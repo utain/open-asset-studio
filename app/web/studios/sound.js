@@ -18,6 +18,11 @@ const SONG_MODES = [
   { value: 'song', label: 'Song', icon: 'drum' },
   { value: 'sing', label: 'Sing a score', icon: 'mic-vocal' },
 ];
+const MEDIA_MODES = [
+  { value: 'subtitles', label: 'Subtitles', icon: 'type' },
+  { value: 'separate', label: 'Stems', icon: 'layers' },
+  { value: 'dub', label: 'Dub', icon: 'film' },
+];
 // tabs with `modes` hold several tasks behind a mode switch (pref key per tab); the others have one task
 const TABS = [
   { id: 'sfx', label: 'SFX', icon: 'zap', tasks: ['sfx'] },
@@ -26,6 +31,7 @@ const TABS = [
   { id: 'song', label: 'Song', icon: 'drum', tasks: ['song', 'sing'], modes: SONG_MODES, pref: 'sound.songMode' },
   { id: 'voice', label: 'Voice', icon: 'mic', tasks: ['tts', 'voice_design', 'voice_clone', 'voice_convert', 's2s'], modes: VOICE_MODES, pref: 'sound.voiceMode' },
   { id: 'v2a', label: 'Video to sound', short: 'Video', icon: 'clapperboard', tasks: ['v2a'] },
+  { id: 'media', label: 'Subtitles, stems & dub', short: 'Media', icon: 'film', tasks: ['subtitles', 'separate', 'dub'], modes: MEDIA_MODES, pref: 'sound.mediaMode' },
   { id: 'sheets', label: 'Sheets', icon: 'list-checks', tasks: [] },
 ];
 const SING_EXAMPLE = '你 C4 0.5\n好 E4 0.5\nSP rest 0.2\n歌 G4,E4 0.4,0.4';
@@ -47,8 +53,15 @@ const TASK_UI = {
     empty: 'Speak to the model and it answers in speech, with its text. Add a question clip and/or type a message, plus an optional instruction (persona, language, length). The reply text shows on each take.' },
   v2a: { label: 'Describe the sound (optional)', ph: 'e.g. footsteps on gravel, a wooden door creaks, distant thunder', qa: 'clap', promptOptional: true,
     empty: 'Drop in a video clip (mp4, mov, webm, mkv) and get matching foley and ambience. Each take also comes as a copy of the video with the new sound muxed in.' },
+  subtitles: { label: 'Subtitles', noPrompt: true, qa: null,
+    empty: 'Drop in a recording or a video and get SRT / VTT subtitles (plus word timings as JSON). Language is detected, or pick it; Whisper large-v3 can translate any language into English subtitles.' },
+  separate: { label: 'Stems', noPrompt: true, qa: null,
+    empty: 'Split a song, a mix or a video soundtrack into vocals and instrumental (and drums / bass / other with Demucs). Mel-Band RoFormer separates dense mixes best.' },
+  dub: { label: 'Dub', noPrompt: true, qa: null,
+    empty: 'Video or audio in, dubbed audio and MP4 out: the speech is separated from the background, transcribed, translated, spoken again in a clone of the original voice (fitted to the timing) and mixed back. Run “Transcript and translation only” first to edit the lines.' },
 };
 const EXTEND_TASKS = ['music', 'ambience', 'sfx'];
+const DUB_FIELDS = ['target_language', 'source_language', 'tts_model', 'translate_backend', 'segments'];   // drawn by the Dub box, not the generic form
 // hard-coded input slots, used when the model declares no `input_slots` for the task (docs/CONTRACTS.md section 1)
 const REF_SLOT = { role: 'ref', label: 'Reference voice', types: ['voice', 'audio'], required: true, hint: 'A voice from the library or any clean speech clip (5-15 s). Its transcript fills in automatically.' };
 const EXTEND_SLOT = { role: 'source', label: 'Clip to extend', types: ['audio'], required: false, hint: 'Set a clip to generate its continuation (Advanced → Extend by). The prompt should describe the clip.' };
@@ -138,6 +151,15 @@ const CSS = `
 .snd-reply.open .snd-reply-t { -webkit-line-clamp: unset; display: block; }
 .snd-reply-dl { color: var(--text-3); flex: none; }
 .snd-card .video-box { margin-top: 2px; }
+.snd-pre { font-family: var(--mono); font-size: 11.5px; line-height: 1.45; color: var(--text-2); background: var(--panel-2); border-radius: 8px; padding: 6px 8px; margin: 0; max-height: 96px; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
+.snd-dub { display: flex; flex-direction: column; gap: 10px; }
+.snd-dub .select { width: 100%; }
+.snd-lines { display: flex; flex-direction: column; gap: 6px; max-height: 56vh; overflow: auto; padding-right: 2px; }
+.snd-ln { display: grid; grid-template-columns: 24px 74px minmax(0, 1fr) minmax(0, 1.2fr); gap: 8px; align-items: start; border: 1px solid var(--line-soft); border-radius: 10px; padding: 6px 8px; }
+.snd-ln.skip { opacity: .5; }
+.snd-ln .tm { font-family: var(--mono); font-size: 11px; color: var(--text-3); padding-top: 7px; }
+.snd-ln .src { font-size: 12.5px; color: var(--text-2); padding-top: 5px; overflow-wrap: anywhere; }
+.snd-ln textarea.textarea { min-height: 34px; width: 100%; resize: vertical; }
 @media (max-width: 900px) {
   .snd-row.sfx, .snd-row.lines { grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1fr); }
   .snd-row .rn { grid-row: span 3; }
@@ -145,6 +167,8 @@ const CSS = `
   .snd-row .acts { grid-column: 2 / -1; justify-content: flex-start; flex-wrap: wrap; }
 }
 @media (max-width: 760px) {
+  .snd-ln { grid-template-columns: 24px minmax(0, 1fr); }
+  .snd-ln .src, .snd-ln textarea.textarea { grid-column: 2; }
   .snd-takes { grid-template-columns: 1fr; }
   .snd-tabs button { padding: 11px 6px 9px; }
 }
@@ -256,7 +280,7 @@ function soundCard(a, ctx) {
       h('div.r2', h('span.snd-m', { title: 'Duration' }, S.fmtClock(I.duration || 0)),
         h(`span.snd-m${I.lufs != null && (I.lufs > -8 || I.lufs < -35) ? '.warn' : ''}`, { title: 'Integrated loudness (LUFS)' }, `${fmtDb(I.lufs)} LUFS`),
         h(`span.snd-m${I.clipped ? '.bad' : ''}`, { title: 'Peak (dBFS)' }, `pk ${fmtDb(I.peak_db)}`),
-        I.silence_fraction > 0.5 && !isSpeechTask(x.task) && x.type !== 'voice' && !x.x_post?.ops?.trim ? h('span.snd-m.warn', { title: 'Mostly near-silence (tail / padding): ⋮ → Audio tools → Trim silence' }, `${Math.round(I.silence_fraction * 100)}% quiet`) : null,
+        I.silence_fraction > 0.5 && !isSpeechTask(x.task) && !['separate', 'dub'].includes(x.task) && x.type !== 'voice' && !x.x_post?.ops?.trim ? h('span.snd-m.warn', { title: 'Mostly near-silence (tail / padding): ⋮ → Audio tools → Trim silence' }, `${Math.round(I.silence_fraction * 100)}% quiet`) : null,
         x.type === 'voice' ? h('span.badge.info', ic('mic', 11), 'voice') : null,
         nc ? S.licenseBadge(x.license) : null, ...qa),
       post,
@@ -271,6 +295,92 @@ function soundCard(a, ctx) {
   el.addEventListener('dblclick', () => ctx.open(a));
   const off = bus.on('player', () => { if (!el.isConnected) { off(); return; } el._drawPlay?.(); });
   return el;
+}
+
+// ------------------------------------------------------------------ subtitles / stems / dub: cards for text and video outputs
+const textCache = new Map();
+function fetchText(x, name) {
+  const k = `${x.id}/${name}`;
+  if (textCache.has(k)) return Promise.resolve(textCache.get(k));
+  return fetch(S.fileUrl(x, name)).then(r => r.text()).then(t => { textCache.set(k, t); return t; });
+}
+/** A subtitle / dub-plan text asset or a dubbed video: preview, downloads, and "Edit lines & render" for a draft. */
+function mediaCard(a, ctx) {
+  const el = h('div.snd-card.snd-media', { dataset: { id: a.id } });
+  const render = x => {
+    a = x; el._asset = x;
+    const draft = !!x.x_dub && (x.tags || []).includes('draft');
+    const selB = h('button.snd-sel', { type: 'button', title: 'Select', on: { click: e => { e.stopPropagation(); ctx.toggleSelect(x.id); } } }, ic('check', 13));
+    const downloads = (x.files || []).filter(f => /\.(srt|vtt|json|txt)$/i.test(f.name)).map(f =>
+      h('a.btn.btn-sm.btn-ghost', { href: S.fileUrl(x, f.name, true), title: `Download ${f.name}`, on: { click: e => e.stopPropagation() } }, ic('download', 12), ' ', f.name.split('.').pop().toUpperCase()));
+    const pre = x.type === 'text' ? h('pre.snd-pre', 'Loading…') : null;
+    if (pre) {
+      fetchText(x, x.main).then(t => {
+        if (draft) { const n = (x.x_dub?.segments || []).length; pre.textContent = (x.x_dub?.segments || []).slice(0, 4).map(g => `${S.fmtClock(g.start)}  ${g.translation || '(not translated yet)'}`).join('\n') + (n > 4 ? `\n… ${n} lines` : ''); return; }
+        pre.textContent = t.replace(/\r/g, '').split(/\n\n+/).slice(0, 4).map(b => b.split('\n').filter(l => !/^\d+$/.test(l.trim()) && !/-->/.test(l)).join('  ')).join('\n') || '(empty)';
+      }).catch(() => { pre.textContent = '(preview unavailable)'; });
+    }
+    const lic = x.license && x.license.commercial === false;
+    el.replaceChildren(
+      h('div.r3', selB, h('span.nm.ellipsis.grow', { title: `${x.name}\nClick for details`, on: { click: () => ctx.open(x) } }, x.name || x.id),
+        btn('', { size: 'sm', kind: 'ghost', icon: 'more-vertical', title: 'Actions', onClick: e => ctx.menu(e.currentTarget, x) })),
+      h('div.r2', h(`span.badge.${draft ? 'warn' : 'info'}`, ic(x.type === 'video' ? 'film' : 'type', 11), draft ? 'dub draft' : x.type === 'video' ? 'dubbed video' : 'text'),
+        x.info?.duration ? h('span.snd-m', S.fmtClock(x.info.duration)) : null, lic ? S.licenseBadge(x.license) : null,
+        x.x_dub?.warnings?.length ? h('span.snd-m.warn', { title: x.x_dub.warnings.join('\n') }, `${x.x_dub.warnings.length} warning(s)`) : null),
+      pre,
+      x.type === 'video' ? S.videoBox(x, { compact: true }) : null,
+      h('div.r2', ...downloads, draft ? btn('Edit lines & render', { size: 'sm', kind: 'primary', icon: 'pencil', onClick: () => ctx.editDraft?.(x) }) : null));
+    el.classList.toggle('sel', ctx.isSelected(x.id));
+  };
+  render(a);
+  el.update = render;
+  el.addEventListener('dblclick', () => ctx.open(a));
+  return el;
+}
+const isMediaOut = a => a.type === 'text' || a.type === 'video';
+
+/** Modal: edit the translated lines of a dub draft, translate the empty ones, render the dub. */
+async function dubDraftModal(a, st) {
+  const plan = a.x_dub || {};
+  let lines = (plan.segments || []).map(g => ({ ...g }));
+  if (!lines.length) return toast('This draft has no lines.', { kind: 'warn' });
+  const tgt = plan.target_language || 'en';
+  const list = h('div.snd-lines');
+  const status = h('div.snd-tip');
+  const draw = () => list.replaceChildren(...lines.map((g, i) => {
+    const tr = textarea('textarea.textarea', { rows: 2, placeholder: 'Translation', on: { input: e => { g.translation = e.target.value; } } }, g.translation || '');
+    const sk = h('input', { type: 'checkbox', checked: !g.skip, title: 'Speak this line', on: { change: e => { g.skip = !e.target.checked; row.classList.toggle('skip', g.skip); } } });
+    const row = h(`div.snd-ln${g.skip ? '.skip' : ''}`, sk, h('div.tm', `${S.fmtClock(g.start)}–${S.fmtClock(g.end)}`), h('div.src', g.text), tr);
+    return row;
+  }));
+  draw();
+  const back = h('select.select', h('option', { value: '' }, 'Translation backend: default'));
+  api.get('/api/x/media_audio/dub/options').then(o => (o.translate_backends || []).forEach(b => back.append(h('option', { value: b.id, disabled: b.available === false }, `${b.label || b.id}${b.available === false ? ' (unavailable)' : ''}${b.cloud ? ' · cloud' : ''}`)))).catch(() => {});
+  const trBtn = btn('Translate empty lines', { size: 'sm', icon: 'type', onClick: async () => {
+    trBtn.disabled = true; status.textContent = 'Translating…';
+    try {
+      const r = await api.post('/api/x/media_audio/dub/translate', { segments: lines, source_language: plan.source_language, target_language: tgt, backend: back.value || null, only_missing: true });
+      lines = r.segments.map((g, i) => ({ ...lines[i], ...g })); draw(); status.textContent = `Translated with ${r.backend || 'the backend'}.`;
+    } catch (e) { status.textContent = ''; toastError(e, 'Translation failed'); }
+    trBtn.disabled = false;
+  } });
+  const md = S.modal({ title: `Dub lines → ${tgt}`, icon: 'film', width: 860, body: h('div.col', { style: { gap: '10px' } },
+    h('div.snd-tip', 'Edit the translation of each line (untick a line to leave it out). Keep lines about as long as the original: a longer line is sped up (up to the limit in Advanced) and then reported as overlapping.'),
+    h('div.row.wrap', back, trBtn, status), list),
+  foot: [btn('Cancel', { kind: 'ghost', onClick: () => md.close() }), btn('Render dub', { kind: 'primary', icon: 'sparkles', onClick: async () => {
+    const todo = lines.filter(g => !g.skip && !String(g.translation || '').trim());
+    if (todo.length) return toast(`${todo.length} line(s) have no translation: translate them or untick them.`, { kind: 'warn' });
+    const inputs = [{ asset: plan.media, role: 'media' }];
+    if (plan.stems?.vocals) inputs.push({ asset: plan.stems.vocals, role: 'vocals' });
+    if (plan.stems?.instrumental) inputs.push({ asset: plan.stems.instrumental, role: 'bg' });
+    try {
+      const params = { ...st.formValues(), target_language: tgt, source_language: plan.source_language || 'auto', tts_model: plan.tts_model || '', stage: 'all',
+        separate_model: plan.separate_model || '', segments: JSON.stringify(lines) };
+      const spec = { task: 'dub', model: 'dub-pipeline', params, inputs, project: store.project, title: `Dub → ${tgt}: ${a.name}`.slice(0, 70), meta: { studio: 'sound' } };
+      md.close();
+      await st.generate(spec);
+    } catch (e) { toastError(e); }
+  } })] });
 }
 
 function pendingTake(i) {
@@ -434,6 +544,7 @@ class SoundStudio {
     this.cards = new Map();         // asset id -> card
     this.assets = new Map();
     this.sort = prefs.get('sound.sort', 'new');
+    this.dub = { target: 'en', source: 'auto', tts: '', translate: '', ...prefs.get('sound.dub', {}) };
     this.autoQA = prefs.get('sound.autoqa', false);
     this.root = h('div.studio.snd');
     this.tabsEl = h('div.snd-tabs', { role: 'tablist' });
@@ -524,6 +635,7 @@ class SoundStudio {
       if (ui.example) kids.push(h('div.row.wrap', btn('Insert example', { size: 'sm', icon: 'plus', onClick: () => { this.prompt.set(ui.example); this.prompt.focus(); } }),
         h('span.snd-tip', 'One syllable per line. “SP rest 0.2” = a pause, “G4,E4 0.4,0.4” = a slur.')));
     }
+    if (task === 'dub') kids.push(this._dubBox());
     kids.push(h('div.field', h('div.field-label', ic('settings-2', 14), 'Settings'), this.form.el));
     if (ui.qa) {
       const qaT = S.toggle(this.autoQA, v => { this.autoQA = v; prefs.set('sound.autoqa', v); }, 'Auto QA');
@@ -565,7 +677,7 @@ class SoundStudio {
     const task = this.task();
     const pp = promptParamFor(task, m);
     this.promptParam = pp;
-    this.form.exclude = new Set(pp === 'prompt' ? [] : [pp]);
+    this.form.exclude = new Set([...(pp === 'prompt' ? [] : [pp]), ...(task === 'dub' ? DUB_FIELDS : [])]);
     this.form.setModel(m, task);
     this.prompt.setModel(m, task);
     if (!fromBuild && this._layoutSig(task, m) !== this._sig) { this._buildPanel(); return; }
@@ -602,6 +714,36 @@ class SoundStudio {
     this.genBtn.title = m && !ok ? m.status.reason : 'Generate (Ctrl/⌘ + Enter in the prompt)';
   }
 
+  formValues() { return { ...this.form.values(), translate_backend: this.dub.translate || '' }; }
+  /** Dub setup: voice-clone model, languages it can speak, translation backend (from /api/x/media_audio/dub/options). */
+  _dubBox() {
+    const box = h('div.snd-dub', h('div.snd-tip', ic('loader', 13, 'spin'), ' Loading the dub options…'));
+    const save = () => prefs.set('sound.dub', this.dub);
+    api.get('/api/x/media_audio/dub/options').then(o => {
+      const names = o.language_names || LANG_NAMES;
+      const models = o.tts_models || [];
+      if (!models.some(m => m.id === this.dub.tts)) this.dub.tts = (models.find(m => m.id === o.default_tts && m.status === 'ready') || models.find(m => m.status === 'ready') || models[0] || {}).id || '';
+      const draw = () => {
+        const tm = models.find(m => m.id === this.dub.tts);
+        const langs = tm?.languages?.length ? tm.languages : Object.keys(names);
+        if (!langs.includes(this.dub.target)) this.dub.target = langs.includes('en') ? 'en' : langs[0];
+        save();
+        const sel = (items, cur, on) => { const e = h('select.select', { on: { change: ev => on(ev.target.value) } }, ...items.map(([v, l, dis]) => h('option', { value: v, selected: v === cur, disabled: !!dis }, l))); return e; };
+        const note = tm ? [tm.status !== 'ready' ? h('div.snd-tip', { style: { color: 'var(--warn)' } }, ic('triangle-alert', 12), ` ${tm.name} is not ready: ${tm.reason || tm.status}`) : null,
+          tm.license && tm.license.commercial === false ? h('div.snd-tip', S.licenseBadge(tm.license), ' The dub inherits this licence.') : null,
+          !tm.languages?.length ? h('div.snd-tip', 'This model lists no languages: it may speak any language it was trained on.') : null] : [];
+        box.replaceChildren(
+          h('label.field', h('span.field-label', 'Voice-clone model (speaks the dub)'), sel(models.map(m => [m.id, `${m.name}${m.status === 'ready' ? '' : ' (not ready)'}`]), this.dub.tts, v => { this.dub.tts = v; draw(); })), ...note,
+          h('div.row.wrap', h('label.field.grow', h('span.field-label', 'Dub language'), sel(langs.map(c => [c, `${names[c] || c} (${c})`]), this.dub.target, v => { this.dub.target = v; save(); })),
+            h('label.field.grow', h('span.field-label', 'Spoken language'), sel([['auto', 'Detect'], ...Object.entries(names).map(([c, n]) => [c, `${n} (${c})`])], this.dub.source, v => { this.dub.source = v; save(); }))),
+          h('label.field', h('span.field-label', 'Translate with'), sel([['', 'Local prompt LLM (default)'], ...(o.translate_backends || []).map(b => [b.id, `${b.label || b.id}${b.available === false ? ' (unavailable)' : ''}${b.cloud ? ' · cloud' : ''}`, b.available === false])], this.dub.translate, v => { this.dub.translate = v; save(); })),
+          h('div.snd-tip', 'One speaker works best: the voice is cloned from the first clean seconds. Without a working translation backend the job stops as an editable draft.'));
+      };
+      draw();
+    }).catch(e => box.replaceChildren(h('div.snd-err', `Could not load the dub options: ${e.message}`)));
+    return box;
+  }
+
   // ---------------------------------------------------------------- submit
   spec() {
     const task = this.task(); const m = this.picker.model;
@@ -622,6 +764,9 @@ class SoundStudio {
     else if (task === 's2s') label = text || params.instruction || `Reply to ${nameOf('audio') || 'the clip'}`;
     else if (task === 'v2a') label = text || `Sound for ${nameOf('video') || 'the video'}`;
     else if (task === 'sing') label = `Sing: ${text.split('\n')[0] || ''}`;
+    else if (task === 'subtitles') label = `Subtitles: ${nameOf('media') || 'clip'}`;
+    else if (task === 'separate') label = `Stems: ${nameOf('media') || 'clip'}`;
+    else if (task === 'dub') { label = `Dub → ${this.dub.target}: ${nameOf('media') || 'clip'}`; Object.assign(params, { target_language: this.dub.target, source_language: this.dub.source || 'auto', tts_model: this.dub.tts || '', translate_backend: this.dub.translate || '' }); }
     meta.asset_extra = { x_inputs: inputs };   // lets Regenerate / More takes restore the input slots by role
     if (!text) meta.asset_extra.x_title = (label || '').slice(0, 120);   // tasks without a prompt: the batch header shows this
     if (task === 'voice_design') meta.asset_extra.x_voice = { ref_text: params.text || '', design_prompt: text, language: params.language && params.language !== 'auto' ? params.language : (isThaiText(params.text) ? 'th' : null) };
@@ -724,7 +869,7 @@ class SoundStudio {
   }
   _ctx() {
     return { open: a => S.openAsset(a, { list: [...this.cards.keys()] }), toggleSelect: id => { this.sel.has(id) ? this.sel.delete(id) : this.sel.add(id); this._selChanged(); },
-      isSelected: id => this.sel.has(id), menu: (anchor, a) => this.cardMenu(anchor, a),
+      isSelected: id => this.sel.has(id), menu: (anchor, a) => this.cardMenu(anchor, a), editDraft: a => dubDraftModal(a, this),
       isBest: id => { const a = this.assets.get(id); const g = this.groups.get(this._groupKey(a)); if (!g || g.ids.length < 2) return false; const sc = g.ids.map(i => scoreOf(this.assets.get(i) || {})); const s = scoreOf(a); return s != null && s === Math.max(...sc.filter(x => x != null)); } };
   }
   _add(a, live = true) {
@@ -734,7 +879,7 @@ class SoundStudio {
     const g = this._group(key, a, { prepend: live });
     if (!g.sample?.created || g.sample.id === undefined) g.sample = a;
     if (!g.ids.includes(a.id)) g.ids.push(a.id);
-    const c = soundCard(a, this._ctx());
+    const c = (isMediaOut(a) ? mediaCard : soundCard)(a, this._ctx());
     this.cards.set(a.id, c);
     const ph = g.pend.shift();
     if (ph) ph.replaceWith(c); else g.takesEl.append(c);
@@ -861,6 +1006,17 @@ class SoundStudio {
 
   // ---------------------------------------------------------------- card actions / send-to
   cardMenu(anchor, a) {
+    if (isMediaOut(a)) {   // subtitles, dub plan, dubbed video
+      const draft = !!a.x_dub && (a.tags || []).includes('draft');
+      return S.menu(anchor, [
+        { label: 'Details & lineage', icon: 'panel-right', onClick: () => S.openAsset(a, { list: [...this.cards.keys()] }) },
+        draft ? { label: 'Edit lines & render…', icon: 'pencil', onClick: () => dubDraftModal(a, this) } : null,
+        { label: 'Regenerate with these settings', icon: 'refresh-cw', onClick: () => this.regenerate(a) },
+        { label: 'Download', icon: 'download', onClick: () => { location.href = S.fileUrl(a, a.main, true); } },
+        { sep: true },
+        { label: 'Delete', icon: 'trash-2', danger: true, onClick: async () => { if (await S.confirmDialog(`Delete “${a.name}”?`, { danger: true, ok: 'Delete' })) api.deleteAsset(a.id).catch(toastError); } },
+      ], { align: 'end' });
+    }
     const voiceish = a.type === 'voice' || isSpeechTask(a.task);
     const ext = ['music', 'ambience', 'sfx'].includes(a.task) && ready('sa3-medium');
     S.menu(anchor, [
@@ -894,6 +1050,7 @@ class SoundStudio {
     this.setTask(a.task);
     if (a.model && store.modelsById.get(a.model)?.tasks.includes(a.task)) { this.picker.set(a.model, true); this._onModel(this.picker.model); }
     const p = { ...(a.params || {}) };
+    if (a.task === 'dub') { this.dub = { ...this.dub, target: p.target_language || this.dub.target, source: p.source_language || 'auto', tts: p.tts_model || this.dub.tts, translate: p.translate_backend || '' }; prefs.set('sound.dub', this.dub); this._buildPanel(); }
     this.form.setValues({ ...p, seed: newSeed ? -1 : (a.seed ?? p.seed) });
     if (this.showPrompt) { this.prompt.set(p[this.promptParam] || a.improved_prompt || a.prompt || ''); this.prompt.setNegative(a.negative || p.negative || ''); }
     if (Array.isArray(a.x_inputs)) {   // saved with the take: restore every slot by role
@@ -955,6 +1112,11 @@ class SoundStudio {
         if (!a) return;
         this.setTab('voice', { mode: 's2s' });
         this.slotOf('audio')?.set([a.id]);
+        return;
+      case 'subtitles': case 'separate': case 'dub':
+        if (!a) return;
+        this.setTab('media', { mode: p.action });
+        this.slotOf('media')?.set([a.id]);
         return;
       case 'v2a':
         if (!a) return;
@@ -1335,6 +1497,9 @@ export default S.defineStudio({
     { action: 'convert', label: 'Convert voice', icon: 'arrow-left-right', types: ['audio', 'voice'] },
     { action: 'reply', label: 'Voice reply', icon: 'message-circle', types: ['audio', 'voice'] },
     { action: 'v2a', label: 'Add sound', icon: 'clapperboard', types: ['video'] },
+    { action: 'subtitles', label: 'Subtitles', icon: 'type', types: ['audio', 'voice', 'video'] },
+    { action: 'separate', label: 'Split stems', icon: 'layers', types: ['audio', 'voice', 'video'] },
+    { action: 'dub', label: 'Dub', icon: 'film', types: ['audio', 'voice', 'video'] },
     { action: 'loop', label: 'Loop', icon: 'repeat', types: ['audio'] },
     { action: 'normalize', label: 'Normalize', icon: 'gauge', types: ['audio', 'voice'] },
     { action: 'post', label: 'Audio tools', icon: 'wand', types: ['audio', 'voice'] },

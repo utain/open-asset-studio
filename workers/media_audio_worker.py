@@ -94,6 +94,8 @@ def refine_edges(words: list[dict], y16: np.ndarray, hop: float = 0.02) -> list[
     m = len(y16) // n
     e = 20 * np.log10(np.sqrt((y16[: m * n].reshape(m, n) ** 2).mean(axis=1)) + 1e-7)
     floor, top = np.percentile(e, 10), np.percentile(e, 95)
+    if top - floor < 24.0:      # steady noise or music under the speech: the energy cannot tell speech from background
+        return words
     thr = max(floor + 10.0, top - 32.0)
     act = e > thr
     out = [dict(w) for w in words]
@@ -102,6 +104,8 @@ def refine_edges(words: list[dict], y16: np.ndarray, hop: float = 0.02) -> list[
         j = i
         while j + 1 < len(out) and out[j + 1]["start"] - out[j]["end"] < 0.3 and not _sentence_end(out[j]["text"]):
             j += 1       # a run = one sentence / breath group (so a sentence parked early inside a pause is still trimmed)
+        if i and out[i]["start"] < out[i - 1]["end"] < out[i]["end"]:
+            out[i]["start"] = out[i - 1]["end"]           # never start inside the previous line (its tail would count as speech)
         a, b = int(out[i]["start"] / hop), min(int(out[j]["end"] / hop) + 1, m)
         sustained = act[a:b].copy()                 # a click or the reverb tail of the previous line is not speech
         if len(sustained) > 8:
@@ -111,9 +115,11 @@ def refine_edges(words: list[dict], y16: np.ndarray, hop: float = 0.02) -> list[
             s0 = max((a + int(idx[0])) * hop - 0.03, 0.0)
             e0 = (a + int(idx[-1]) + 1) * hop + 0.05
             if s0 - out[i]["start"] > 0.12:
-                out[i]["start"] = round(min(s0, out[i]["end"] - 0.02), 3)
+                out[i]["start"] = round(s0, 3)
+                out[i]["end"] = round(max(out[i]["end"], s0 + 0.05), 3)
                 for k in range(i + 1, j + 1):          # keep order if later words started before the new start
                     out[k]["start"] = max(out[k]["start"], out[i]["start"])
+                    out[k]["end"] = max(out[k]["end"], out[k]["start"] + 0.02)
             if out[j]["end"] - e0 > 0.15:
                 out[j]["end"] = round(max(e0, out[j]["start"] + 0.02), 3)
         i = j + 1
@@ -282,43 +288,60 @@ class MediaAudioBackend(Backend):
         if cur:
             groups.append(cur)
         words: list[dict] = []
+
+        def window(g, w0):
+            """DTW-align the text of the segments `g` against the audio from w0 on -> words (absolute seconds)."""
+            w1 = min(max(g[-1]["end"] + 1.0, w0 + 1.0), dur, w0 + 30.0)
+            yw = y[int(w0 * 16000):int(w1 * 16000)]
+            text = "".join(sg["text"] for sg in g)
+            toks = tok.encode(text, add_special_tokens=False)
+            if not toks or len(yw) < 800:
+                return []
+            feats = fe(yw, sampling_rate=16000, return_tensors="pt").input_features.to(model.device, model.dtype)
+            ids = torch.tensor([prefix + toks + [eot]], device=model.device)
+            with torch.no_grad():
+                out = model(input_features=feats, decoder_input_ids=ids, output_attentions=True)
+            w = torch.stack([out.cross_attentions[l][0, h] for l, h in heads]).float()
+            nf = max(2, int(len(yw) / 16000 * 50))
+            w = w[:, :, :nf]
+            w = (w - w.mean(dim=-2, keepdim=True)) / (w.std(dim=-2, keepdim=True, unbiased=False) + 1e-6)
+            wn = median_filter(w.cpu().numpy(), size=(1, 1, 7))
+            mat = wn.mean(axis=0)[3:-1]                  # rows: <|notimestamps|> + the text tokens
+            ti, tj = C.dtw(-mat)
+            jump = np.pad(np.diff(ti), (1, 0), constant_values=1).astype(bool)
+            times = tj[jump] / 50.0
+            units = C.split_token_units(tok, toks, spaces=lang not in C.NO_SPACE_LANGS)
+            bounds = np.pad(np.cumsum([len(u[1]) for u in units[:-1]]), (1, 0)).astype(int) if units else []
+            res = []
+            for ui, (txt, ut) in enumerate(units):
+                a = bounds[ui]
+                b = bounds[ui + 1] if ui + 1 < len(bounds) else len(toks)
+                if a >= len(times):
+                    break
+                st = float(times[a])
+                en = float(times[min(b, len(times) - 1)])
+                res.append({"text": txt, "start": w0 + st, "end": w0 + max(en, st + 0.02)})
+            return res
+
+        def collapsed(ws):   # the window missed the speech: many words squeezed into the same few frames
+            return len(ws) >= 4 and sum(1 for x in ws if x["end"] - x["start"] < 0.05) > 0.35 * len(ws)
+
         model.set_attn_implementation("eager")      # output_attentions needs the eager attention
         try:
             for g in groups:
                 # Whisper's own segment times can be ~1 s off, so the window starts early (not before the previous window's last word)
-                # (a segment start can also be too LATE, e.g. after a long digital silence: so start right after the previous words)
                 w0 = max(g[0]["start"] - 1.5, 0.0)
                 if words:
-                    w0 = max(words[-1]["end"] - 0.3, 0.0)
-                w1 = min(max(g[-1]["end"] + 1.0, w0 + 1.0), dur, w0 + 30.0)
-                yw = y[int(w0 * 16000):int(w1 * 16000)]
-                text = "".join(sg["text"] for sg in g)
-                toks = tok.encode(text, add_special_tokens=False)
-                if not toks or len(yw) < 800:
-                    continue
-                feats = fe(yw, sampling_rate=16000, return_tensors="pt").input_features.to(model.device, model.dtype)
-                ids = torch.tensor([prefix + toks + [eot]], device=model.device)
-                with torch.no_grad():
-                    out = model(input_features=feats, decoder_input_ids=ids, output_attentions=True)
-                w = torch.stack([out.cross_attentions[l][0, h] for l, h in heads]).float()
-                nf = max(2, int(len(yw) / 16000 * 50))
-                w = w[:, :, :nf]
-                w = (w - w.mean(dim=-2, keepdim=True)) / (w.std(dim=-2, keepdim=True, unbiased=False) + 1e-6)
-                wn = median_filter(w.cpu().numpy(), size=(1, 1, 7))
-                mat = wn.mean(axis=0)[3:-1]                  # rows: <|notimestamps|> + the text tokens
-                ti, tj = C.dtw(-mat)
-                jump = np.pad(np.diff(ti), (1, 0), constant_values=1).astype(bool)
-                times = tj[jump] / 50.0
-                units = C.split_token_units(tok, toks, spaces=lang not in C.NO_SPACE_LANGS)
-                bounds = np.pad(np.cumsum([len(u[1]) for u in units[:-1]]), (1, 0)).astype(int) if units else []
-                for ui, (txt, ut) in enumerate(units):
-                    a = bounds[ui]
-                    b = bounds[ui + 1] if ui + 1 < len(bounds) else len(toks)
-                    if a >= len(times):
-                        break
-                    st = float(times[a])
-                    en = float(times[min(b, len(times) - 1)])
-                    words.append({"text": txt, "start": w0 + st, "end": w0 + max(en, st + 0.02)})
+                    w0 = max(w0, min(words[-1]["end"] - 0.3, g[0]["start"]))
+                ws = window(g, w0)
+                if collapsed(ws):
+                    # a segment start can also be far too LATE (seen on vocal stems after a long pause): retry right after the previous words
+                    alt = max(words[-1]["end"] - 0.3, 0.0) if words else 0.0
+                    if alt < w0 - 0.2:
+                        ws2 = window(g, alt)
+                        if ws2 and not collapsed(ws2):
+                            ws = ws2
+                words.extend(ws)
         finally:
             model.set_attn_implementation("sdpa")
         if not words:

@@ -142,3 +142,21 @@ def test_language_mapping():
     assert C.model_languages(m) == ["zh", "ja", "th"]
     assert C.model_languages({"features": {"languages": ["en", "zh-cn"]}, "params": []}) == ["en", "zh"]
     assert C.language_value({"params": [{"name": "language", "type": "choice", "choices": ["zh", "zh-cn"]}]}, "zh") == "zh"
+
+
+def test_refine_edges_sentence_parked_in_silence():
+    """A sentence the aligner parked early inside a pause (and overlapping the previous line's tail) starts at the sound."""
+    np = pytest.importorskip("numpy")
+    import media_audio_worker as W
+    sr = 16000
+    y = np.zeros(sr * 8, dtype=np.float32)
+    rng = np.random.default_rng(0)
+    y[sr * 0: int(sr * 2.0)] = rng.normal(0, 0.1, int(sr * 2.0))              # sentence 1: 0-2 s
+    y[int(sr * 2.0): int(sr * 2.3)] = rng.normal(0, 0.001, int(sr * 0.3))    # its decaying tail
+    y[sr * 5: sr * 7] = rng.normal(0, 0.1, sr * 2)                            # sentence 2: 5-7 s
+    words = [{"text": " One", "start": 0.0, "end": 1.0}, {"text": " done.", "start": 1.0, "end": 2.4},
+             {"text": " Two", "start": 2.2, "end": 4.5}, {"text": " here.", "start": 4.5, "end": 7.0}]
+    out = W.refine_edges(words, y)
+    assert 4.8 <= out[2]["start"] <= 5.05          # snapped from 2.2 (the tail) to the sound at 5 s
+    assert out[1]["end"] <= 2.2                    # the first sentence ends with its sound, not the aligner's 2.4
+    assert out[3]["end"] <= 7.2

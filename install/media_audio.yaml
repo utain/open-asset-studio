@@ -1,0 +1,19 @@
+backend: media_audio
+env: media_audio
+python: "3.12"
+torch:
+  - torch==2.9.1
+  - torchaudio==2.9.1
+lock: media_audio
+lock_flags: [--no-deps]         # demucs / bs-roformer pin training-only or unbuildable deps; the lock is the full, resolved set
+vendor: [demucs]                # adefossez/demucs @ 829d218 (4.1.0, has demucs.hf.get_hf_model); not on PyPI at this version
+steps:
+  - uv pip install --no-deps -e ./vendor/demucs
+check: "import torch, transformers, librosa, soundfile, scipy, demucs.hf, demucs.apply, bs_roformer; from bs_roformer import MelBandRoformer"
+manual:
+  - "Weights come from the HF cache: ./install.sh model whisper-subs-turbo (openai/whisper-large-v3-turbo), whisper-subs-large-v3 (translate), demucs-htdemucs (adefossez/HTDemucs), demucs-htdemucs-ft, demucs-htdemucs-6s, melband-roformer-vocals (KimberleyJSN/melbandroformer). None is gated."
+  - "The dubbing pipeline (dub-pipeline) runs in the core server; it needs a TTS model of the Sound studio (e.g. omnivoice) and, for the translation step, a text backend (local llama-server or `cli:claude`); without one it ends as an editable draft."
+  - "ffmpeg must be on PATH (audio/video decode, atempo, MP4 mux, loudnorm)."
+tested: [linux-aarch64]
+size_gb: 7
+shares_env_with: null

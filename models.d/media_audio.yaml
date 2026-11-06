@@ -182,7 +182,7 @@ models:
     handler: media.dub
     input_slots:
       - {role: media, label: Video or audio, types: [video, audio, voice], required: true, hint: "The speech to dub. One speaker works best (the voice is cloned from the first clean 6-12 s)."}
-      - {role: ref, label: Voice to use (optional), types: [voice, audio], required: false, hint: "Leave empty to clone the original speaker."}
+      - {role: ref, label: Voice to use, types: [voice, audio], required: false, hint: "Leave empty to clone the original speaker."}
     weights:
       - {hf: openai/whisper-large-v3-turbo}
       - {hf: adefossez/HTDemucs}
