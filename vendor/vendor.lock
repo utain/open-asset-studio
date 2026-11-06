@@ -38,3 +38,17 @@ engines/hy3d/vendor/Hunyuan3D-2.1 https://github.com/Tencent-Hunyuan/Hunyuan3D-2
 vendor/MOSS-TTS https://github.com/OpenMOSS/MOSS-TTS.git 934d6826b084c46a0d033402174d5f8ac4ed2519
 vendor/magenta-realtime/magenta_rt/_vendor/sequence-layers https://github.com/magenta/sequence-layers.git 0773d337495ad11af98179991e41346560075634
 vendor/vllm-omni https://github.com/vllm-project/vllm-omni.git 109942465fa4d8e140f9ccac3430bfd90b7cf6de
+vendor/demucs https://github.com/adefossez/demucs 829d21890023800713e5dd231c67e43ecc06069b
+vendor/MOSS-Audio https://github.com/OpenMOSS/MOSS-Audio.git 66326e6e0db34f036c86a76ba005efa4830c69dd
+vendor/MOSS-Transcribe-Diarize https://github.com/OpenMOSS/MOSS-Transcribe-Diarize.git 79c675f0670cc2f824bcbcdd98263704f40f1f7e
+vendor/TripoSR https://github.com/VAST-AI-Research/TripoSR 107cefdc244c39106fa830359024f6a2f1c78871
+vendor/stable-fast-3d https://github.com/Stability-AI/stable-fast-3d ff21fc491b4dc5314bf6734c7c0dabd86b5f5bb2
+vendor/stable-point-aware-3d https://github.com/Stability-AI/stable-point-aware-3d fdc311b16809e6a8adc2f5a3407ebb3db1a95bd1
+vendor/generative-models https://github.com/Stability-AI/generative-models e8cd657656fa5d61688191730d0e03242bf4ed44
+vendor/TripoSG https://github.com/VAST-AI-Research/TripoSG fc5c40990181e2a756c4e0b1c2f4d6b5202faf8c
+vendor/TRELLIS https://github.com/microsoft/TRELLIS 193e0502b5cb3eb5997ec457d5340e95d09b158e
+vendor/TRELLIS.2 https://github.com/microsoft/TRELLIS.2 75fbf0183001ed9876c8dbb35de6b68552ee08bd
+vendor/Hunyuan3D-2 https://github.com/Tencent-Hunyuan/Hunyuan3D-2 f8db63096c8282cb27354314d896feba5ba6ff8a
+vendor/Step1X-3D https://github.com/stepfun-ai/Step1X-3D cb5ac944709c6c913109070c7b90c3447f57f3d4
+vendor/UniRig https://github.com/VAST-AI-Research/UniRig 6793c6640ff01c8fb389f3993434124bb43d2933
+vendor/dinov2 https://github.com/facebookresearch/dinov2 7764ea0f912e53c92e82eb78a2a1631e92725fc8

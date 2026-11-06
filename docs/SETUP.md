@@ -50,6 +50,7 @@ runtime) are in the group reports:
 | backends | report |
 |---|---|
 | `audio`, `qwentts`, `moss`, `vllm_omni` | [research/audio_models.md](research/audio_models.md) §3 |
+| `moss_more` (reuses `envs/moss`), `moss_asr` | [research/moss_more.md](research/moss_more.md) |
 | `ttslight`, `ttslight_parler` | [research/audio_more/tts_light.md](research/audio_more/tts_light.md) |
 | `clonea_*` | [research/audio_more/tts_clone_a.md](research/audio_more/tts_clone_a.md) |
 | `cloneb_*` | [research/audio_more/tts_clone_b.md](research/audio_more/tts_clone_b.md) |
@@ -58,6 +59,7 @@ runtime) are in the group reports:
 | `foley` | [research/audio_more/foley.md](research/audio_more/foley.md) |
 | `omni_*` | [research/audio_more/omni.md](research/audio_more/omni.md) |
 | `vc`, `vc_diffsinger` | [research/audio_more/vc_sing.md](research/audio_more/vc_sing.md) |
+| `video` (Wan 2.x, LTX-2.3, Kandinsky 6, HunyuanVideo 1.5, RIFE) | [research/video.md](research/video.md) and `env-lock/video.txt` |
 | `qwen`, `hy3d`, `imgtools` | below, and the headers of `env-lock/qwen.txt` / `env-lock/hy3d.txt` |
 
 ### Image and 3D (`envs/qwen`, `envs/hy3d`)

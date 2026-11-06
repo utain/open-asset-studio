@@ -58,6 +58,8 @@ Upstream source code that the workers import, cloned at the pinned commit from `
 | `vendor/Zonos` | [Zyphra/Zonos](https://github.com/Zyphra/Zonos) | `bc40d98e1e1a` | Apache-2.0 |
 | `engines/hy3d/vendor/Hunyuan3D-2.1` | [Tencent-Hunyuan/Hunyuan3D-2.1](https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1) | `82920d643c0d` | Tencent Hunyuan 3D 2.1 Community License (not valid in the EU, UK and South Korea) |
 | `vendor/MOSS-TTS` | [OpenMOSS/MOSS-TTS](https://github.com/OpenMOSS/MOSS-TTS) | `934d6826b084` | Apache-2.0 |
+| `vendor/MOSS-Audio` | [OpenMOSS/MOSS-Audio](https://github.com/OpenMOSS/MOSS-Audio) | `66326e6e0db3` | Apache-2.0 (README; no LICENSE file) |
+| `vendor/MOSS-Transcribe-Diarize` | [OpenMOSS/MOSS-Transcribe-Diarize](https://github.com/OpenMOSS/MOSS-Transcribe-Diarize) | `79c675f0670c` | Apache-2.0 |
 | `vendor/magenta-realtime/magenta_rt/_vendor/sequence-layers` | [magenta/sequence-layers](https://github.com/magenta/sequence-layers) | `0773d337495a` | Apache-2.0 |
 | `vendor/vllm-omni` | [vllm-project/vllm-omni](https://github.com/vllm-project/vllm-omni) | `109942465fa4` | Apache-2.0 |
 
@@ -78,6 +80,9 @@ in addition to this repository's Apache-2.0 licence.
 - **StyleTTS 2 inference code** (MIT, [yl4579/StyleTTS2](https://github.com/yl4579/StyleTTS2)). `workers/ttslight_styletts2.py`
   is ported from the upstream `Demo/Inference_LibriTTS.ipynb` notebook and loads the upstream code from
   `vendor/StyleTTS2` (pinned in `vendor/vendor.lock`; licence listed in the table above).
+- **RIFE v4 IFNet** (MIT, [hzwer/ECCV2022-RIFE](https://github.com/hzwer/ECCV2022-RIFE) / Practical-RIFE). `workers/video_rife.py`
+  is a pure-PyTorch re-implementation of the v4 `IFNet` (frame interpolation) that loads the `TensorForger/RIFE-safetensors`
+  weights. No upstream repository is cloned.
 
 ## Not included: model weights
 

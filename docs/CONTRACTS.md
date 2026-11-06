@@ -92,7 +92,7 @@ hard-coded reference / source slots:
 |---|---|
 | `role` | the `inputs[].role` sent to the worker (`[a-z][a-z0-9_]{0,31}`); must be the role the worker reads via `Job.input(role=...)` |
 | `label`, `hint` | UI text |
-| `types` | asset types the slot accepts: `audio`, `voice`, `video` (default `[audio, voice]`) |
+| `types` | asset types the slot accepts: `audio`, `voice`, `video`, plus `image`, `mesh` for the 3D studio tasks (default `[audio, voice]`) |
 | `required` | Generate is blocked with a toast while the slot is empty |
 | `tasks` | optional: only for these tasks (models with several tasks, e.g. Vevo: `voice_convert` / `voice_clone` / `tts`) |
 | `replaces_prompt` | optional: a filled slot makes the prompt text optional (DiffRhythm / Vevo 1.5 style prompt) |
@@ -636,6 +636,7 @@ code lives in `vendor/` (git clones, not in the lock files).
 | `omni_llama2` (LLaMA-Omni2) | `envs/omni_llama2` | `env-lock/omni_llama2.txt` |
 | `vc` (Seed-VC, RVC) | `envs/vc` | `env-lock/vc.txt` |
 | `vc_diffsinger` (DiffSinger) | `envs/vc_diffsinger` | `env-lock/vc_diffsinger.txt` |
+| `video` (Wan 2.1/2.2, LTX-2.3, Kandinsky 6, HunyuanVideo 1.5, RIFE; Video studio) | `envs/video` | `env-lock/video.txt` |
 | `comfyui` (optional remote FLUX.2) | `envs/core` (HTTP client of a ComfyUI server) | - |
 
 Ports: studio 7860 (tests 7861-7869), prompt LLM 7880 (fallback may use 7881), workers have no ports. Make sure
@@ -765,6 +766,95 @@ returned.
 `STUDIO_CLOUD_MOCK=http://127.0.0.1:7899` (provider `p`, base kind `k` → `<mock>/<p>/<k>`); any key works except one
 containing `bad`. Unit tests: `tests/test_cloud.py`.
 
+## 9. Profiles, export presets, licence filter (`app/profiles.py`, `app/licensing.py`, `app/media.py`)
+
+### 9.1 Profiles
+
+`settings.json` key `profile`: `game | video | podcast | social | film | general` (default `general`; `PATCH /api/settings
+{"profile": "video"}` validates it and publishes the SSE event `settings`). `GET /api/profiles` returns
+`{current, default_export, license, profiles: [...], export_presets: [...]}`; a profile is
+`{id, label, icon, summary, context?, aspect, aspects, export, export_presets, hints}`:
+
+| field | meaning |
+|---|---|
+| `aspect` | default aspect ratio (`"16:9"`, `"9:16"`, `"1:1"`) or `null` = keep the model default (game, general) |
+| `export` | id of the default export preset (`original` for game / general) |
+| `export_presets` | presets listed first in the export dialog |
+| `hints` | free-form: `rgba`, `loop`, `mesh_format` (game), `video_aspect` (for video studios) |
+| `context` | one line prepended to the prompt improver's CONTEXT (absent for game / general: prompts unchanged) |
+
+**Preset tags.** Prompt chips (`prompts/*.yaml`, in `chipsets:` or a style's `chips:`) may carry
+`profiles: [game|video|podcast|social|film|general]` and `default_for: [profile, ...]`. Untagged chips belong to every
+profile. The UI (`profileChips()` in `PromptBox`) lists chips of the active profile first, then untagged, then chips
+tagged only for other profiles (dimmed); `game` keeps the file order for untagged chips; `general` never reorders.
+`default_for` chips start selected the first time a prompt box is used under that profile. The improver ignores both
+keys (it only reads `id` and `hint`). Add presets by tagging, never by copying a chip set per profile.
+
+**Frontend API** (from `sdk.js`): `S.getProfile()` -> the active profile object; `S.store.profile` (id);
+`S.profileAspect(choices)` -> the profile's aspect if it is one of the model's choices, else `null`;
+`S.defaultExportPreset()`; `S.setProfile(id)`; bus events `'profile'` (data: the profile object), `'license'`
+(`{commercial_only, strict}`), `'export'` (default preset id). `ParamForm` already applies `profileAspect` to any param
+named `aspect` (type `choice`) on first use of a model and on every `'profile'` event, so a studio gets it for free by
+naming its param `aspect` with choices like `"16:9"`. `TaskStudio` accepts `placeholder: profile => string`.
+
+### 9.2 Export presets
+
+`EXPORT_PRESETS` in `app/profiles.py` (`original`, `video_online`, `broadcast`, `film_master`, `podcast`,
+`social_vertical`, `social_square`, `thumbnail`, `music_cd`, `web_images`). A preset is `{label, summary, audio, image}`;
+`audio` / `image` are option dicts or `null` (leave that kind untouched):
+
+```
+audio: {format: wav|mp3|ogg|flac, sample_rate, bit_depth: 16|24|32, lufs, true_peak: -1.0, channels: 1|2,
+        bitrate_kbps (mp3), music_sample_rate (used instead of sample_rate for assets whose task is music / song)}
+image: {format: png|jpeg|webp, aspect: "16:9", width, height, max_side, fit: crop|pad, quality, background: "#rrggbb"}
+```
+
+Loudness is a two-pass ffmpeg `loudnorm` (`media.export_audio`): pass 1 measures, pass 2 applies the measured values
+with `linear=true`; sample rate / bit depth / channels are applied after it. Silent input is converted without a gain
+change (`report.note`). Images: `media.export_image` crops (centred) or pads to `aspect` (or `width:height`), resizes
+(`width`+`height` exact, `max_side` never upscales), JPEG flattens alpha onto `background`. Both are CPU only and raise
+`media.ExportError` (a `ValueError`, HTTP 400) for bad options.
+
+**Originals are never modified.** Every route below writes a derived file elsewhere:
+
+| route | body | result |
+|---|---|---|
+| `POST /api/export` | `{ids, naming, include_meta, include_attachments, export?}` | zip; with `export: {preset?, audio?, image?}` the main file of each audio / voice / image asset is replaced by its converted copy (`manifest.json` gets `export` and a per-asset `export` = report + `original` file name). Omitted = stored files as they are |
+| `POST /api/assets/{id}/render` | `{export: {preset?, audio?, image?}}` | `{url, name, bytes, report}` for one converted file under `/api/export/render/<token>/<name>` (400 if the spec has nothing for the asset type) |
+| tool `asset.export` (`POST /api/jobs {tool: "asset.export", params: {preset?, audio?, image?}, inputs}`) | | saves converted copies as NEW assets (`parents` = the originals, `info.export` = report, tags `export`, `<preset>`) |
+
+Request resolution (`profiles.resolve_export`): `preset` gives the base options, explicit `audio` / `image` dicts are
+merged over it, `null` / `{}` / `false` switch that kind off; with neither a preset nor option keys the settings default
+applies (`settings.export.preset`, else the profile's `export`). `report` (audio): `{format, sample_rate, bit_depth,
+target_lufs, true_peak, normalized, input_lufs, output_lufs, output_true_peak, result:{duration, sample_rate, channels,
+peak_db, lufs}, note?}`; (image): `{format, width, height, source_width, source_height, alpha}`.
+
+### 9.3 Licence filter
+
+Every registry model has `license: {name, commercial: bool, note?, verify?}` (section 1). Three states
+(`licensing.state()` / `S.licenseState()`):
+
+| state | rule | badge |
+|---|---|---|
+| `commercial` | `commercial: true` | Commercial OK |
+| `check` | `commercial: true, verify: true` | Check licence |
+| `noncommercial` | `commercial: false` (or no licence) | Non-commercial |
+
+Settings `license.commercial_only` (bool) and `license.strict` (bool), set with `PATCH /api/settings {"license": {...}}`
+(also in `GET /api/bootstrap` -> `settings.license` and `GET /api/profiles`). When `commercial_only` is on:
+
+* `JobManager.submit` (so `POST /api/jobs`, retries, pipelines, the assistant's plans) refuses a `noncommercial` model
+  (and a `check` model when `strict`) **before** anything starts: HTTP **403**, body
+  `{"error": "<model> is not licensed for commercial use (<licence>), and 'Commercial-safe models only' is on. ...",
+  "kind": "license", "fix": "..."}` (`JobError(kind="license")`; `licensing.check`).
+* the web pickers hide those models: `S.modelsFor(task)` omits them (`{includeBlocked: true}` keeps them); `ModelPicker`
+  lists them greyed out at the bottom with the reason; `TaskStudio`'s Generate button is disabled for a blocked model;
+  `S.isLicenseBlocked(model)` is the check for studios that build their own pickers. Studios should use `modelsFor`
+  or `isLicenseBlocked` rather than testing `license.commercial` themselves, and re-read on bus `'license'`.
+* the assistant's `list_models` tool and catalog leave them out.
+
+Existing assets are never hidden or deleted by the filter; the licence of the model stays on every asset.
+
 ## Changelog
 - 0.1.0: initial core.
 - 0.1.1 (image/3D studio): `app/main.py` keeps the catch-all static mount last after `load_plugins()`, so plugin routers
@@ -794,3 +884,14 @@ containing `bad`. Unit tests: `tests/test_cloud.py`.
   prompt style `sing_score` (`prompts/sound.yaml`), Improve is hidden for models / tasks without a template;
   backends of the new models in section 7. Tests: `tests/test_files_safety.py` (video upload + serving, slot
   validation). No new Python dependencies in envs/core; ffmpeg / ffprobe are optional (magic bytes are the fallback).
+- 0.5.0 (media profiles): section 9. `app/profiles.py`, `app/licensing.py`, `GET /api/profiles`, settings `profile` /
+  `license` / `export` (allowed in `PATCH /api/settings`, SSE `settings`), `POST /api/assets/{id}/render`,
+  `ExportReq.export`, `AssetStore.render/convert_main/export(convert=)`, `media.export_audio/export_image`, tool
+  `asset.export`, `JobError(kind="license")` -> HTTP 403, prompt chips `profiles` / `default_for`, web `core/license.js`,
+  `core/components/exportdialog.js`, `S.getProfile/profileAspect/setProfile/isLicenseBlocked/exportDialog`.
+- video studio (Video tasks): new tasks `t2v`, `i2v`, `flf2v`, `interpolate` (`models.d/video.yaml`, backend `video`, worker
+  `workers/video_worker.py` + `video_common.py` + `video_rife.py`); new input roles `last_image` (flf2v) and `video`
+  (interpolate); output asset type `video` (h264 / yuv420p / faststart mp4, AAC when the model makes sound, poster by the core).
+  Plugin `app/plugins/video.py`: `GET /api/x/video/formats` and tools `video.frame|trim|loop|speed|reframe|convert|concat|mux`.
+  Web: `app/web/studios/video.js` (`receives` i2v / continue / interpolate / tools; "Add sound" = `S.sendTo('sound', id, {action:'v2a'})`).
+  Prompt styles `video_wan|ltx|kandinsky|hunyuan` (`prompts/video.yaml`). Research: `docs/research/video.md`. Tests: `tests/test_video.py`.

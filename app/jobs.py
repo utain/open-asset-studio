@@ -20,6 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable
 
+from . import licensing
 from .assets import AssetError, AssetStore
 from .memory import InsufficientMemory, MemoryManager
 from .registry import Registry
@@ -361,6 +362,7 @@ class JobManager:
                 task = m["tasks"][0]
             if task not in m["tasks"]:
                 raise JobError(f"{m['name']} cannot do '{task}' (it supports {', '.join(m['tasks'])}).", "input")
+            licensing.check(m, self.settings)        # "Commercial-safe models only" (settings license.commercial_only)
             st = self.registry.status.get(model_id, {})
             if st.get("status") != "ready" and not spec.get("force"):
                 raise JobError(f"{m['name']} is not ready: {st.get('reason')}", st.get("kind") or "env", st.get("fix", ""))

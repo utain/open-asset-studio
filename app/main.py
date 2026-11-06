@@ -81,7 +81,7 @@ async def _asset_err(_r, e: AssetError):
 @app.exception_handler(JobError)
 async def _job_err(_r, e: JobError):
     body = {**(getattr(e, "data", None) or {}), "error": str(e), "kind": e.kind, "fix": e.fix}
-    return JSONResponse(body, status_code=400 if e.kind == "input" else 409)
+    return JSONResponse(body, status_code=400 if e.kind == "input" else 403 if e.kind == "license" else 409)
 
 
 @app.exception_handler(ImproveError)
@@ -133,7 +133,8 @@ def _studio_modules() -> list[str]:
 def bootstrap():
     c = C()
     return {"version": c.version, "projects": c.assets.projects(), "tasks": c.registry.tasks,
-            "settings": {"ui": c.settings.get("ui"), "defaults": {t: c.registry.default_for(t) for t in c.registry.tasks}},
+            "settings": {"ui": c.settings.get("ui"), "profile": c.settings.get("profile"), "license": c.settings.get("license"),
+                         "export": c.settings.get("export"), "defaults": {t: c.registry.default_for(t) for t in c.registry.tasks}},
             "modules": _studio_modules(), "llm": c.llm.status(), "jobs": c.jobs.counts(),
             "memory": c.memory.snapshot(), "plugins": sorted(c.plugins), "plugin_errors": c.plugin_errors,
             "tools": {k[5:]: v["label"] for k, v in HANDLERS.items() if k.startswith("tool:")},
@@ -285,11 +286,31 @@ def settings_get():
 
 @app.patch("/api/settings")
 def settings_patch(patch: dict):
-    allowed = {"defaults", "ui", "memory", "workers", "jobs", "llm", "textgen"}
+    allowed = {"defaults", "ui", "memory", "workers", "jobs", "llm", "textgen", "profile", "license", "export"}
     bad = set(patch) - allowed
     if bad:
         raise HTTPException(400, f"Unknown settings: {', '.join(sorted(bad))}")
-    return C().settings.update(patch)
+    from . import profiles
+
+    if "profile" in patch and patch["profile"] not in profiles.PROFILES:
+        raise HTTPException(400, f"Unknown profile '{patch['profile']}' (one of {', '.join(profiles.PROFILE_IDS)}).")
+    if isinstance(patch.get("export"), dict) and patch["export"].get("preset") not in (None, *profiles.EXPORT_PRESETS):
+        raise HTTPException(400, f"Unknown export preset '{patch['export']['preset']}'.")
+    if "license" in patch and not isinstance(patch["license"], dict):
+        raise HTTPException(400, "license must be an object: {commercial_only, strict}.")
+    c = C()
+    out = c.settings.update(patch)
+    if {"profile", "license", "export"} & set(patch):
+        c.bus.publish("settings", {"profile": out.get("profile"), "license": out.get("license"), "export": out.get("export")})
+    return out
+
+
+@app.get("/api/profiles")
+def profiles_get():
+    """Use-case profiles + export presets + the current selection (docs/CONTRACTS.md "Profiles and export presets")."""
+    from . import profiles
+
+    return {**profiles.public(C().settings), "license": C().settings.get("license")}
 
 
 class DefaultReq(BaseModel):
@@ -439,13 +460,53 @@ class ExportReq(BaseModel):
     naming: str = "name"
     include_meta: bool = True
     include_attachments: bool = True
+    # Export preset: {"preset": "<id>"} and/or {"audio": {...}, "image": {...}} (app/profiles.py). Omitted = the stored
+    # files as they are (the web UI sends the profile's default preset). Originals are never modified.
+    export: dict | None = None
+
+
+class RenderReq(BaseModel):
+    export: dict | None = None
+
+
+def _export_spec(spec: dict | None) -> dict | None:
+    """Request body -> {audio, image} option dicts (None for 'original')."""
+    from . import profiles
+
+    if spec is None:
+        return None
+    r = profiles.resolve_export(spec, C().settings)
+    return {"audio": r["audio"], "image": r["image"], "preset": r["preset"]} if (r["audio"] or r["image"]) else None
 
 
 @app.post("/api/export")
 def export(req: ExportReq):
     z = C().assets.export(req.ids, config.DATA / "exports", naming=req.naming, include_meta=req.include_meta,
-                          include_attachments=req.include_attachments)
+                          include_attachments=req.include_attachments, convert=_export_spec(req.export))
     return {"url": f"/api/export/{z.name}", "name": z.name, "bytes": z.stat().st_size, "count": len(req.ids)}
+
+
+@app.post("/api/assets/{asset_id}/render")
+def asset_render(asset_id: str, req: RenderReq):
+    """Convert one asset for download (loudness / sample rate / format / crop / size). Returns a URL to a derived file."""
+    r = C().assets.render(asset_id, _export_spec(req.export), config.DATA / "exports")
+    return {"url": f"/api/export/render/{r['token']}/{r['name']}", "name": r["name"], "bytes": r["bytes"], "report": r["report"],
+            "asset": asset_id}
+
+
+@app.get("/api/export/render/{token}/{name}")
+def render_get(token: str, name: str):
+    import re
+
+    from .assets import FILE_RE
+    from . import media
+
+    if not re.fullmatch(r"[0-9a-f]{12}", token) or not FILE_RE.match(name) or ".." in name:
+        raise HTTPException(404)
+    p = config.DATA / "exports" / f"render-{token}" / name
+    if not p.is_file():
+        raise HTTPException(404)
+    return FileResponse(p, media_type=media.MIME.get(p.suffix.lower(), "application/octet-stream"), filename=name)
 
 
 @app.get("/api/export/{name}")
