@@ -14,7 +14,7 @@ relevant CONTRACTS section before touching an extension point.
 
 ```bash
 ./run_studio.sh --host 0.0.0.0           # core on :7860 (LAN, no auth); logs/studio.log. STUDIO_PORT=7861 for another port
-envs/core/bin/python -m pytest           # all tests, ~seconds, no GPU / no weights needed
+envs/core/bin/python -m pytest           # all tests, no GPU / no weights; the full suite takes ~25 min, so prefer one file
 envs/core/bin/python -m pytest tests/test_media_audio.py::test_time_formats   # one file / one test
 ./install.sh list | doctor               # backends + models installed?, environment check
 ./install.sh backend <backend> [--weights]   # (re)build one venv from install/<backend>.yaml
@@ -55,6 +55,13 @@ Always use the venv pythons (`envs/<env>/bin/python`), never the system python. 
 - **Assets**: `data/projects/<p>/assets/<id>/` (files + `meta.json` with lineage, seed, prompt, licence).
   Exports always write derived files and never modify originals.
 - **Cloud** (`app/providers.py`, `app/cloud/`): optional, off by default, `backend: cloud` registry entries.
+- **Two MCP servers, both stdlib-only.** `workers/studio_mcp.py` is for the in-app Assistant only: it needs a per-run
+  token, can only read and propose, and its `TOOLS` are the source of truth for `app/plugins/assistant.py`.
+  `scripts/mcp_server.py` is public and can submit jobs. It defines the tools once, as a pure REST client of the core,
+  and also serves as the stdio transport. `app/plugins/mcp.py` serves those same tools over HTTP at `/api/x/mcp`, so
+  they start with the core (after a change to either file, restart the core). It is registered for Claude Code in
+  `.mcp.json` as `studio`. When this repo's `studio` MCP tools are available, use them to generate or inspect
+  assets instead of hand-written curl.
 
 Core-owned files (listed at the top of `docs/CONTRACTS.md`) should change only through small,
 backwards-compatible hooks, each recorded in the CONTRACTS changelog. Everything else is a drop-in file.
