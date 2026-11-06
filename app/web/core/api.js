@@ -60,6 +60,7 @@ export const api = {
   setDefault: (task, model) => req('PUT', '/api/settings/defaults', { task, model }),
   settings: () => req('GET', '/api/settings'),
   patchSettings: (p) => req('PATCH', '/api/settings', p),
+  profiles: () => req('GET', '/api/profiles'),
   presets: (model) => req('GET', `/api/presets/${encodeURIComponent(model)}`),
   savePreset: (model, name, params) => req('PUT', `/api/presets/${encodeURIComponent(model)}`, { name, params }),
   deletePreset: (model, name) => req('DELETE', `/api/presets/${encodeURIComponent(model)}/${encodeURIComponent(name)}`),
@@ -71,7 +72,8 @@ export const api = {
   patchAsset: (id, p) => req('PATCH', `/api/assets/${id}`, p),
   deleteAsset: (id) => req('DELETE', `/api/assets/${id}`),
   lineage: (id) => req('GET', `/api/assets/${id}/lineage`),
-  exportAssets: (ids, opts = {}) => req('POST', '/api/export', { ids, ...opts }),
+  exportAssets: (ids, opts = {}) => req('POST', '/api/export', { ids, ...opts }),     // opts.export = {preset?, audio?, image?}
+  renderAsset: (id, exp) => req('POST', `/api/assets/${id}/render`, { export: exp }),   // one converted file (derived; original untouched)
   setThumb: (id, blob) => { const f = new FormData(); f.append('file', blob, 'thumb.webp'); return req('POST', `/api/assets/${id}/thumb`, f); },
   upload(file, { project = 'default', name = '', tags = '', type = '' } = {}, onProgress) {
     return new Promise((resolve, reject) => {

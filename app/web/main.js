@@ -1,6 +1,6 @@
 // Boot: bootstrap data, theme, models, studio modules (web/studios/*.js, discovered by the server), shell, SSE.
 import { api } from './core/api.js';
-import { store, prefs, loadModels, connectEvents } from './core/store.js';
+import { store, prefs, loadModels, loadProfiles, connectEvents } from './core/store.js';
 import { registerStudio } from './core/studio.js';
 import { buildShell, applyTheme, startRouter } from './core/shell.js';
 import { h } from './core/ui.js';
@@ -17,6 +17,7 @@ async function boot() {
     llm: b.llm, counts: b.jobs, version: b.version, tools: b.tools });
   if (!store.projects.find(p => p.id === store.project)) store.project = store.projects[0]?.id || 'default';
   await loadModels();
+  await loadProfiles(b.settings);
   try { for (const d of (await api.downloads()).downloads) store.downloads.set(d.model, d); } catch { /* older core */ }
   const mods = await Promise.all(b.modules.map(async f => {
     try { const m = await import(`./studios/${f}`); return m.default; } catch (e) { console.error(`studio module ${f} failed to load`, e); return null; }

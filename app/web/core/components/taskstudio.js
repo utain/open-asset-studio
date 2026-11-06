@@ -4,7 +4,7 @@
 //   drawer: asset details (shared)
 // Studios can use it as is (see studios/selftest.js) or compose the same components themselves.
 import { api } from '../api.js';
-import { store, bus, prefs, promptStyleOf } from '../store.js';
+import { store, bus, prefs, promptStyleOf, getProfile, isLicenseBlocked } from '../store.js';
 import { h, ic, btn, toast, toastError, fmtDur, empty, clear } from '../ui.js';
 import { ModelPicker } from './modelpicker.js';
 import { ParamForm, estimateSeconds } from './paramform.js';
@@ -63,6 +63,8 @@ export class TaskStudio {
       if (ev.action === 'created' && ev.asset.studio === this.studio && ev.asset.project === store.project && this.cur().id === ev.asset.task && !this.grid.cards.has(ev.asset.id) && !this._tracking) this.grid.add(ev.asset);
     });
     this._offProj = bus.on('project', () => this.loadResults());
+    this._offProfile = bus.on('profile', () => { if (this.promptOn) this.prompt.ta.placeholder = this._placeholder(this.cur()); });
+    this._offLic = bus.on('license', () => this._eta());
     this.loadResults();
   }
   cur() { return this.tasks.find(t => t.id === this.task) || this.tasks[0]; }
@@ -94,7 +96,7 @@ export class TaskStudio {
     const m = this.picker.model;
     this.promptOn = t.prompt !== false && (t.prompt === true || !!promptStyleOf(m, this.task));
     if (this.promptOn) {
-      this.prompt.ta.placeholder = t.placeholder || 'Describe what you want… (Thai or English)';
+      this.prompt.ta.placeholder = this._placeholder(t);
       this.panelBody.append(this.prompt.el);
     }
     this.form.exclude = new Set(t.exclude || []);
@@ -102,6 +104,11 @@ export class TaskStudio {
     const extra = this.o.extraPanel?.(this, t);
     if (extra) this.panelBody.append(extra);
     this._onModel(m, true);
+  }
+  /** `placeholder` may be a string or a function (profile) -> string, so the hint follows the use-case profile. */
+  _placeholder(t) {
+    const p = typeof t.placeholder === 'function' ? t.placeholder(getProfile()) : t.placeholder;
+    return p || 'Describe what you want… (Thai or English)';
   }
   _onModel(m, fromBuild = false) {
     if (!fromBuild && m) prefs.set(`model.${this.task}`, m.id);
@@ -117,12 +124,13 @@ export class TaskStudio {
     const m = this.picker.model;
     const loaded = (store.memory?.loaded || []).some(e => e.key?.endsWith(':' + m?.id));
     const s = estimateSeconds(m, this.form.allValues(), loaded);
-    const ready = m?.status?.status === 'ready';
+    const blocked = isLicenseBlocked(m);
+    const ready = m?.status?.status === 'ready' && !blocked;
     const nIn = Object.values(this.slots || {}).reduce((n, sl) => n + sl.ids.length, 0);
     this.genBtn.replaceChildren(ic('sparkles', 18), h('span', ready || !m ? 'Generate' : (m.status.status === 'cloud_disabled' ? 'Cloud disabled' : m.status.status === 'missing_key' ? 'Needs API key' : 'Model not ready')),
       s ? h('span.eta', `· ~${fmtDur(s)}`) : null, ready ? costSpan(m, { ...this.form.allValues(), prompt: this.prompt?.value }, nIn) : null);
     this.genBtn.disabled = !m || !ready;
-    this.genBtn.title = m && !ready ? (m.status.reason || '') : 'Generate (Ctrl/⌘ + Enter in the prompt)';
+    this.genBtn.title = m && !ready ? (blocked ? 'Commercial-safe models only is on: this model is not licensed for commercial use.' : (m.status.reason || '')) : 'Generate (Ctrl/⌘ + Enter in the prompt)';
   }
   _buildCenter() {
     this.headTitle = h('div.grow', { style: { minWidth: 0 } });
@@ -215,5 +223,5 @@ export class TaskStudio {
     const slot = Object.values(this.slots)[0];
     if (slot && assets.length) slot.set(assets.map(a => a.id).slice(0, slot.multiple ? slot.max : 1));
   }
-  destroy() { this._offAsset(); this._offProj(); this.grid.destroy(); this.picker.destroy(); }
+  destroy() { this._offAsset(); this._offProj(); this._offProfile(); this._offLic(); this.grid.destroy(); this.picker.destroy(); }
 }

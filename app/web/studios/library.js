@@ -45,6 +45,7 @@ export default S.defineStudio({
           for (const id of sel) { const a = grid.assets().find(x => x.id === id); await S.api.patchAsset(id, { tags: [...new Set([...(a?.tags || []), t])] }).catch(S.toastError); }
         } }),
         btn('Export zip', { size: 'sm', icon: 'package', onClick: () => S.exportAssets(sel) }),
+        btn('Export…', { size: 'sm', icon: 'sliders-horizontal', title: 'Choose an export preset: loudness, sample rate, format, image size and aspect', onClick: () => S.exportAssets(sel, { options: true }) }),
         btn('Delete', { size: 'sm', icon: 'trash-2', kind: 'danger', onClick: async () => {
           if (!(await S.confirmDialog(`Delete ${sel.length} asset(s)? They are moved to the project's .trash folder.`, { ok: 'Delete', danger: true }))) return;
           for (const id of sel) await S.api.deleteAsset(id).catch(S.toastError);

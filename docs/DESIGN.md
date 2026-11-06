@@ -1,20 +1,27 @@
 # Open Asset Studio: design
 
-An all-in-one local studio on the DGX Spark for game teams that need **3D, images and sound**.
-Open-weight models only, offline-first, one machine. This document is the shared spec for
+An all-in-one local studio on the DGX Spark for teams that need **images, 3D models, sound and video** for games,
+video, podcasts, social content and film. Open-weight models only, offline-first, one machine. This document is the shared spec for
 everyone building it. Research on what actually runs here lives in `docs/research/`.
 
 ## 1. Goals and non-goals
 
 Goals
-- One web app with three studios (Image, 3D, Sound) plus a shared **asset library**, so an idea
-  can go concept image -> cleaned RGBA -> textured 3D model -> sounds and voice for it, without
-  downloading/uploading files between tools.
+- One web app with studios (Image, 3D, Sound, plus Video where installed) and a shared **asset library**, so an idea
+  can go concept image -> cleaned RGBA -> textured 3D model -> sounds and voice for it, or thumbnail ->
+  intro sting -> voice-over -> loudness-matched export, without downloading/uploading files between tools.
+- **Use-case profiles** (game, video, podcast, social, film, general): one setting that reorders the style presets,
+  sets the default aspect ratios and picks the default export (loudness, sample rate, image size). Game is a
+  first-class profile and keeps its RGBA / seamless-loop / GLB behaviour; the others add presets, never remove any.
+- **Export presets**: audio and images are converted on the way out into derived files (the library is never
+  modified); see section 4.7.
+- A **commercial-safe** switch: every model carries a licence badge, and one setting hides and refuses
+  non-commercial models everywhere (section 4.8).
 - **Switch models per task**, filtered by what each model can do (features) and whether it runs
   here (compatibility). Changing the model swaps the parameter form; shared fields stay.
 - A built-in **prompt improver** (local LLM) next to every prompt: Thai or English in,
   model-specific prompt out, with variations.
-- Game-production features: batches/takes, A/B compare, favourites/ratings, lineage, export in
+- Production features for every medium: batches/takes, A/B compare, favourites/ratings, lineage, export in
   engine-friendly formats, sheets of many assets (voice line sheets, SFX event lists).
 
 Non-goals (for now)
@@ -25,8 +32,8 @@ Non-goals (for now)
 
 ## 2. Users and core flows
 
-Primary user: a small game team member (artist, sound designer, designer) using a browser on the
-LAN. Typical flows, which the UI must make short:
+Primary user: a member of a small production team (game artist or sound designer, video editor, podcaster, social
+content creator, animator) using a browser on the LAN. Typical flows, which the UI must make short:
 
 1. **Concept to 3D prop**: prompt (Thai ok) -> improve -> 4 variations with a fast model -> pick ->
    refine with an edit model -> transparent cut-out + recenter -> 3D shape -> texture -> GLB export.
@@ -166,6 +173,26 @@ uploads are validated; APIs never accept server-side paths.
   clip), line sheet editor (character, line, emotion/direction, language) with CSV paste/import
   and per-line takes.
 - Export: folder per category with consistent naming (`<event>_<take>.ogg`) + a manifest JSON.
+
+### 4.7 Profiles and export presets
+- `settings.json` `"profile"` (`game | video | podcast | social | film | general`, default `general`) is read by
+  the UI through `GET /api/profiles` and the shared store (`getProfile()`, bus event `profile`). A profile owns:
+  chip order (`profiles: [...]` tags on prompt chips; untagged chips belong to every profile), the default aspect
+  ratio of image / video models (`aspect` param, applied on first use and on a profile change), the context line sent
+  to the prompt improver and the default export preset. Presets are tagged, never duplicated.
+- Export presets (`app/profiles.py`) are named bundles of audio options (format, sample rate, bit depth, target LUFS
+  and true peak via two-pass ffmpeg `loudnorm`) and image options (format, aspect crop / pad, size). Plain "Export zip"
+  applies the default preset; "Export / convert..." opens the dialog; the `asset.export` tool saves converted
+  copies as new assets. Rules: originals are never modified, conversions run on CPU (ffmpeg, Pillow), a silent file
+  is converted without a gain change, the report (input / output LUFS, true peak) goes into the manifest.
+- Game and general default to `original`: exports are byte-identical to the stored files, as before.
+
+### 4.8 Commercial-use licence filter
+- Registry `license: {name, commercial, note?, verify?}` gives three states: *commercial*, *check* (`verify: true`),
+  *non-commercial*. Badges on the Models page, in every model picker and on assets.
+- `settings.license.commercial_only` (top-bar shield, Models page, Queue & System): pickers hide / disable
+  non-commercial models, the assistant never lists them, and `POST /api/jobs` refuses them with HTTP 403 and
+  `kind: "license"`. `license.strict` also refuses *check* models. The filter never deletes or hides existing assets.
 
 ## 5. Quality bar
 - Every control reaches the model call (no dead knobs); every result is reproducible from its

@@ -1,6 +1,6 @@
 // Model picker: models that can do the current task, with feature / license / status badges. Not-ready models are
 // shown greyed out with the reason and the fix command (and cannot be picked).
-import { store, bus, modelsFor, prefs } from '../store.js';
+import { store, bus, modelsFor, prefs, isLicenseBlocked } from '../store.js';
 import { h, ic, btn, popover, closePopover, statusBadge, licenseBadge, copyText, MOD_ICON } from '../ui.js';
 import { cloudBadge, priceBadge, priceLabel, isCloud } from '../cost.js';
 import { navigate } from '../studio.js';
@@ -44,6 +44,10 @@ export class ModelPicker {
     this.value = value || this._initial();
     this._render();
     this._off = bus.on('models', () => { if (!this.model) this.value = this._initial(); this._render(); });
+    // "Commercial-safe models only" switched on while a non-commercial model is selected: move to the next usable one
+    this._offLic = bus.on('license', () => {
+      if (this.model && isLicenseBlocked(this.model)) { this.value = this._initial(); this._render(); this.onChange?.(this.model, true); } else this._render();
+    });
   }
   _initial() {
     const remembered = prefs.get(`model.${this.task}`);
@@ -66,19 +70,23 @@ export class ModelPicker {
       licenseBadge(m.license), ic('chevron-down', 16, 'dim'));
   }
   open() {
-    const list = modelsFor(this.task, { includeTest: this.includeTest });
-    const box = h('div.mp-list', { role: 'listbox' }, h('div.menu-head', `${store.tasks[this.task]?.label || this.task} · ${list.length} models`));
-    for (const m of list) {
-      const ready = m.status.status === 'ready';
+    const list = modelsFor(this.task, { includeTest: this.includeTest, includeBlocked: true });
+    const nBlocked = list.filter(isLicenseBlocked).length;
+    const box = h('div.mp-list', { role: 'listbox' }, h('div.menu-head', `${store.tasks[this.task]?.label || this.task} · ${list.length - nBlocked} models`,
+      nBlocked ? h('span.dim', { style: { fontWeight: 400 } }, ` · ${nBlocked} hidden by Commercial-safe`) : null));
+    for (const m of list.filter(x => !isLicenseBlocked(x)).concat(list.filter(isLicenseBlocked))) {
+      const blocked = isLicenseBlocked(m);
+      const ready = m.status.status === 'ready' && !blocked;
       const item = h(`div.mp-item.mod-${m.modality}${m.id === this.value ? '.on' : ''}${ready ? '' : '.off'}`, { role: 'option', 'aria-selected': m.id === this.value, tabindex: ready ? 0 : -1 },
         h('div.mp-icon', ic(MOD_ICON[m.modality] || 'cpu', 17)),
         h('div.grow', { style: { minWidth: 0 } },
           h('div.row', h('b.ellipsis', m.name), store.defaults[this.task] === m.id ? h('span.badge.accent', 'default') : null, h('span.spacer'), statusBadge(m.status)),
           h('div.mp-sum', m.summary || ''),
           h('div.badges', cloudBadge(m), priceBadge(m), licenseBadge(m.license), memBadge(m), m.speed ? h('span.badge.outline', { title: m.speed }, ic('clock', 12), m.speed.split(/[;(]/)[0].slice(0, 34)) : null, ...featureBadges(m)),
-          !ready && CLOUD_CODES.includes(m.status.code) ? cloudFix(m) : null,
-          !ready && m.status.code !== 'no_worker' && !CLOUD_CODES.includes(m.status.code) ? h('div.mp-fix', h('div', m.status.reason), m.status.fix ? h('div.row', h('code.mono.ellipsis', m.status.fix), h('button.btn.btn-ghost.btn-sm', { type: 'button', on: { click: e => { e.stopPropagation(); copyText(m.status.fix); } } }, ic('copy', 13))) : null) : null,
-          !ready && m.status.code === 'no_worker' ? h('div.mp-fix', { style: { color: 'var(--text-3)' } }, 'Backend worker not implemented yet.') : null));
+          blocked ? h('div.mp-fix', ic('ban', 12), ' Disabled: “Commercial-safe models only” is on and this licence is not cleared for commercial use.') : null,
+          !blocked && !ready && CLOUD_CODES.includes(m.status.code) ? cloudFix(m) : null,
+          !blocked && !ready && m.status.code !== 'no_worker' && !CLOUD_CODES.includes(m.status.code) ? h('div.mp-fix', h('div', m.status.reason), m.status.fix ? h('div.row', h('code.mono.ellipsis', m.status.fix), h('button.btn.btn-ghost.btn-sm', { type: 'button', on: { click: e => { e.stopPropagation(); copyText(m.status.fix); } } }, ic('copy', 13))) : null) : null,
+          !blocked && !ready && m.status.code === 'no_worker' ? h('div.mp-fix', { style: { color: 'var(--text-3)' } }, 'Backend worker not implemented yet.') : null));
       if (ready) {
         const pick = () => { closePopover(); this.set(m.id); };
         item.addEventListener('click', pick);
@@ -89,5 +97,5 @@ export class ModelPicker {
     if (!list.length) box.append(h('div.empty', 'No model supports this task yet.'));
     popover(this.btnEl, box, { width: 'min(460px, calc(100vw - 16px))' });
   }
-  destroy() { this._off(); }
+  destroy() { this._off(); this._offLic(); }
 }

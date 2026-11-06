@@ -2,7 +2,7 @@
 // (Fast / Balanced / Quality from the registry + user-saved). Values of fields that exist in several models
 // (steps, seed, size, batch, seconds, ...) are kept when the model changes; per-studio memory in localStorage.
 import { api } from '../api.js';
-import { prefs } from '../store.js';
+import { prefs, bus, profileAspect, getProfile } from '../store.js';
 import { h, ic, seg, toggle, btn, menu, promptDialog, toast, toastError, confirmDialog } from '../ui.js';
 
 const BUILTIN = ['fast', 'balanced', 'quality'];
@@ -24,6 +24,15 @@ export class ParamForm {
     this.advOpen = prefs.get('params.advOpen', false);
     this.el = h('div.pf');
     if (model) this.setModel(model, task);
+    // use-case profile: a profile change sets the aspect ratio of image / video models (16:9 video, 9:16 social, 1:1 podcast cover)
+    this._hadAspect = !!getProfile().aspect;
+    this._offProfile = bus.on('profile', prof => {
+      const p = (this.model?.params || []).find(x => x.name === 'aspect');
+      const a = p && profileAspect(p.choices);
+      if (a) this.setValues({ aspect: a });
+      else if (p && this._hadAspect && !prof?.aspect && p.default !== undefined) this.setValues({ aspect: p.default });   // back to game / general: the model default
+      this._hadAspect = !!prof?.aspect;
+    });
   }
   params() {
     return (this.model?.params || []).filter(p => !this.exclude.has(p.name) && (!p.tasks || !this.task || p.tasks.includes(this.task))
@@ -49,6 +58,8 @@ export class ParamForm {
     const next = {};
     for (const p of model?.params || []) {
       const remembered = this.mem[p.name];
+      // first use of an `aspect` choice: start from the profile's aspect ratio (none for game / general: model default)
+      if (p.name === 'aspect' && remembered === undefined && p.type === 'choice') { const a = profileAspect(p.choices); if (a) { next[p.name] = a; continue; } }
       next[p.name] = this._valid(p, remembered) ? this._coerce(p, remembered) : (p.default ?? (p.type === 'seed' ? -1 : p.type === 'bool' ? false : ''));
       if (p.type === 'seed' && next[p.name] == null) next[p.name] = -1;
     }

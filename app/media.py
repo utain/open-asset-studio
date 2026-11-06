@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import shutil
 import struct
 import subprocess
@@ -27,7 +28,8 @@ AUDIO_EXT = {".wav": "audio/wav", ".flac": "audio/flac", ".ogg": "audio/ogg", ".
 MESH_EXT = {".glb": "model/gltf-binary"}
 VIDEO_EXT = {".mp4": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm", ".mkv": "video/x-matroska"}
 OTHER_EXT = {".json": "application/json", ".txt": "text/plain", ".obj": "text/plain", ".mtl": "text/plain",
-             ".fbx": "application/octet-stream", ".npz": "application/octet-stream", ".csv": "text/csv"}
+             ".fbx": "application/octet-stream", ".npz": "application/octet-stream", ".csv": "text/csv",
+             ".srt": "application/x-subrip", ".vtt": "text/vtt"}
 MIME = {**IMAGE_EXT, **AUDIO_EXT, **MESH_EXT, **VIDEO_EXT, **OTHER_EXT}
 
 
@@ -290,3 +292,255 @@ def make_video_poster(src: Path, dst: Path, duration: float | None = None, side:
             return Path(dst)
     Path(dst).unlink(missing_ok=True)
     return None
+
+
+# ------------------------------------------------------------------ export (derived files; CPU only)
+# The originals are never touched: these write a new file next to a scratch / export path chosen by the caller.
+AUDIO_EXPORT_FORMATS = ("wav", "mp3", "ogg", "flac")
+IMAGE_EXPORT_FORMATS = ("png", "jpeg", "webp")
+_IMAGE_EXT = {"png": ".png", "jpeg": ".jpg", "webp": ".webp"}
+_ASPECT_RE = re.compile(r"^(\d{1,3}(?:\.\d+)?):(\d{1,3}(?:\.\d+)?)$")
+
+
+class ExportError(ValueError):
+    pass
+
+
+def _ffmpeg() -> str:
+    p = shutil.which("ffmpeg")
+    if not p:
+        raise ExportError("ffmpeg is not installed (needed for audio export): install it with your package manager.")
+    return p
+
+
+def _run_ffmpeg(args: list[str], timeout: float = 900.0) -> str:
+    try:
+        r = subprocess.run([_ffmpeg(), "-hide_banner", "-nostdin", "-nostats", "-protocol_whitelist", "file", *args], capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise ExportError("ffmpeg took too long converting this audio file.") from None
+    if r.returncode != 0:
+        tail = [ln for ln in r.stderr.strip().splitlines() if ln.strip()][-2:]
+        raise ExportError("ffmpeg failed: " + " ".join(tail)[:300])
+    return r.stderr
+
+
+def _loudnorm_json(stderr: str) -> dict | None:
+    """The JSON block ffmpeg's loudnorm prints at the end of stderr."""
+    i = stderr.rfind("{")
+    j = stderr.rfind("}")
+    if i < 0 or j < i:
+        return None
+    try:
+        return json.loads(stderr[i:j + 1])
+    except ValueError:
+        return None
+
+
+def _num(v) -> float | None:
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
+
+
+def audio_export_options(opts: dict) -> dict:
+    """Validate / normalise audio export options (see app/profiles.py for the keys)."""
+    o = dict(opts or {})
+    fmt = str(o.get("format") or "wav").lower().lstrip(".")
+    fmt = {"ogg_vorbis": "ogg", "vorbis": "ogg"}.get(fmt, fmt)
+    if fmt not in AUDIO_EXPORT_FORMATS:
+        raise ExportError(f"Audio format must be one of {', '.join(AUDIO_EXPORT_FORMATS)}.")
+    sr = o.get("sample_rate")
+    sr = int(sr) if sr not in (None, "", 0) else None
+    if sr is not None and not 8000 <= sr <= 192000:
+        raise ExportError("sample_rate must be 8000..192000 Hz.")
+    bd = o.get("bit_depth")
+    bd = int(bd) if bd not in (None, "", 0) else None
+    if bd is not None and bd not in (16, 24, 32):
+        raise ExportError("bit_depth must be 16, 24 or 32.")
+    if fmt == "flac" and bd == 32:
+        bd = 24
+    lufs = _num(o.get("lufs")) if o.get("lufs") not in (None, "") else None
+    if lufs is not None and not -40.0 <= lufs <= -5.0:
+        raise ExportError("lufs must be between -40 and -5.")
+    tp = _num(o.get("true_peak"))
+    tp = -1.0 if tp is None else tp
+    if not -9.0 <= tp <= 0.0:
+        raise ExportError("true_peak must be between -9 and 0 dBTP.")
+    ch = o.get("channels")
+    ch = int(ch) if ch not in (None, "", 0) else None
+    if ch not in (None, 1, 2):
+        raise ExportError("channels must be 1 or 2.")
+    br = int(o.get("bitrate_kbps") or 192)
+    if not 32 <= br <= 320:
+        raise ExportError("bitrate_kbps must be 32..320.")
+    return {"format": fmt, "sample_rate": sr, "bit_depth": bd, "lufs": lufs, "true_peak": tp, "channels": ch, "bitrate_kbps": br}
+
+
+def export_audio(src: Path, dst_dir: Path, stem: str, opts: dict, *, music: bool = False) -> tuple[Path, dict]:
+    """Convert `src` into `dst_dir/<stem>.<ext>` per `opts`; returns (path, report).
+
+    Loudness: two-pass ffmpeg loudnorm (pass 1 measures, pass 2 applies the measured values with linear=true so the
+    dynamics are kept whenever the target is reachable). Silent files are converted without a gain change. Sample
+    rate / bit depth / channels are applied after the loudness stage (loudnorm works internally at 192 kHz)."""
+    o = {**(opts or {})}
+    if music and o.get("music_sample_rate"):
+        o["sample_rate"] = o["music_sample_rate"]
+    o = audio_export_options(o)
+    src, dst_dir = Path(src), Path(dst_dir)
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    fmt = o["format"]
+    out = dst_dir / f"{stem}.{fmt}"
+    report: dict = {"format": fmt, "sample_rate": o["sample_rate"], "bit_depth": o["bit_depth"], "channels": o["channels"],
+                    "target_lufs": o["lufs"], "true_peak": o["true_peak"], "normalized": False}
+    filters = []
+    if o["lufs"] is not None:
+        base = f"loudnorm=I={o['lufs']}:TP={o['true_peak']}:LRA=11"
+        err = _run_ffmpeg(["-i", str(src), "-af", base + ":print_format=json", "-vn", "-f", "null", "-"])
+        m = _loudnorm_json(err) or {}
+        mi, mtp, mlra, mth, off = (_num(m.get(k)) for k in ("input_i", "input_tp", "input_lra", "input_thresh", "target_offset"))
+        report["input_lufs"] = mi
+        if None in (mi, mtp, mlra, mth, off) or mi < -69.0:
+            report["note"] = "Input is silent or too quiet to measure: converted without a gain change."
+        else:
+            filters.append(f"{base}:measured_I={mi}:measured_TP={mtp}:measured_LRA={mlra}:measured_thresh={mth}:offset={off}:linear=true:print_format=json")
+            report["normalized"] = True
+    args = ["-y", "-i", str(src), "-vn", "-map_metadata", "-1"]
+    if filters:
+        args += ["-af", ",".join(filters)]
+    sr_out = o["sample_rate"]
+    if filters and not sr_out:      # loudnorm resamples to 192 kHz internally: bring it back to the source rate
+        try:
+            import soundfile as sf
+
+            sr_out = int(sf.info(str(src)).samplerate)
+        except (RuntimeError, OSError):
+            sr_out = 48000
+    if sr_out:
+        args += ["-ar", str(sr_out)]
+        report["sample_rate"] = sr_out
+    if o["channels"]:
+        args += ["-ac", str(o["channels"])]
+    bd = o["bit_depth"] or 16
+    if fmt == "wav":
+        args += ["-c:a", {16: "pcm_s16le", 24: "pcm_s24le", 32: "pcm_f32le"}[bd]]
+        report["bit_depth"] = bd
+    elif fmt == "flac":
+        args += ["-c:a", "flac", "-sample_fmt", "s32" if bd == 24 else "s16"] + (["-bits_per_raw_sample", "24"] if bd == 24 else [])
+        report["bit_depth"] = bd
+    elif fmt == "mp3":
+        args += ["-c:a", "libmp3lame", "-b:a", f"{o['bitrate_kbps']}k"]
+        report["bit_depth"] = None
+    else:
+        args += ["-c:a", "libvorbis", "-q:a", "6"]
+        report["bit_depth"] = None
+    args.append(str(out))
+    err = _run_ffmpeg(args)
+    if filters:
+        res = _loudnorm_json(err) or {}
+        report["output_lufs"] = _num(res.get("output_i"))
+        report["output_true_peak"] = _num(res.get("output_tp"))
+        if res.get("normalization_type") == "dynamic":
+            report["note"] = "The target was not reachable linearly; ffmpeg used dynamic normalisation."
+    try:
+        info, _ = analyze_audio(out, buckets=10)
+        report["result"] = {k: info.get(k) for k in ("duration", "sample_rate", "channels", "peak_db", "lufs")}
+    except ValueError:
+        pass
+    return out, report
+
+
+def image_export_options(opts: dict) -> dict:
+    o = dict(opts or {})
+    fmt = str(o.get("format") or "png").lower().lstrip(".")
+    fmt = {"jpg": "jpeg"}.get(fmt, fmt)
+    if fmt not in IMAGE_EXPORT_FORMATS:
+        raise ExportError("Image format must be png, jpeg or webp.")
+    out = {"format": fmt, "fit": "pad" if o.get("fit") == "pad" else "crop"}
+    aspect = o.get("aspect")
+    if aspect not in (None, "", "original"):
+        mm = _ASPECT_RE.match(str(aspect))
+        if not mm or float(mm.group(1)) <= 0 or float(mm.group(2)) <= 0:
+            raise ExportError("aspect must look like 16:9.")
+        out["aspect"] = (float(mm.group(1)), float(mm.group(2)))
+    for k, lo, hi in (("width", 16, 16384), ("height", 16, 16384), ("max_side", 16, 16384)):
+        v = o.get(k)
+        if v not in (None, "", 0):
+            v = int(v)
+            if not lo <= v <= hi:
+                raise ExportError(f"{k} must be {lo}..{hi}.")
+            out[k] = v
+    q = int(o.get("quality") or 90)
+    out["quality"] = max(1, min(100, q))
+    bg = str(o.get("background") or "#ffffff")
+    if not re.fullmatch(r"#[0-9a-fA-F]{6}", bg):
+        raise ExportError("background must look like #rrggbb.")
+    out["background"] = bg
+    return out
+
+
+def export_image(src: Path, dst_dir: Path, stem: str, opts: dict) -> tuple[Path, dict]:
+    """Crop (or pad) to the aspect, resize and re-encode `src` into `dst_dir/<stem>.<ext>`; returns (path, report).
+
+    `width`+`height` give an exact size (the aspect defaults to width:height; a different `aspect` is cropped first);
+    `max_side` scales the longest side; neither keeps the pixel size of the crop. Images are never upscaled unless an
+    exact size is requested. The crop is centred. PNG / WebP keep alpha, JPEG is flattened onto `background`."""
+    o = image_export_options(opts)
+    src, dst_dir = Path(src), Path(dst_dir)
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    with Image.open(src) as im0:
+        im = ImageOps.exif_transpose(im0)
+        im.load()
+    if im.mode not in ("RGB", "RGBA"):
+        im = im.convert("RGBA" if (im.mode in ("LA", "PA") or "transparency" in im.info) else "RGB")
+    w0, h0 = im.size
+    if o.get("aspect"):
+        ar = o["aspect"][0] / o["aspect"][1]
+    elif o.get("width") and o.get("height"):
+        ar = o["width"] / o["height"]
+    else:
+        ar = None
+    if ar and abs(ar - w0 / h0) > 1e-3:
+        if o["fit"] == "crop":
+            if w0 / h0 > ar:
+                nw = max(1, round(h0 * ar))
+                x0 = (w0 - nw) // 2
+                im = im.crop((x0, 0, x0 + nw, h0))
+            else:
+                nh = max(1, round(w0 / ar))
+                y0 = (h0 - nh) // 2
+                im = im.crop((0, y0, w0, y0 + nh))
+        else:
+            if w0 / h0 > ar:
+                canvas = (w0, max(1, round(w0 / ar)))
+            else:
+                canvas = (max(1, round(h0 * ar)), h0)
+            pad = Image.new("RGBA", canvas, (0, 0, 0, 0))
+            pad.paste(im.convert("RGBA"), ((canvas[0] - w0) // 2, (canvas[1] - h0) // 2))
+            im = pad
+    if o.get("width") and o.get("height"):
+        if im.size != (o["width"], o["height"]):
+            im = im.resize((o["width"], o["height"]), Image.LANCZOS)
+    elif o.get("max_side"):
+        side = max(im.size)
+        if side > o["max_side"]:
+            f = o["max_side"] / side
+            im = im.resize((max(1, round(im.width * f)), max(1, round(im.height * f))), Image.LANCZOS)
+    elif o.get("width") or o.get("height"):
+        f = (o.get("width") / im.width) if o.get("width") else (o["height"] / im.height)
+        im = im.resize((max(1, round(im.width * f)), max(1, round(im.height * f))), Image.LANCZOS)
+    fmt = o["format"]
+    out = dst_dir / f"{stem}{_IMAGE_EXT[fmt]}"
+    if fmt == "jpeg":
+        rgba = im.convert("RGBA")
+        bg = Image.new("RGB", rgba.size, o["background"])
+        bg.paste(rgba, mask=rgba.getchannel("A"))
+        bg.save(out, "JPEG", quality=o["quality"], optimize=True)
+    elif fmt == "webp":
+        im.save(out, "WEBP", quality=o["quality"], method=4)
+    else:
+        im.save(out, "PNG", optimize=True)
+    report = {"format": fmt, "width": im.width, "height": im.height, "source_width": w0, "source_height": h0,
+              "alpha": im.mode == "RGBA" and fmt != "jpeg"}
+    return out, report

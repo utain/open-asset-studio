@@ -11,8 +11,8 @@ const API = '/api/x/assistant';
 const PROMPT_TASKS = ['t2i', 'edit', 'multi_ref', 'inpaint', 'rgba', 'sfx', 'ambience', 'music', 'song', 'tts', 'voice_design', 'voice_clone'];
 const STARTERS = [
   'A set of 10 medieval village props (barrel, cart, well, market stall…) as 3D models, with a matching village ambience loop and footsteps on cobblestone.',
-  'Make 4 UI sound effects for a cozy farming game: click, confirm, cancel, coin pickup.',
-  'Concept art for a crystal cave level: 4 variations, then the best one as a transparent prop.',
+  'For a travel vlog: a 16:9 thumbnail (4 variations), a 6-second intro sting and a calm music bed, all exported at -14 LUFS.',
+  'Podcast kit: square cover art for a late-night history show, a warm intro / outro sting, and a narrator voice sample.',
   'What can I make here for free commercial use?',
 ];
 

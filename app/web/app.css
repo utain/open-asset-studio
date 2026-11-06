@@ -566,3 +566,20 @@ model-viewer { width: 100%; height: 340px; background: radial-gradient(circle at
   .studio-center .sc-body { padding: 14px 16px 30px; }
   .studio-panel .sp-body { padding: 14px 16px; }
 }
+
+/* ---- media profiles, licence filter, export dialog ---- */
+.pill-btn.lic-toggle.on { color: var(--ok); border-color: var(--ok); background: var(--ok-soft); }
+.chip.chip-off { opacity: .55; }
+.chip.chip-off:hover, .chip.chip-off.on { opacity: 1; }
+.badge.lic-check { background: var(--warn-soft); color: var(--warn); }
+.export-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px 14px; align-items: start; }
+.profile-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.profile-card { text-align: left; padding: 11px 12px; border-radius: 12px; border: 1px solid var(--line-soft); background: var(--panel); color: var(--text-2);
+  cursor: pointer; display: flex; flex-direction: column; gap: 4px; min-width: 0; font: inherit; transition: border-color .15s, background .15s; }
+.profile-card:hover { border-color: var(--text-3); color: var(--text); }
+.profile-card.on { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
+.profile-card b { display: flex; align-items: center; gap: 7px; font-size: 13.5px; }
+.profile-card span { font-size: 11.5px; line-height: 1.35; color: var(--text-2); }
+tr.lic-blocked { opacity: .55; }
+.set-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+.set-row { display: flex; align-items: center; gap: 10px; justify-content: space-between; }

@@ -2,15 +2,24 @@
 import * as S from '../core/sdk.js';
 const { h, ic, btn } = S;
 
+// Quick-start flows. `profiles` tags decide which flows come first for the active use-case profile (untagged = all).
 const FLOWS = [
-  { id: 'concept3d', title: 'Concept → 3D prop', color: 'var(--c-3d)', icon: 'cuboid', steps: ['sparkles', 'image', 'scissors', 'cuboid', 'package'],
+  { id: 'concept3d', title: 'Concept → 3D prop', color: 'var(--c-3d)', icon: 'cuboid', steps: ['sparkles', 'image', 'scissors', 'cuboid', 'package'], profiles: ['game', 'film'],
     text: 'Idea → 4 fast concepts → refine → transparent cut-out → textured GLB.', go: () => S.navigate('pipelines', 'concept3d') },
-  { id: 'character', title: 'Character kit', color: 'var(--accent)', icon: 'user', steps: ['image', 'cuboid', 'mic', 'audio-lines'],
+  { id: 'character', title: 'Character kit', color: 'var(--accent)', icon: 'user', steps: ['image', 'cuboid', 'mic', 'audio-lines'], profiles: ['game', 'film'],
     text: 'Concept art → 3D model → a designed voice → barks and SFX for it.', go: () => S.navigate('pipelines', 'character') },
   { id: 'sfx', title: 'SFX pass', color: 'var(--c-sound)', icon: 'audio-lines', steps: ['list-checks', 'shuffle', 'star', 'scissors', 'package'],
-    text: 'Paste an event list → N takes each → audition, rate, trim, loop → export for Godot/Unity.', go: () => S.navigate('sound', 'sfx') },
+    text: 'Paste an event list → N takes each → audition, rate, trim, loop → export for your editor or engine.', go: () => S.navigate('sound', 'sfx') },
   { id: 'music', title: 'Music & loops', color: 'var(--c-sound)', icon: 'music', steps: ['sparkles', 'music', 'repeat', 'package'],
     text: 'Mood + genre (+ lyrics) → takes → extend / seamless loop → export.', go: () => S.navigate('sound', 'music') },
+  { id: 'thumb', title: 'Thumbnails & b-roll stills', color: 'var(--c-image)', icon: 'image', steps: ['sparkles', 'image', 'maximize-2', 'package'], profiles: ['video', 'social', 'podcast'],
+    text: 'Describe the shot → 16:9 / 9:16 / square takes → upscale → export as JPEG or PNG at platform size.', go: () => S.navigate('image') },
+  { id: 'sting', title: 'Stings, jingles & beds', color: 'var(--c-sound)', icon: 'music', steps: ['sparkles', 'music', 'gauge', 'package'], profiles: ['video', 'podcast', 'social'],
+    text: 'Intro / outro sting, ad jingle or ambience bed → pick a take → export normalised to -14 / -16 LUFS.', go: () => S.navigate('sound', 'music') },
+  { id: 'voiceover', title: 'Voice-over & narration', color: 'var(--c-sound)', icon: 'mic', steps: ['sparkles', 'mic', 'gauge', 'package'], profiles: ['video', 'podcast', 'social', 'film'],
+    text: 'Write or paste the script → pick or design a voice → takes → loudness-matched export.', go: () => S.navigate('sound', 'voice') },
+  { id: 'storyboard', title: 'Storyboard & concept art', color: 'var(--c-image)', icon: 'film', steps: ['sparkles', 'image', 'columns-2', 'package'], profiles: ['film', 'video'],
+    text: 'Scene description → 16:9 frames → compare and pick → export the board as PNG.', go: () => S.navigate('image') },
   { id: 'iterate', title: 'Iterate on an asset', color: 'var(--c-image)', icon: 'history', steps: ['eye', 'sliders-horizontal', 'refresh-cw', 'columns-2'],
     text: 'Open any asset, see exactly how it was made, tweak one knob, regenerate, compare A/B.', go: () => S.navigate('library') },
 ];
@@ -24,6 +33,17 @@ const TARGETS = [
   { value: 'voice', label: 'Voice', style: 'voice', studio: 'sound', task: 'voice_design' },
 ];
 
+const PLACEHOLDER = {
+  game: 'Type an idea in Thai or English, e.g. “หีบสมบัติไม้เก่า ประดับทอง” or “boss fight in a lava cave”',
+  video: 'Type an idea, e.g. “warm sunrise over a harbour, slow drone shot” or “punchy 5-second logo sting”',
+  podcast: 'Type an idea, e.g. “cosy cover art for a late-night history podcast” or “warm 6-second intro sting”',
+  social: 'Type an idea, e.g. “vertical product shot of a matte black bottle, neon rim light” or “upbeat 15-second ad jingle”',
+  film: 'Type an idea, e.g. “storyboard frame: detective at a rain-soaked window, low key light” or “tense strings, sparse”',
+  general: 'Type an idea in Thai or English, e.g. “a lighthouse at dusk, painterly” or “soft piano bed for a documentary”',
+};
+
+const rank = (profiles, prof) => (!profiles ? 1 : profiles.includes(prof) ? 0 : 2);
+
 function greeting() { const hr = new Date().getHours(); return hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening'; }
 
 export default S.defineStudio({
@@ -32,13 +52,13 @@ export default S.defineStudio({
     const statsEl = h('div.stats');
     const heroTitle = h('h1');
     const hero = h('section.hero', h('div.row.wrap', { style: { alignItems: 'flex-start', gap: '20px' } },
-      h('div.grow', heroTitle, h('p', 'Concept art, 3D props, sound effects, music and voices from open-weight models running on this machine. Every result keeps its full recipe.')),
+      h('div.grow', heroTitle, h('p', 'Images, 3D, sound effects, music and voices for games, video, podcasts, social and film, from open-weight models running on this machine. Every result keeps its full recipe, and exports are normalised for where they will be used.')),
       statsEl));
 
     // idea box
     let target = S.prefs.get('home.target', 'image');
     const tgt = () => TARGETS.find(t => t.value === target) || TARGETS[0];
-    const box = new S.PromptBox({ memoryKey: 'home', placeholder: 'Type an idea in Thai or English, e.g. “หีบสมบัติไม้เก่า ประดับทอง” or “boss fight in a lava cave”', style: tgt().style,
+    const box = new S.PromptBox({ memoryKey: 'home', placeholder: PLACEHOLDER[S.store.profile] || PLACEHOLDER.general, style: tgt().style,
       onSubmit: () => box.run() });
     const segT = S.seg(TARGETS.map(t => ({ value: t.value, label: t.label })), target, v => { target = v; S.prefs.set('home.target', v); box.setStyle(tgt().style); });
     const sendBtn = btn('Open in studio', { icon: 'arrow-right', onClick: () => {
@@ -49,9 +69,24 @@ export default S.defineStudio({
       h('div.section-head', { style: { margin: 0 } }, h('h3', ic('sparkles', 17), 'Idea box'), h('span.spacer'), h('span.dim.hide-sm', { style: { fontSize: '12.5px' } }, 'Write it once, get a model-ready prompt')),
       h('div.row.wrap', h('span.field-label', 'For'), segT), box.el, h('div.row', h('span.spacer'), sendBtn));
 
-    const flows = h('div.flows', ...FLOWS.map(f => h('div.flow', { tabindex: 0, role: 'button', style: { '--fc': f.color }, on: { click: f.go, keydown: e => e.key === 'Enter' && f.go() } },
-      h('div.row', h('div.fi', ic(f.icon, 17)), h('h4.grow', f.title), ic('arrow-right', 16, 'dim')),
-      h('p', f.text), h('div.steps', ...f.steps.flatMap((s, i) => [i ? ic('chevron-right', 12) : null, ic(s, 14)])))));
+    const flowsEl = h('div.flows');
+    const drawFlows = () => {
+      const prof = S.store.profile;
+      const sorted = FLOWS.map((f, i) => [f, i]).filter(([f]) => prof === 'general' || rank(f.profiles, prof) < 2 || ['sfx', 'music', 'iterate'].includes(f.id))
+        .sort((a, b) => (prof === 'general' ? 0 : rank(a[0].profiles, prof) - rank(b[0].profiles, prof)) || a[1] - b[1]).map(x => x[0]);
+      flowsEl.replaceChildren(...sorted.map(f => h('div.flow', { tabindex: 0, role: 'button', style: { '--fc': f.color }, on: { click: f.go, keydown: e => e.key === 'Enter' && f.go() } },
+        h('div.row', h('div.fi', ic(f.icon, 17)), h('h4.grow', f.title), ic('arrow-right', 16, 'dim')),
+        h('p', f.text), h('div.steps', ...f.steps.flatMap((s2, i) => [i ? ic('chevron-right', 12) : null, ic(s2, 14)])))));
+      box.ta.placeholder = PLACEHOLDER[prof] || PLACEHOLDER.general;
+    };
+    const profEl = h('div.profile-strip');
+    const drawProfiles = () => {
+      profEl.replaceChildren(...Object.values(S.store.profiles).map(p => h(`button.profile-card${p.id === S.store.profile ? '.on' : ''}`, { type: 'button', title: p.summary,
+        on: { click: async () => { try { await S.setProfile(p.id); } catch (e) { S.toastError(e); } } } }, h('b', ic(p.icon || 'layers', 16), p.label), h('span', p.summary))));
+    };
+    S.bus.on('profile', () => { drawProfiles(); drawFlows(); });
+    drawProfiles(); drawFlows();
+    const flows = flowsEl;
 
     // recent
     const grid = new S.ResultsGrid({ selectable: false, onOpen: a => S.openAsset(a, { list: grid.assets().map(x => x.id) }),
@@ -100,6 +135,7 @@ export default S.defineStudio({
     el.append(h('div.page-pad.col', { style: { gap: '18px' } }, hero,
       h('div.home-grid',
         h('div.col', { style: { gap: '18px' } }, idea,
+          h('section', h('div.section-head', h('h3.section-title', ic('layers', 17), 'What are you making?'), h('span.spacer'), h('span.dim.hide-sm', { style: { fontSize: '12.5px' } }, 'Sets style presets, aspect ratios and export defaults')), profEl),
           h('section', h('div.section-head', h('h3.section-title', ic('rocket', 17), 'Quick start')), flows),
           h('section', h('div.section-head', h('h3.section-title', ic('history', 17), 'Recent assets'), h('span.spacer'), btn('Library', { size: 'sm', kind: 'ghost', icon: 'arrow-right', onClick: () => S.navigate('library') })), grid.el)),
         h('div.col', { style: { gap: '16px' } },

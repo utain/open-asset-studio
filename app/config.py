@@ -63,6 +63,13 @@ DEFAULT_SETTINGS: dict = {
         "temperature": 0.7,
     },
     "ui": {"show_test_models": False},
+    # Use-case profile (docs/CONTRACTS.md "Profiles"): game | video | podcast | social | film | general.
+    "profile": "general",
+    # Commercial-use filter: when `commercial_only` is on, models whose licence is not commercial are hidden /
+    # disabled in the pickers and refused by the job API. `strict` also refuses models flagged `license.verify`.
+    "license": {"commercial_only": False, "strict": False},
+    # Export overrides: {"preset": "<export preset id>"} replaces the profile's default export preset.
+    "export": {},
 }
 
 

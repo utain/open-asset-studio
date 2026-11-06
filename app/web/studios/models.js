@@ -7,7 +7,8 @@ const MODS = [{ value: '', label: 'All' }, { value: 'image', label: 'Image' }, {
 export default S.defineStudio({
   id: 'models', title: 'Models', icon: 'cpu', order: 80, section: 'system',
   async mount(el) {
-    const f = { mod: '', q: '', commercial: false, status: '', ...S.prefs.get('models.filters', {}) };
+    const f = { mod: '', q: '', lic: '', status: '', ...S.prefs.get('models.filters', {}) };
+    if (f.commercial) { f.lic = f.lic || 'commercial'; } delete f.commercial;
     let backends = [];
     const body = h('div.col', { style: { gap: '14px' } });
     const summary = h('div.row.wrap');
@@ -15,7 +16,12 @@ export default S.defineStudio({
     const modSeg = S.seg(MODS, f.mod, v => { f.mod = v; render(); });
     const statusSel = h('select.select', { style: { width: 'auto' }, 'aria-label': 'Status', on: { change: e => { f.status = e.target.value; render(); } } },
       ...[['', 'Any status'], ['ready', 'Ready'], ['missing', 'Missing weights / env'], ['no_worker', 'Coming soon'], ['broken', 'Broken'], ['cloud', 'Cloud (API)'], ['local', 'Local only']].map(([v, l]) => h('option', { value: v, selected: f.status === v }, l)));
-    const comm = S.toggle(f.commercial, v => { f.commercial = v; render(); }, 'Commercial use only');
+    const licSel = h('select.select', { style: { width: 'auto' }, 'aria-label': 'Licence', on: { change: e => { f.lic = e.target.value; render(); } } },
+      ...[['', 'Any licence'], ['commercial', 'Commercial OK'], ['check', 'Check licence'], ['noncommercial', 'Non-commercial'], ['usable', 'Commercial OK + check']].map(([v, l]) => h('option', { value: v, selected: f.lic === v }, l)));
+    const comm = S.toggle(S.store.license.commercial_only, async v => {
+      try { await S.setCommercialOnly(v); S.toast(v ? 'Non-commercial models are now hidden in the pickers and refused by the API.' : 'All models are available again.', { kind: 'ok', timeout: 2600 }); } catch (e) { S.toastError(e); comm.input.checked = !v; }
+    }, 'Commercial-safe models only');
+    S.bus.on('license', () => { comm.input.checked = S.store.license.commercial_only; });
     const refresh = btn('Re-check', { icon: 'refresh-cw', onClick: async () => {
       refresh.disabled = true;
       try { const r = await S.api.refreshModels(); backends = r.backends; await S.loadModels(); S.toast('Model status re-checked', { kind: 'ok', timeout: 1800 }); } catch (e) { S.toastError(e); }
@@ -25,7 +31,7 @@ export default S.defineStudio({
     const match = m => {
       if (m.test && !S.store.ui.show_test_models && f.mod !== 'test') { if (!f.q.includes('test')) return false; }
       if (f.mod && m.modality !== f.mod) return false;
-      if (f.commercial && !m.license?.commercial) return false;
+      if (f.lic === 'usable' ? S.licenseState(m.license) === 'noncommercial' : f.lic && S.licenseState(m.license) !== f.lic) return false;
       const st = m.status.status, code = m.status.code;
       if (f.status === 'ready' && st !== 'ready') return false;
       if (f.status === 'missing' && !['missing_weights', 'missing_env'].includes(st)) return false;
@@ -68,15 +74,17 @@ export default S.defineStudio({
         h('span.badge.outline', `${n(m => m.status.code === 'no_worker')} coming soon`),
         h('span.badge.warn', `${n(m => ['missing_weights', 'missing_env'].includes(m.status.status))} missing`),
         h('span.badge.err', `${n(m => m.status.status === 'broken' && m.status.code !== 'no_worker')} broken`),
-        h('span.badge.outline', `${n(m => m.license?.commercial)} commercial-safe`),
+        h('span.badge.ok', { title: 'Licence allows commercial use' }, ic('shield-check', 12), `${n(m => S.licenseState(m.license) === 'commercial')} commercial OK`),
+        h('span.badge.warn', { title: 'Commercial use looks allowed but the terms must be verified' }, ic('triangle-alert', 12), `${n(m => S.licenseState(m.license) === 'check')} check licence`),
+        h('span.badge.err', { title: 'Research / non-commercial licence' }, ic('ban', 12), `${n(m => S.licenseState(m.license) === 'noncommercial')} non-commercial`),
         h('span.badge.cloud', { title: 'Cloud models: enable and add keys on the Providers page' }, ic('cloud', 12), `${n(m => m.cloud && m.status.status === 'ready')}/${n(m => m.cloud)} cloud ready`));
-      const rows = list.map(m => h(`tr.mod-${m.modality}${m.status.code === 'no_worker' ? '.dimrow' : ''}`,
+      const rows = list.map(m => h(`tr.mod-${m.modality}${m.status.code === 'no_worker' ? '.dimrow' : ''}${S.isLicenseBlocked(m) ? '.lic-blocked' : ''}`,
         h('td', h('div.row', { style: { alignItems: 'flex-start' } }, h('div.mp-icon', ic(S.MOD_ICON[m.modality] || 'cpu', 17)),
           h('div', { style: { minWidth: '160px', maxWidth: '300px' } }, h('div.mname', m.name), h('div.dim.mono', { style: { fontSize: '11px' } }, m.id), h('div.muted', { style: { fontSize: '12px', marginTop: '3px' } }, m.summary || ''),
             m.cloud ? h('div.row.wrap', { style: { gap: '4px', marginTop: '4px' } }, S.cloudBadge(m), S.priceBadge(m)) : null))),
         h('td', taskChips(m)),
         h('td', h('div.feat', ...S.featureBadges(m))),
-        h('td', S.licenseBadge(m.license), h('div.dim', { style: { fontSize: '11.5px', marginTop: '4px', maxWidth: '170px' } }, m.license?.name), m.license?.note ? h('div.dim', { style: { fontSize: '11px', maxWidth: '170px' }, title: m.license.note }, ic('info', 11), ' terms') : null),
+        h('td', S.licenseBadge(m.license), h('div.dim', { style: { fontSize: '11.5px', marginTop: '4px', maxWidth: '170px' } }, m.license?.name), S.isLicenseBlocked(m) ? h('div.err', { style: { fontSize: '11.5px', marginTop: '3px', maxWidth: '170px' } }, 'Disabled by Commercial-safe filter') : null, m.license?.note ? h('div.dim', { style: { fontSize: '11px', maxWidth: '170px' }, title: m.license.note }, ic('info', 11), ' terms') : null),
         h('td.nowrap', m.cloud ? (m.cloud.local ? 'endpoint' : 'cloud') : m.memory_gb ? `${m.memory_gb} GB` : '–', h('div.dim', { style: { fontSize: '11.5px' } }, m.cloud ? 'no GPU' : m.device === 'cpu' ? 'CPU' : 'GPU')),
         h('td', h('div.muted', { style: { fontSize: '12px', maxWidth: '200px' } }, m.speed || '')),
         h('td', statusCell(m))));
@@ -102,9 +110,9 @@ export default S.defineStudio({
     }
     S.bus.on('models', render);
     el.append(h('div.page-pad.col', { style: { gap: '14px', maxWidth: '1600px' } },
-      h('div.section-head', { style: { margin: 0, flexWrap: 'wrap' } }, h('div.grow', h('h1.page-title', 'Models'), h('p.page-sub', 'What each model can do, whether it runs here, what you may use it for. ★ sets the default model of a task.')), refresh),
+      h('div.section-head', { style: { margin: 0, flexWrap: 'wrap' } }, h('div.grow', h('h1.page-title', 'Models'), h('p.page-sub', 'What each model can do, whether it runs here, and whether its output may be used commercially. ★ sets the default model of a task.')), refresh),
       summary,
-      h('div.row.wrap', { style: { gap: '8px' } }, q, modSeg, statusSel, h('label.row', { style: { gap: '6px', fontSize: '13px', color: 'var(--text-2)' } }, comm, 'Commercial use only')),
+      h('div.row.wrap', { style: { gap: '8px' } }, q, modSeg, statusSel, licSel, h('label.row', { style: { gap: '6px', fontSize: '13px', color: 'var(--text-2)' }, title: 'Hide non-commercial models in every studio picker and make the API refuse them' }, comm, ic('shield-check', 14), 'Commercial-safe models only')),
       body));
     try { const r = await S.api.models({ include_test: true }); backends = r.backends; } catch (e) { S.toastError(e); }
     render();

@@ -10,7 +10,8 @@
 #   negative     true when the target model takes a negative prompt (otherwise "" is requested)
 #   apply        where each output key goes in the studio form (param names); the UI uses it for Insert
 #   checks       content checks run on the answer (english, distinct, lyrics_markers, notes_lang, no_labels)
-#   chips        style chips: {id, label, hint}; the hint is appended to CONTEXT
+#   chips        style chips: {id, label, hint, profiles?: [game|video|podcast|social|film|general], default_for?: [profile]};
+#                the hint is appended to CONTEXT; `profiles` only orders / dims chips in the UI (use-case profile)
 
 preamble: |
   You are a prompt engineer inside a media-asset studio. You turn a user's short idea into a
@@ -26,8 +27,9 @@ preamble: |
   - Produce exactly N_VARIATIONS variations. Each variation is a complete, standalone prompt that
     differs meaningfully (material, mood, tempo, camera, timbre...), not a synonym swap, and is
     never identical to "prompt". Do not prefix strings with labels such as "Prompt:".
-  - CONTEXT describes the project (genre, art style). Use it only where it fits the TARGET;
-    never copy visual words into audio prompts or audio words into image prompts.
+  - CONTEXT describes the project (use case such as game, video, podcast, social or film; genre; art
+    style). Use it only where it fits the TARGET; never copy visual words into audio prompts or audio
+    words into image prompts.
 
 chipsets:
   image: &image_chips
@@ -180,7 +182,7 @@ styles:
       T-pose for characters, three-quarter front view, plain light-grey or white seamless background,
       soft even studio lighting, no cast shadows on the background, no cropping, no text, no extra
       objects, clear silhouette, clean readable forms, PBR-friendly materials.
-      "prompt": 40-80 words: subject + style (e.g. "stylized game asset, hand-painted" or
+      "prompt": 40-80 words: subject + style (e.g. "stylized hand-painted prop" or
       "realistic PBR") + materials/colors + pose/view + the 3D-ready framing terms above.
       "negative": "multiple subjects, cropped, cut off, busy background, scenery, text, watermark,
       logo, motion blur, depth of field, harsh shadows, extreme perspective, fisheye, lowres, deformed".
@@ -193,7 +195,7 @@ styles:
     negative: false
     apply: {prompt: prompt}
     system: |
-      You are given an image from a game-asset workflow. Describe it for re-generation.
+      You are given an image from a media-asset workflow (games, video, podcasts, social, film). Describe it for re-generation.
       "prompt": one dense English text-to-image prompt reproducing the image: subject, style, materials,
       colors, lighting, camera/framing, background. "negative": "".
       "variations": N alternative prompts: same subject, different style/material.
@@ -216,7 +218,7 @@ styles:
         3) space/perspective (close-mic, small stone room reverb, open field, distant),
         4) duration/shape (single hit, short 1-second, sustained loop, fade out, rhythmic),
         5) quality tags: "high quality, foley, sound effect, 44.1kHz stereo".
-      No music, melody, speech or vocals unless asked. Do not mention the game or visuals.
+      No music, melody, speech or vocals unless asked. Do not mention the project, the game or any visuals.
       "negative": "music, melody, speech, vocals, distortion, clipping, low quality, noise, hum" plus
       anything specific to avoid.
       Variations: change material, intensity, distance or tail length.
@@ -261,7 +263,8 @@ styles:
       never use visual/render words (lighting, 3D, render, 8k, textures, concept art, camera).
       "prompt": one comma-separated descriptive line, 15-40 words: genre and sub-genre, mood, lead and
       supporting instruments, production ("orchestral, cinematic, wide stereo"), tempo written as
-      "NNN BPM" and a key ("D minor"), game context ("RPG village theme, loopable").
+      "NNN BPM" and a key ("D minor"), and the usage when the idea or CONTEXT gives one ("RPG village theme, loopable",
+      "podcast intro sting, 6 seconds", "upbeat 15-second ad jingle", "bed under voice-over").
       "negative": tags to avoid (vocals, speech, distortion, low quality ...).
       Variations: alternative genre / tempo / instrumentation.
   music:
@@ -278,7 +281,8 @@ styles:
       textures, concept art, camera). Translate a visual idea into how it would sound as music.
       "prompt": comma-separated style tags, 8-20 tags: genre, sub-genre, mood, tempo in BPM, key
       (optional), lead instruments, vocal type (e.g. "female vocal, soft, breathy") or "instrumental",
-      production ("lo-fi", "orchestral, cinematic, wide stereo"), game context ("RPG village theme, loopable").
+      production ("lo-fi", "orchestral, cinematic, wide stereo"), and the usage when the idea or CONTEXT gives one
+      ("RPG village theme, loopable", "theme song for a travel vlog", "jingle for a coffee ad").
       "negative": tags to avoid (e.g. "harsh vocals, heavy distortion, out of tune").
       "lyrics": lyrics with section markers on their own lines, using exactly these markers:
         [intro] [verse] [pre-chorus] [chorus] [bridge] [outro] (use [inst] for instrumental parts).

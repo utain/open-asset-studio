@@ -37,7 +37,7 @@ from pathlib import Path
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
-from .. import config
+from .. import config, licensing, profiles
 from ..assets import AssetError, check_project
 from ..jobs import HANDLERS, TERMINAL, JobError
 from ..textgen import CLI_INFO, TOS_NOTE, TextGenError, parse_backend
@@ -66,6 +66,7 @@ TOOL_PARAMS = {
     "audio.process": {"trim", "fade", "loop", "normalize", "sample_rate", "channels", "format", "threshold_db", "pad_ms",
                       "fade_in_ms", "fade_out_ms", "xfade_ms", "lufs", "ceiling_db", "bit_depth", "quality"},
     "image.convert": {"format", "max_side", "square"},
+    "asset.export": {"preset", "audio", "image"},       # export preset: loudness / sample rate / format / crop; derived copies
 }
 
 
@@ -117,6 +118,8 @@ def tool_list_models(args: dict) -> dict:
     out = []
     for m in reg.list(task or None, modality or None, include_test=_show_test()):
         if m.get("modality") == "text" or "improve" in m["tasks"]:
+            continue
+        if licensing.blocked(m, c.settings):     # "Commercial-safe models only": the planner must not propose them
             continue
         st = m["status"]
         if ready_only and st["status"] != "ready":
@@ -416,7 +419,8 @@ def _mid(chat) -> str:
 
 
 # ===================================================================== the agent turn
-SYSTEM = """You are the planning assistant of a local media-asset studio (images, 3D models, sound) running on one machine.
+SYSTEM = """You are the planning assistant of a local media-asset studio running on one machine. It makes images, 3D models, sound
+effects, ambience, music, voices and video for games, video, podcasts, social content and film.
 You help the user turn a request into a PLAN of generation steps. You can ONLY look things up and propose; you can never
 run anything yourself. The user reviews, edits and approves the plan, then the studio runs it.
 
@@ -428,8 +432,11 @@ Rules:
 - Chain steps with inputs: {"step": "<earlier step id>", "use": "first"|"all"|"each"} ("each" = one job per output of that
   step, e.g. turn every concept image into a 3D shape). Existing assets: {"asset": "<id>"}.
 - Typical chains: concept image (t2i or rgba) -> shape -> texture for 3D props; sfx / ambience with 3 takes;
-  ambience then tool audio.loop; voice_design then tts. Write prompts in English, in the target model's style
+  ambience then tool audio.loop; voice_design then tts; thumbnail or b-roll stills (t2i at 16:9 or 9:16); podcast or video
+  intro stings and music beds (music, short); asset.export to deliver loudness-normalised audio or platform-sized images. Write prompts in English, in the target model's style
   (Stable Audio: comma-separated sound tags; images: concrete visual description, plain background for 3D).
+- Honour the USE CASE line when present (aspect ratios, lengths, loudness targets) and keep game support intact when the
+  request is about a game.
 - Keep plans short (usually <= 12 steps). Step ids: short snake_case. Give every step a clear title.
 - Reply briefly in the user's language. If something cannot be done with the ready models, say what is missing.
 """
@@ -465,7 +472,14 @@ def _catalog_text(project: str) -> str:
     assets = tool_search_assets(project, {"limit": 15})["assets"]
     al = [f"- {a['id']} {a['type']} '{a['name']}'" for a in assets]
     tools = ", ".join(d["tools"])
-    return ("READY MODELS:\n" + "\n".join(lines) + f"\nCPU TOOLS (step 'tool'): {tools}\nRECENT ASSETS:\n" + ("\n".join(al) or "- none"))
+    c = _core()
+    pid = profiles.profile_id(c.settings)
+    prof = profiles.PROFILES[pid]
+    use = (f"USE CASE: {prof['label']}. {prof['summary']} Default aspect ratio: {prof['aspect'] or 'model default'}.\n"
+           if pid != "general" else "")
+    if licensing.settings_of(c.settings)[0]:
+        use += "COMMERCIAL-SAFE MODE IS ON: only commercial-licence models are listed; never propose a non-commercial model.\n"
+    return (use + "READY MODELS:\n" + "\n".join(lines) + f"\nCPU TOOLS (step 'tool'): {tools}\nRECENT ASSETS:\n" + ("\n".join(al) or "- none"))
 
 
 PLAN_JSON_SCHEMA = {
@@ -771,10 +785,10 @@ def _start_run(project: str, cid: str, message_id: str, plan: dict) -> dict:
 # ===================================================================== writing tools
 WRITE_KINDS = {
     "barks": {
-        "system": ("You write short in-game voice lines (barks) for game characters. Each line is something the character says "
-                   "aloud: short (2-12 words usually), in character, varied, no stage directions inside the line, no quotes. "
+        "system": ("You write short voice lines for characters (in-game barks, short video / podcast / ad lines, animation one-liners). Each line is "
+                   "something the character says aloud: short (2-12 words usually), in character, varied, no stage directions inside the line, no quotes. "
                    "emotion = a short acting direction for a TTS model (e.g. 'gruff, amused', 'panicked, out of breath'). "
-                   "situation = when the line plays (e.g. combat_start, hit, idle, low_health, victory, greeting). Write the "
+                   "situation = when the line plays (e.g. combat_start, hit, idle, low_health, victory, greeting, intro, outro, cta). Write the "
                    "lines in the requested language; directions in English."),
         "schema": {"type": "object", "additionalProperties": False, "required": ["lines", "notes"], "properties": {
             "lines": {"type": "array", "minItems": 1, "items": {"type": "object", "additionalProperties": False, "required": ["line", "emotion", "situation"],
@@ -782,11 +796,11 @@ WRITE_KINDS = {
             "notes": {"type": "string"}}},
     },
     "sfx_events": {
-        "system": ("You are a game sound designer. From the game design text, list the sound effect events the game needs. "
-                   "event = snake_case file-friendly id (e.g. door_wood_open, ui_click_soft, footstep_stone). prompt = an English "
+        "system": ("You are a sound designer. From the design text (game design, video script, storyboard, podcast outline), list the sound effect events the project needs. "
+                   "event = snake_case file-friendly id (e.g. door_wood_open, ui_click_soft, footstep_stone, transition_whoosh_short). prompt = an English "
                    "text-to-audio prompt in Stable Audio style: comma-separated concrete sound tags (source, material, action, "
                    "space, character), no music unless asked. seconds = sensible clip length (0.3-10). category = ui | foley | "
-                   "combat | ambience | creature | magic | vehicle | misc. Avoid duplicates; cover the important interactions."),
+                   "combat | ambience | creature | magic | vehicle | transition | misc. Avoid duplicates; cover the important interactions."),
         "schema": {"type": "object", "additionalProperties": False, "required": ["events", "notes"], "properties": {
             "events": {"type": "array", "minItems": 1, "items": {"type": "object", "additionalProperties": False, "required": ["event", "prompt", "seconds", "category"],
                                                                  "properties": {"event": {"type": "string", "minLength": 1}, "prompt": {"type": "string", "minLength": 3},
@@ -794,8 +808,8 @@ WRITE_KINDS = {
             "notes": {"type": "string"}}},
     },
     "asset_list": {
-        "system": ("You are a game production planner. From the game design text, list the assets to make. kind = image (2D art, "
-                   "icons, concepts), mesh (3D prop / character), sfx, ambience, music or voice. name = short snake_case id. "
+        "system": ("You are a production planner. From the design text (game, video, podcast, social or film project), list the assets to make. kind = image (2D art, "
+                   "icons, concepts, thumbnails, b-roll stills, storyboard frames), mesh (3D prop / character), sfx, ambience, music or voice. name = short snake_case id. "
                    "prompt = an English generation prompt suited to the kind (images/meshes: concrete visual description, for 3D "
                    "a single object on a plain background; audio: comma-separated sound tags). notes = one short line on use."),
         "schema": {"type": "object", "additionalProperties": False, "required": ["assets", "notes"], "properties": {
@@ -806,12 +820,12 @@ WRITE_KINDS = {
             "notes": {"type": "string"}}},
     },
     "character_audio": {
-        "system": ("You are a game audio director. From a game character's description, infer how the character sounds and "
+        "system": ("You are an audio director. From a character's description (game, animation, film or video character), infer how the character sounds and "
                    "write the defaults for its audio kit. summary = one line: apparent gender, age, build, personality, role. "
                    "voice.description = an English voice-design prompt for a TTS voice-design model: gender, age, pitch, timbre, "
                    "pace, accent if any, emotion / attitude (e.g. 'A gruff, warm male voice in his fifties, low pitch, slow and "
                    "confident, slight rasp'); describe only the voice, never the looks. voice.sample_line = one natural in-character "
-                   "sentence (8-20 words) to audition the voice, in the requested language. barks = short in-game lines (2-12 words, "
+                   "sentence (8-20 words) to audition the voice, in the requested language. barks = short in-character lines (2-12 words, "
                    "no quotes, no stage directions) covering greeting, attack, hit, low_health, victory and idle, in the requested "
                    "language; emotion = a short English acting direction. sfx = the character's own sound effects (footsteps on a "
                    "fitting surface with the right weight / footwear, its weapon or ability swings and hits, armour / clothing / "
@@ -828,7 +842,7 @@ WRITE_KINDS = {
             "notes": {"type": "string"}}},
     },
     "asset_meta": {
-        "system": ("You name and tag game assets for a library. For each asset (given with its id, type, prompt and model) write: "
+        "system": ("You name and tag media assets (game, video, podcast, social, film) for a library. For each asset (given with its id, type, prompt and model) write: "
                    "name = short human-readable title (2-5 words, Title Case), tags = 3-6 lowercase single-word or kebab-case tags "
                    "(subject, material, style, use), description = one sentence for the team. Keep each id exactly as given."),
         "schema": {"type": "object", "additionalProperties": False, "required": ["items"], "properties": {
@@ -844,15 +858,15 @@ def write_prompt(kind: str, inp: dict, project: str) -> str:
         sit = ", ".join(inp.get("situations") or []) or "a mix of combat, idle, hurt, victory and greeting"
         return (f"CHARACTER: {inp.get('character') or 'unnamed'}\nDESCRIPTION: {inp.get('description') or '-'}\n"
                 f"PERSONALITY: {inp.get('personality') or '-'}\nSITUATIONS: {sit}\nCOUNT: {int(inp.get('count') or 8)} lines\n"
-                f"LANGUAGE: {inp.get('language') or 'en'}\nGAME CONTEXT: {inp.get('context') or '-'}")
+                f"LANGUAGE: {inp.get('language') or 'en'}\nPROJECT CONTEXT: {inp.get('context') or '-'}")
     if kind == "character_audio":
         return (f"CHARACTER: {str(inp.get('character') or '-')[:3000]}\n"
                 f"DETAILED VISUAL PROMPT: {str(inp.get('description') or '-')[:3000]}\n"
-                f"ART DIRECTION / GAME CONTEXT: {str(inp.get('context') or '-')[:1000]}\n"
+                f"ART DIRECTION / PROJECT CONTEXT: {str(inp.get('context') or '-')[:1000]}\n"
                 f"BARKS: {max(1, min(int(inp.get('count') or 6), 20))} lines\nSFX: {max(1, min(int(inp.get('sfx_count') or 4), 12))} events\n"
                 f"LANGUAGE (sample line + barks): {inp.get('language') or 'en'}")
     if kind in ("sfx_events", "asset_list"):
-        return f"GAME DESIGN TEXT:\n{str(inp.get('text') or '')[:12000]}\n\nAbout {int(inp.get('count') or 12)} items. EXTRA: {inp.get('context') or '-'}"
+        return f"DESIGN TEXT (game design, script, outline):\n{str(inp.get('text') or '')[:12000]}\n\nAbout {int(inp.get('count') or 12)} items. EXTRA: {inp.get('context') or '-'}"
     if kind == "asset_meta":
         rows = []
         for aid in (inp.get("asset_ids") or [])[:40]:
@@ -958,7 +972,7 @@ class TestReq(BaseModel):
 @router.post("/backends/test")
 def test_backend(req: TestReq):
     r = _core().textgen.generate(messages=[{"role": "system", "content": "You are a connectivity test. Answer in JSON."},
-                                           {"role": "user", "content": "Reply with ok=true and a three-word greeting for a game studio."}],
+                                           {"role": "user", "content": "Reply with ok=true and a three-word greeting for a media studio."}],
                                  schema={"type": "object", "additionalProperties": False, "required": ["ok", "greeting"],
                                          "properties": {"ok": {"type": "boolean"}, "greeting": {"type": "string"}}},
                                  backend=req.backend, purpose="write", temperature=0.2, max_tokens=60)

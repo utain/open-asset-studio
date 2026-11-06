@@ -1,7 +1,8 @@
 // Asset detail drawer: preview (image zoom on a checkerboard, GLB in model-viewer, audio waveform), metadata,
 // prompts, lineage, rating / tags / notes, send-to actions, regenerate, compare, export, delete.
 import { api, fileUrl, thumbUrl } from '../api.js';
-import { bus, store } from '../store.js';
+import { bus, store, defaultExportPreset } from '../store.js';
+import { exportDialog } from './exportdialog.js';
 import { h, ic, btn, stars, toast, toastError, confirmDialog, copyText, fmtBytes, fmtDur, fmtAgo, MOD_ICON, licenseBadge, menu, clear } from '../ui.js';
 import { sendActions, sendTo, getStudio } from '../studio.js';
 import { waveSurfer } from './audio.js';
@@ -152,6 +153,7 @@ function renderMetaOnly() {
     btn('', { size: 'sm', icon: 'more-horizontal', title: 'More', onClick: e => menu(e.currentTarget, [
       { label: 'Compare with…', icon: 'columns-2', onClick: () => import('./compare.js').then(m => m.pickAndCompare(a)) },
       { label: 'Export as zip', icon: 'package', onClick: () => exportAssets([a.id]) },
+      ['audio', 'voice', 'image'].includes(a.type) ? { label: 'Export / convert…', icon: 'sliders-horizontal', onClick: () => exportAssets([a.id], { options: true }) } : null,
       { label: 'Copy asset id', icon: 'copy', onClick: () => copyText(a.id) },
       { sep: true },
       { label: 'Delete', icon: 'trash-2', danger: true, onClick: async () => {
@@ -245,10 +247,16 @@ function tagEditor(a) {
   return box;
 }
 
-export async function exportAssets(ids) {
+/** Zip of the assets. With the profile's default export preset (settings) audio / images are converted into derived
+ *  files inside the zip (originals untouched); `{options: true}` opens the export dialog (preset, loudness, format…).
+ *  The game / general profiles default to "original": the stored files, exactly as before. */
+export async function exportAssets(ids, { options = false, preset } = {}) {
+  if (options) return exportDialog(ids);
   try {
-    const r = await api.exportAssets(ids);
-    toast(`${r.count} asset(s) · ${fmtBytes(r.bytes)}`, { kind: 'ok', title: 'Export ready' });
+    const p = preset || defaultExportPreset();
+    const r = await api.exportAssets(ids, p && p !== 'original' ? { export: { preset: p } } : {});
+    const label = p && p !== 'original' ? ` · ${store.exportPresets[p]?.label || p}` : '';
+    toast(`${r.count} asset(s) · ${fmtBytes(r.bytes)}${label}`, { kind: 'ok', title: 'Export ready' });
     const a = document.createElement('a'); a.href = r.url; a.download = r.name; document.body.append(a); a.click(); a.remove();
   } catch (e) { toastError(e, 'Export failed'); }
 }

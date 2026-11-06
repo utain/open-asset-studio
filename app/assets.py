@@ -14,6 +14,7 @@ import os
 import re
 import secrets
 import shutil
+import tempfile
 import threading
 import time
 import zipfile
@@ -429,9 +430,50 @@ class AssetStore:
         return {"asset": brief(meta), "ancestors": ancestors, "children": children, "siblings": siblings}
 
     # ------------------------------------------------------------ export
+    def convert_main(self, meta: dict, export: dict | None, out_dir: Path, stem: str) -> tuple[Path, dict] | None:
+        """Derived copy of an asset's main file per an export spec ({audio: {...}, image: {...}}, see app/profiles.py):
+        audio / voice -> media.export_audio (two-pass loudnorm, rate, bit depth, format), image -> media.export_image.
+        Returns (new file, report), or None when the spec has nothing for this asset type (meshes, video, no options).
+        The stored original is only read, never changed."""
+        if not export:
+            return None
+        d = self.asset_dir(meta["project"], meta["id"])
+        src = (d / meta["main"]).resolve()
+        if src.parent != d or not src.is_file():
+            raise AssetError("The asset's main file is missing.", 404)
+        if meta["type"] in ("audio", "voice") and export.get("audio"):
+            from .profiles import MUSIC_TASKS
+            return media.export_audio(src, out_dir, stem, export["audio"], music=meta.get("task") in MUSIC_TASKS)
+        if meta["type"] == "image" and export.get("image"):
+            return media.export_image(src, out_dir, stem, export["image"])
+        return None
+
+    def render(self, aid: str, export: dict | None, out_root: Path) -> dict:
+        """Convert one asset for download. Writes out_root/render-<token>/<name>.<ext> and returns
+        {token, name, path, report}. Raises AssetError when the export spec does not apply to this asset."""
+        meta = self.get(aid)
+        out_root.mkdir(parents=True, exist_ok=True)
+        for old in out_root.glob("render-*"):
+            if old.is_dir() and time.time() - old.stat().st_mtime > 3600:
+                shutil.rmtree(old, ignore_errors=True)
+        token = secrets.token_hex(6)
+        d = out_root / f"render-{token}"
+        try:
+            res = self.convert_main(meta, export, d, slug(meta.get("name") or meta["id"]))
+        except ValueError as e:      # media.ExportError
+            shutil.rmtree(d, ignore_errors=True)
+            raise AssetError(str(e)) from None
+        if res is None:
+            shutil.rmtree(d, ignore_errors=True)
+            raise AssetError(f"This export preset has no conversion for {meta['type']} assets (the original file is unchanged).")
+        path, report = res
+        return {"token": token, "name": path.name, "path": path, "report": report, "bytes": path.stat().st_size}
+
     def export(self, ids: list[str], out_dir: Path, *, naming: str = "name", include_meta: bool = True,
-               include_attachments: bool = True) -> Path:
-        """Zip of the selected assets: <type>/<name>.<ext> (+ attachments) and manifest.json."""
+               include_attachments: bool = True, convert: dict | None = None) -> Path:
+        """Zip of the selected assets: <type>/<name>.<ext> (+ attachments) and manifest.json.
+        `convert` ({audio: {...}, image: {...}}) re-encodes audio / images into derived files inside the zip (loudness,
+        sample rate, format, crop, size); without it the stored files are zipped as they are."""
         if not ids:
             raise AssetError("Select at least one asset to export.")
         metas = [self.get(i) for i in ids]
@@ -441,8 +483,11 @@ class AssetStore:
                 old.unlink(missing_ok=True)
         zpath = out_dir / f"export-{time.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(3)}.zip"
         manifest = {"exported": time.strftime("%Y-%m-%dT%H:%M:%S"), "tool": "Open Asset Studio", "assets": []}
+        if convert:
+            manifest["export"] = convert
         used: set[str] = set()
-        with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
+        tmp = tempfile.TemporaryDirectory(prefix="oas-export-")
+        with tmp, zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
             for m in metas:
                 d = self.asset_dir(m["project"], m["id"])
                 stem = slug(m.get("name") or m["id"]) if naming == "name" else m["id"]
@@ -457,13 +502,24 @@ class AssetStore:
                          "model": m.get("model"), "license": m.get("license"), "prompt": m.get("final_prompt") or m.get("prompt"),
                          "seed": m.get("seed"), "params": m.get("params"), "parents": m.get("parents"),
                          "tags": m.get("tags"), "rating": m.get("rating"), "info": m.get("info")}
+                conv = None
+                if convert:
+                    try:
+                        conv = self.convert_main(m, convert, Path(tmp.name) / m["id"], "converted")
+                    except ValueError as e:
+                        raise AssetError(f"{m.get('name') or m['id']}: {e}") from None
                 for f in m.get("files", []):
                     if f["role"] != "main" and not include_attachments:
                         continue
                     src = (d / f["name"]).resolve()
                     if src.parent != d or not src.is_file():
                         continue
-                    arc = f"{base}{Path(f['name']).suffix}" if f["role"] == "main" else f"{base}_{f['name']}"
+                    if f["role"] == "main" and conv:
+                        src = conv[0]
+                        arc = f"{base}{src.suffix}"
+                        entry["export"] = {**conv[1], "original": f["name"]}
+                    else:
+                        arc = f"{base}{Path(f['name']).suffix}" if f["role"] == "main" else f"{base}_{f['name']}"
                     z.write(src, arc)
                     entry["files"].append(arc)
                 if include_meta:

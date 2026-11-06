@@ -1,7 +1,7 @@
 // App shell: sidebar (bottom bar on phones), top bar (project switcher, search, queue indicator, memory meter,
 // theme), page containers per studio, routing and send-to delivery.
 import { api } from './api.js';
-import { store, bus, prefs, setProject } from './store.js';
+import { store, bus, prefs, setProject, getProfile, setProfile, setCommercialOnly } from './store.js';
 import { h, ic, btn, menu, popover, promptDialog, toast, toastError, fmtAgo } from './ui.js';
 import { allStudios, getStudio, parseHash, takePayload, navigate, _setCurrent } from './studio.js';
 import { JobList } from './components/jobs.js';
@@ -19,7 +19,7 @@ export function applyTheme(t) {
 
 export function buildShell(root) {
   const sidebar = h('nav.sidebar', { 'aria-label': 'Main' });
-  sidebar.append(h('div.brand', h('div.brand-mark', ic('boxes', 18)), h('div.brand-name', 'Asset Studio', h('small', 'Game assets · local'))));
+  sidebar.append(h('div.brand', h('div.brand-mark', ic('boxes', 18)), h('div.brand-name', 'Open Asset Studio', h('small', 'Media assets · local'))));
   const sections = [['', null], ['Create', 'studio'], ['Workspace', 'workspace'], ['System', 'system']];
   const list = allStudios().filter(s => s.nav !== false);
   for (const [label, sec] of sections) {
@@ -68,7 +68,22 @@ export function buildShell(root) {
   themeTop.classList.add('hide-sm');
   const drawTheme = t => themeTop.replaceChildren(ic(t === 'light' ? 'moon' : 'sun', 17));
   bus.on('theme', drawTheme); drawTheme(document.documentElement.dataset.theme);
-  const top = h('header.topbar', titleEl, projBtn, searchBox, h('span.spacer'), queueBtn, mem, themeTop);
+  // use-case profile (game | video | podcast | social | film | general) and the "Commercial-safe models only" switch
+  const profBtn = h('button.pill-btn', { type: 'button', title: 'Use-case profile: style presets, aspect ratios and export defaults', on: { click: () => profileMenu(profBtn) } });
+  const drawProf = () => { const p = getProfile(); profBtn.replaceChildren(ic(p.icon || 'layers', 16), h('span.lbl.hide-sm', p.label || p.id), ic('chevron-down', 14)); };
+  bus.on('profile', drawProf); drawProf();
+  const licBtn = h('button.pill-btn.lic-toggle', { type: 'button', on: { click: async () => {
+    try { await setCommercialOnly(!store.license.commercial_only); toast(store.license.commercial_only ? 'Commercial-safe models only: non-commercial models are hidden and refused.' : 'All models are available again.', { kind: 'ok', timeout: 2600 }); } catch (e) { toastError(e); }
+  } } });
+  const drawLic = () => {
+    const on = store.license.commercial_only;
+    licBtn.classList.toggle('on', on);
+    licBtn.title = on ? 'Commercial-safe models only: ON. Non-commercial models are hidden in the pickers and refused by the API. Click to turn off.' : 'Commercial-safe models only: off. Click to hide / refuse non-commercial models.';
+    licBtn.setAttribute('aria-pressed', String(on));
+    licBtn.replaceChildren(ic(on ? 'shield-check' : 'shield-off', 16), h('span.lbl.hide-sm', on ? 'Commercial-safe' : 'All models'));
+  };
+  bus.on('license', drawLic); drawLic();
+  const top = h('header.topbar', titleEl, projBtn, searchBox, h('span.spacer'), profBtn, licBtn, queueBtn, mem, themeTop);
 
   mainEl = h('main.main', { id: 'main' });
   // ----- bottom bar (phones)
@@ -86,6 +101,13 @@ export function buildShell(root) {
   root.replaceChildren(sidebar, top, mainEl, bottom);
   addEventListener('hashchange', route);
   bus.on('route', r => show(r));
+}
+
+function profileMenu(anchor) {
+  const cur = store.profile;
+  menu(anchor, [{ head: 'Profile: what are you making?' },
+    ...Object.values(store.profiles).map(p => ({ label: p.label, sub: p.summary, icon: p.icon, on: p.id === cur,
+      onClick: async () => { try { await setProfile(p.id); toast(`Profile: ${p.label}`, { kind: 'ok', timeout: 1800 }); } catch (e) { toastError(e); } } }))]);
 }
 
 function recount() {

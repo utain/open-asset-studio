@@ -1,5 +1,6 @@
 // DOM helpers, toasts, popovers, menus, modals, formatters. No framework: h() builds elements.
 import { icon } from './icons.js';
+import { licenseState, LICENSE_LABEL, LICENSE_HELP } from './license.js';
 export { icon };
 
 // append / prepend / replaceChildren ignore null, undefined and false (so `cond ? el : null` works everywhere).
@@ -206,7 +207,9 @@ export function statusBadge(st) {
 }
 export function licenseBadge(lic) {
   if (!lic) return null;
-  return lic.commercial
-    ? h('span.badge.ok', { title: lic.name + (lic.note ? ` — ${lic.note}` : '') }, ic('shield-check', 12), lic.verify ? 'Commercial?' : 'Commercial')
-    : h('span.badge.err', { title: lic.name + (lic.note ? ` — ${lic.note}` : '') }, ic('ban', 12), 'Non-commercial');
+  const st = licenseState(lic);
+  const tip = `${lic.name || 'Licence'}${lic.note ? ` — ${lic.note}` : ''}\n${LICENSE_HELP[st]}`;
+  const ico = { commercial: 'shield-check', check: 'triangle-alert', noncommercial: 'ban' }[st];
+  const cls = { commercial: 'ok', check: 'warn', noncommercial: 'err' }[st];
+  return h(`span.badge.${cls}.lic-${st}`, { title: tip }, ic(ico, 12), LICENSE_LABEL[st]);
 }

@@ -1,65 +1,85 @@
 # Sound studio additions to the prompt improver (merged per style id over prompts/core.yaml).
-# Only `chips` are extended here: game-audio style chips for every sound / music / voice target, so the ✨ panel
-# offers the same vocabulary a sound designer uses (impact, UI, foley, creature, loopable ambience, battle music…).
+# Only `chips` are extended here: style chips for every sound / music / voice target, so the ✨ panel offers the same
+# vocabulary a sound designer uses (impact, UI, foley, loopable ambience, battle music, podcast stings, ad jingles, music
+# beds, video transitions…). A chip may carry `profiles: [game|video|podcast|social|film|general]`: the web UI lists chips of
+# the active use-case profile first and dims chips tagged only for other profiles (no tag = every profile).
 # The formats themselves (SA3 tags + negative, MiniMax caption + lyric structure, TTS instruct / tags) stay in core.yaml.
 
 chipsets:
   sound_sfx: &sound_sfx
     - {id: impact, label: Impact, hint: "short punchy impact, sharp transient, tight low end"}
-    - {id: ui, label: UI, hint: "clean game UI sound, short, clear, no reverb tail"}
-    - {id: ui_confirm, label: UI confirm, hint: "positive UI confirm / select sound, bright, short rising tone"}
-    - {id: pickup, label: Pickup / coin, hint: "item pickup or coin collect sound, sparkly, short, satisfying"}
-    - {id: foley, label: Foley, hint: "realistic foley recording, close-mic, dry"}
-    - {id: footsteps, label: Footsteps, hint: "footsteps, rhythmic, surface material clear"}
-    - {id: whoosh, label: Whoosh, hint: "fast whoosh / swish, air movement, short"}
-    - {id: weapon, label: Weapon, hint: "weapon sound, metallic, aggressive"}
-    - {id: explosion, label: Explosion, hint: "explosion, deep boom, debris tail"}
-    - {id: magic, label: Magic, hint: "fantasy magic spell sound, shimmering"}
-    - {id: creature, label: Creature, hint: "creature vocalization, non-human, no speech"}
-    - {id: hurt, label: Hit / hurt, hint: "character hit reaction / damage sound, non-verbal, short"}
+    - {id: ui, label: UI, hint: "clean game UI sound, short, clear, no reverb tail", profiles: [game]}
+    - {id: ui_confirm, label: UI confirm, hint: "positive UI confirm / select sound, bright, short rising tone", profiles: [game]}
+    - {id: pickup, label: Pickup / coin, hint: "item pickup or coin collect sound, sparkly, short, satisfying", profiles: [game]}
+    - {id: foley, label: Foley, hint: "realistic foley recording, close-mic, dry", profiles: [film, video, game]}
+    - {id: footsteps, label: Footsteps, hint: "footsteps, rhythmic, surface material clear", profiles: [game, film, video]}
+    - {id: whoosh, label: Whoosh, hint: "fast whoosh / swish, air movement, short", profiles: [video, social, film, game]}
+    - {id: weapon, label: Weapon, hint: "weapon sound, metallic, aggressive", profiles: [game]}
+    - {id: explosion, label: Explosion, hint: "explosion, deep boom, debris tail", profiles: [game, film, video]}
+    - {id: magic, label: Magic, hint: "fantasy magic spell sound, shimmering", profiles: [game]}
+    - {id: creature, label: Creature, hint: "creature vocalization, non-human, no speech", profiles: [game, film]}
+    - {id: hurt, label: Hit / hurt, hint: "character hit reaction / damage sound, non-verbal, short", profiles: [game]}
     - {id: mechanical, label: Mechanical, hint: "mechanical device, gears, servo, clicks"}
     - {id: scifi, label: Sci-fi, hint: "futuristic sci-fi sound, synthetic, energy"}
-    - {id: retro, label: Retro 8-bit, hint: "retro 8-bit chiptune sound effect"}
+    - {id: retro, label: Retro 8-bit, hint: "retro 8-bit chiptune sound effect", profiles: [game]}
     - {id: ambience, label: Loopable ambience, hint: "continuous ambience bed, sustained, loopable, no sudden events"}
+    - {id: transition, label: Video transition, hint: "smooth video transition whoosh with a soft riser into the cut, 1-2 seconds", profiles: [video, social]}
+    - {id: riser, label: Riser / build, hint: "tension riser building to a hit, 3-6 seconds, clean end on the peak", profiles: [video, film, social]}
+    - {id: cine_hit, label: Cinematic hit, hint: "cinematic impact hit with a long reverb tail, deep sub, for trailers and title cards", profiles: [film, video]}
+    - {id: social_pop, label: Social pop / click, hint: "short pop, swipe or notification click for social video, bright, dry, under 1 second", profiles: [social]}
   sound_amb: &sound_amb
     - {id: ambience, label: Loopable ambience, hint: "continuous ambience bed, steady, seamless loop, no sudden events"}
-    - {id: forest, label: Forest, hint: "forest ambience: wind in leaves, distant birds, insects"}
-    - {id: dungeon, label: Dungeon, hint: "dungeon / cave ambience: dripping water, low drone, stone reverb"}
-    - {id: city, label: City / town, hint: "town ambience: distant crowd murmur, footsteps, carts (no intelligible speech)"}
-    - {id: night, label: Night, hint: "night ambience: crickets, soft wind, distant owl"}
-    - {id: rain, label: Rain / storm, hint: "rain ambience, steady rainfall, distant thunder"}
-    - {id: interior, label: Interior / room tone, hint: "interior room tone, quiet hum, subtle"}
-    - {id: scifi, label: Sci-fi ship, hint: "spaceship interior hum, machinery, air vents"}
-    - {id: battle, label: Battlefield, hint: "distant battlefield ambience: clashes, shouts as texture, no clear speech"}
+    - {id: forest, label: Forest, hint: "forest ambience: wind in leaves, distant birds, insects", profiles: [game, film, video]}
+    - {id: dungeon, label: Dungeon, hint: "dungeon / cave ambience: dripping water, low drone, stone reverb", profiles: [game]}
+    - {id: city, label: City / town, hint: "town ambience: distant crowd murmur, footsteps, carts (no intelligible speech)", profiles: [game, film, video]}
+    - {id: night, label: Night, hint: "night ambience: crickets, soft wind, distant owl", profiles: [game, film, video]}
+    - {id: rain, label: Rain / storm, hint: "rain ambience, steady rainfall, distant thunder", profiles: [game, film, video]}
+    - {id: interior, label: Interior / room tone, hint: "interior room tone, quiet hum, subtle", profiles: [film, video, podcast]}
+    - {id: scifi, label: Sci-fi ship, hint: "spaceship interior hum, machinery, air vents", profiles: [game, film]}
+    - {id: battle, label: Battlefield, hint: "distant battlefield ambience: clashes, shouts as texture, no clear speech", profiles: [game]}
     - {id: water, label: Water, hint: "water ambience: river, waves or stream"}
+    - {id: bed, label: Ambience bed, hint: "very soft wide ambience bed under voice-over, non-distracting, no sudden events, no clear speech", profiles: [podcast, video, film]}
+    - {id: cafe, label: Cafe / crowd, hint: "busy cafe background: murmur, cups and cutlery, no intelligible speech", profiles: [video, film, podcast]}
+    - {id: street, label: Street / traffic, hint: "city street ambience: distant traffic, passers-by, occasional horn, no intelligible speech", profiles: [video, film]}
+    - {id: roomtone, label: Room tone, hint: "clean room tone, low noise floor, for dialogue editing and gaps", profiles: [film, video, podcast]}
   sound_music: &sound_music
-    - {id: loopable, label: Loopable, hint: "seamless loopable game track, consistent energy, no ending, no fade out"}
-    - {id: battle, label: Battle music, hint: "battle music, driving percussion, intense, 140-160 BPM"}
-    - {id: boss, label: Boss fight, hint: "boss fight theme, epic, dramatic, heavy"}
-    - {id: exploration, label: Exploration, hint: "exploration theme, calm, wondrous, open"}
-    - {id: menu, label: Menu / title, hint: "main menu theme, inviting, memorable motif"}
-    - {id: town, label: Town / village, hint: "village / town theme, cozy, warm, acoustic"}
-    - {id: tension, label: Stealth / tension, hint: "tense stealth music, sparse, pulsing, suspense"}
-    - {id: victory, label: Victory sting, hint: "short victory fanfare / stinger, triumphant, 5-10 seconds"}
+    - {id: loopable, label: Loopable, hint: "seamless loopable game track, consistent energy, no ending, no fade out", profiles: [game]}
+    - {id: battle, label: Battle music, hint: "battle music, driving percussion, intense, 140-160 BPM", profiles: [game]}
+    - {id: boss, label: Boss fight, hint: "boss fight theme, epic, dramatic, heavy", profiles: [game]}
+    - {id: exploration, label: Exploration, hint: "exploration theme, calm, wondrous, open", profiles: [game]}
+    - {id: menu, label: Menu / title, hint: "main menu theme, inviting, memorable motif", profiles: [game]}
+    - {id: town, label: Town / village, hint: "village / town theme, cozy, warm, acoustic", profiles: [game]}
+    - {id: tension, label: Stealth / tension, hint: "tense stealth music, sparse, pulsing, suspense", profiles: [game, film]}
+    - {id: victory, label: Victory sting, hint: "short victory fanfare / stinger, triumphant, 5-10 seconds", profiles: [game]}
     - {id: sad, label: Sad / emotional, hint: "emotional, melancholic, slow, piano and strings"}
-    - {id: chiptune, label: Chiptune, hint: "chiptune, 8-bit, retro console"}
-    - {id: orchestral, label: Orchestral, hint: "orchestral, cinematic, wide stereo"}
+    - {id: chiptune, label: Chiptune, hint: "chiptune, 8-bit, retro console", profiles: [game]}
+    - {id: orchestral, label: Orchestral, hint: "orchestral, cinematic, wide stereo", profiles: [film, game, video]}
     - {id: thai, label: Thai traditional, hint: "Thai traditional instruments: ranat ek, khim, pi, ching, khong wong"}
-    - {id: lofi, label: Lo-fi, hint: "lo-fi, mellow, soft"}
+    - {id: lofi, label: Lo-fi, hint: "lo-fi, mellow, soft", profiles: [podcast, video, social]}
     - {id: instrumental, label: Instrumental, hint: "instrumental, no vocals"}
+    - {id: podcast_sting, label: Podcast intro / outro sting, hint: "short podcast intro or outro sting, 5-8 seconds, clear start and a clean natural ending, warm and memorable, no vocals", profiles: [podcast, video]}
+    - {id: ad_jingle, label: Ad jingle, hint: "catchy advertising jingle, upbeat, bright memorable hook, 15-30 seconds, clean button ending", profiles: [social, video]}
+    - {id: bed_music, label: Music bed, hint: "unobtrusive background music bed under voice-over, steady, low dynamics, no strong lead melody, leaves room for speech", profiles: [podcast, video, social]}
+    - {id: hook, label: Short hook, hint: "short punchy hook, 3-6 seconds, immediate energy, ends decisively", profiles: [social]}
+    - {id: documentary, label: Documentary underscore, hint: "documentary underscore, gentle piano and strings, restrained, evolving slowly", profiles: [video, film, podcast]}
+    - {id: corporate, label: Corporate / upbeat, hint: "upbeat corporate background track, light percussion, optimistic, clean mix", profiles: [video, social]}
+    - {id: score, label: Film score cue, hint: "cinematic film score cue, dynamic arc, wide stereo, strings and low brass", profiles: [film]}
   sound_voice: &sound_voice
-    - {id: hero, label: Hero, hint: "heroic protagonist, confident"}
-    - {id: villain, label: Villain, hint: "menacing villain, cold"}
-    - {id: narrator, label: Narrator, hint: "calm storyteller narrator"}
-    - {id: merchant, label: Merchant / NPC, hint: "friendly shopkeeper NPC, chatty"}
-    - {id: child, label: Child, hint: "young child character"}
-    - {id: elder, label: Elder, hint: "elderly wise character"}
-    - {id: robot, label: Robot, hint: "robotic, synthetic character"}
-    - {id: creature, label: Creature, hint: "monster / creature voice"}
-    - {id: shout, label: Battle cry, hint: "shouting battle bark, high energy"}
-    - {id: hurt, label: Pain / effort, hint: "pain, effort grunt, short bark"}
-    - {id: whisper, label: Whisper, hint: "whispering, intimate"}
+    - {id: hero, label: Hero, hint: "heroic protagonist, confident", profiles: [game]}
+    - {id: villain, label: Villain, hint: "menacing villain, cold", profiles: [game]}
+    - {id: narrator, label: Narrator, hint: "calm storyteller narrator", profiles: [video, podcast, film, social]}
+    - {id: merchant, label: Merchant / NPC, hint: "friendly shopkeeper NPC, chatty", profiles: [game]}
+    - {id: child, label: Child, hint: "young child character", profiles: [game, film]}
+    - {id: elder, label: Elder, hint: "elderly wise character", profiles: [game, film]}
+    - {id: robot, label: Robot, hint: "robotic, synthetic character", profiles: [game, film]}
+    - {id: creature, label: Creature, hint: "monster / creature voice", profiles: [game, film]}
+    - {id: shout, label: Battle cry, hint: "shouting battle bark, high energy", profiles: [game]}
+    - {id: hurt, label: Pain / effort, hint: "pain, effort grunt, short bark", profiles: [game]}
+    - {id: whisper, label: Whisper, hint: "whispering, intimate", profiles: [film, podcast, video]}
     - {id: tutorial, label: Tutorial / UI voice, hint: "clear neutral announcer voice for tutorials and UI"}
+    - {id: host, label: Podcast host, hint: "warm conversational podcast host, close-mic, friendly, natural pace", profiles: [podcast]}
+    - {id: ad_announcer, label: Ad announcer, hint: "energetic advertising announcer, bright and clear, confident call to action", profiles: [social, video]}
+    - {id: documentary_voice, label: Documentary narrator, hint: "calm documentary narrator, authoritative, measured pace, low warmth", profiles: [video, film]}
 
 styles:
   sfx: {chips: *sound_sfx}

@@ -6,6 +6,15 @@ import { store, bus, promptStyleOf, prefs } from '../store.js';
 import { h, ic, btn, toastError, isThai, copyText, seg } from '../ui.js';
 import { backendPicker, generatedBy } from './writer.js';
 
+/** Order a style's chips for the active use-case profile (chips carry `profiles: [...]` in prompts/*.yaml): chips for
+ *  this profile first, untagged chips next, chips tagged only for other profiles last. `general` keeps the file order;
+ *  `game` treats untagged chips like game chips, so it keeps today's order. */
+export function profileChips(chips, profile = store.profile) {
+  if (!profile || profile === 'general') return chips;
+  const rank = c => (c.profiles?.includes(profile) ? 0 : !c.profiles ? (profile === 'game' ? 0 : 1) : 2);
+  return chips.map((c, i) => [c, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(x => x[0]);
+}
+
 let stylesP = null;
 export function improveStyles() { if (!stylesP) stylesP = api.improveStyles().catch(e => { stylesP = null; throw e; }); return stylesP; }
 
@@ -40,6 +49,7 @@ export class PromptBox {
       this.panel, this.negWrap);
     this.setModel(this.model, this.task);
     this._count();
+    bus.on('profile', () => { if (!this.panel.classList.contains('hidden')) this._renderPanel(this.lastResult); });
   }
   get value() { return this.ta.value.trim(); }
   get negative() { return this.negWrap.classList.contains('hidden') ? '' : this.neg.value.trim(); }
@@ -62,6 +72,14 @@ export class PromptBox {
     this.panel.classList.toggle('hidden', !show);
     if (show) this._renderPanel();
   }
+  /** Chips with `default_for: [profile]` start selected the first time a studio box is used under that profile. */
+  _seed(c) {
+    if (!c.default_for?.includes(store.profile)) return false;
+    const key = `chips.seeded.${this.o.memoryKey || 'default'}.${store.profile}.${c.id}`;
+    if (prefs.get(key, false)) return false;
+    prefs.set(key, true);
+    return true;
+  }
   async _renderPanel(result = this.lastResult, state = null) {
     const p = this.panel; p.replaceChildren();
     const styleId = this.targetStyle();
@@ -73,8 +91,9 @@ export class PromptBox {
       h('span.spacer'), btn('', { icon: 'x', size: 'sm', kind: 'ghost', title: 'Close', onClick: () => this.togglePanel(false) })));
     if (!styleId) { p.append(h('div.imp-notes', 'Pick a model first: the improver writes the prompt format that model understands.')); return; }
     const chipsEl = h('div.chips');
-    for (const c of style?.chips || []) {
-      chipsEl.append(h(`button.chip${this.chips.has(c.id) ? '.on' : ''}`, { type: 'button', title: c.hint, on: { click: e => {
+    for (const c of profileChips(style?.chips || [])) {
+      if (this._seed(c)) this.chips.add(c.id);
+      chipsEl.append(h(`button.chip${this.chips.has(c.id) ? '.on' : ''}${c.profiles && !c.profiles.includes(store.profile) && store.profile !== 'general' ? '.chip-off' : ''}`, { type: 'button', title: c.hint, on: { click: e => {
         if (this.chips.has(c.id)) this.chips.delete(c.id); else this.chips.add(c.id);
         e.currentTarget.classList.toggle('on'); prefs.set(`chips.${this.o.memoryKey || 'default'}`, [...this.chips]);
       } } }, c.label));
@@ -127,7 +146,7 @@ export class PromptBox {
     this._renderPanel(this.lastResult, 'busy');
     try {
       const body = { text: this.improved && text === this.improved.applied ? this.improved.original : text, target_style: this.style || undefined,
-        model_id: this.model?.id, task: this.task, n: this.n, chips: [...this.chips], context: this.o.context?.() || '', image_asset: img || undefined, backend: this.backend || undefined };
+        model_id: this.model?.id, task: this.task, n: this.n, chips: [...this.chips], context: [store.profiles[store.profile]?.context, this.o.context?.()].filter(Boolean).join(' '), image_asset: img || undefined, backend: this.backend || undefined };
       const r = await api.improve(body);
       this.lastResult = r;
       this._renderPanel(r);

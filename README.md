@@ -1,7 +1,18 @@
 # Open Asset Studio
 
-A local, offline web studio for game teams: **images, 3D models and sound** from open-weight models, in one app
-with a shared asset library, a job queue that keeps one GPU busy safely, and a built-in prompt improver.
+A local, offline web studio for **assets for any medium**: images, 3D models, sound and video from
+open-weight models, in one app with a shared asset library, a job queue that keeps one GPU busy safely, and a
+built-in prompt improver. Make what a production needs:
+
+* **Games**: transparent RGBA sprites and icons, seamless loops, GLB props, SFX sheets, barks, music.
+* **Video and film**: thumbnails, b-roll stills, storyboard frames and concept art, SFX, foley, music beds and
+  stings, voice-over, loudness-matched masters.
+* **Podcasts**: cover art, intro / outro stings, music beds, narrator and host voices, -16 LUFS delivery.
+* **Social and ads**: vertical 9:16 stills, product shots, jingles and hooks, -14 LUFS delivery.
+
+Pick a **profile** (game, video, podcast, social, film or general) in the top bar and the studio puts the right style
+presets first, defaults to the right aspect ratio, and exports with the right loudness, sample rate and image size
+(see [Profiles and export presets](#profiles-export-presets-and-the-commercial-safe-filter)).
 
 It drives about 100 open-weight models through small per-model worker processes: image generation and editing,
 Hunyuan3D image-to-3D, and 65+ audio models covering SFX, ambience, music, songs, TTS, voice design, voice cloning,
@@ -59,7 +70,7 @@ run_studio.sh            start script (127.0.0.1:7860, logs/studio.log)
 models.yaml              model registry: tasks, backends (venvs), models (features, license, memory, params, presets)
 models.d/*.yaml          drop-in registry files (merged after models.yaml): sound, tts_light, tts_clone_a/b, music, sfx_more, foley, omni, vc_sing, image, cloud
                          (models may declare `input_slots`, the extra audio / voice / video inputs their worker reads)
-settings.json            user settings: default model per task, memory margin, idle timeouts, LLM config
+settings.json            user settings: profile, commercial-safe filter, default model per task, memory margin, idle timeouts, LLM config
 prompts/*.yaml           prompt-improver templates per prompt_style (core.yaml + studio files)
 app/                     FastAPI core (envs/core)
   main.py                REST + SSE API, static web UI
@@ -69,6 +80,7 @@ app/                     FastAPI core (envs/core)
   memory.py              MemAvailable checks, loaded-model table, LRU eviction (LLM first)
   workers.py procs.py    worker subprocesses (JSON lines over stdin/stdout), leak-proof spawning
   assets.py media.py     projects/assets on disk, thumbnails, waveforms, LUFS, export zip, safe file serving
+  profiles.py licensing.py  use-case profiles + export presets; the commercial-use licence filter
   improver.py            llama-server supervisor + templates + JSON-schema output + checks
   providers.py cloud/    optional cloud APIs: keys (data/secrets.json, 600), Allow-cloud switch, budget, adapters
   plugins/               server-side extensions (job handlers, CPU tools, extra routes)
@@ -91,13 +103,40 @@ Clone, **Convert** = voice conversion, **Reply** = speech-to-speech answer with 
 HunyuanVideo-Foley, ThinkSound; the take card plays the muxed video) and Sheets. Video files (mp4 / mov / webm / mkv)
 are a library asset type with a poster and a player. The 65 added audio models: `docs/research/audio_more/README.md`.
 
-Pages: **Home** (quick-start flows, idea box with the improver, recent assets, queue, memory), **Image / 3D /
+Pages: **Home** (profile chooser, quick-start flows, idea box with the improver, recent assets, queue, memory), **Image / 3D /
 Sound / Pipelines** (studios), **Library** (filters, search, rate, tag, compare, export, upload), **Models**
 (capability matrix, status + fix command, license, defaults per task, backend deep check), **Queue & System**
-(jobs, loaded models, workers, prompt LLM, logs, self-test), **Providers** (optional cloud APIs: keys, Allow
+(jobs, loaded models, workers, prompt LLM, studio settings, logs, self-test), **Providers** (optional cloud APIs: keys, Allow
 cloud switch (off by default), budget + confirm threshold, spend, prices, your OpenAI-compatible endpoints,
 subscription CLIs; docs/CONTRACTS.md section 8), **Diagnostics** (a full studio page on the CPU test
 models: the reference for new studios).
+
+## Profiles, export presets and the commercial-safe filter
+
+**Profiles.** The profile button in the top bar (and Home, and Queue & System > Studio settings) selects what you are
+making: `game`, `video`, `podcast`, `social`, `film` or `general` (default). It is stored in `settings.json`
+(`"profile"`). A profile changes defaults only, never what a model can do:
+
+| profile | style chips first | default aspect | default export |
+|---|---|---|---|
+| general | file order | model default | original files |
+| game | RGBA sprites, loops, 3D-ready, pixel art, icons | model default (1:1) | original files (today's behaviour) |
+| video | thumbnail, b-roll, product shot, cinematic, music beds, transitions | 16:9 | 48 kHz 24-bit WAV at -14 LUFS, 1920x1080 PNG |
+| podcast | cover art, intro / outro stings, beds, host voice | 1:1 | 44.1 kHz MP3 at -16 LUFS, 3000x3000 JPEG |
+| social | social vertical, product shot, ad jingle, hooks | 9:16 | 48 kHz MP3 at -14 LUFS, 1080x1920 JPEG |
+| film | storyboard, concept art, score cues, room tone | 16:9 | 48 kHz 24-bit WAV at -23 LUFS, PNG |
+
+**Export presets.** Export (library, studios, asset panel > Export / convert...) can convert audio and images on the
+way out: ffmpeg two-pass `loudnorm` to a target LUFS (true peak -1 dBTP), sample rate, bit depth and format
+(WAV / MP3 / OGG / FLAC); images are cropped or padded to an aspect ratio, resized and saved as PNG / JPEG / WebP.
+Conversions always write **new derived files** (a zip, a download, or new library assets via the `asset.export`
+tool); the stored originals are never modified. CPU only.
+
+**Commercial-safe models only.** Every model has a licence badge: *Commercial OK*, *Check licence* (allowed on paper
+but flagged `verify`) or *Non-commercial*. The shield button in the top bar (or Models, or Queue & System) turns on
+`license.commercial_only`: non-commercial models disappear from every picker and the job API refuses them
+(HTTP 403, kind `license`). `license.strict` also refuses *Check licence* models. Details: docs/CONTRACTS.md
+"Profiles, export presets, licence filter".
 
 ## Add a model
 

@@ -1,20 +1,30 @@
-// Image studio: Generate / Edit (multi-reference) / Transparent RGBA / Extract subject / Remove background / Upscale /
-// 3D prep (crop + recenter + pad). Built on the shared TaskStudio kit: the model picker switches models by task with
+// Image studio (concept art, thumbnails, b-roll stills, product shots, storyboard frames, game sprites):
+// Generate / Edit (multi-reference) / Transparent RGBA / Extract subject / Remove background / Upscale /
+// 3D prep (crop + recenter + pad). The use-case profile sets the default aspect ratio (16:9 video, 9:16 social, 1:1 podcast
+// cover) and puts the profile's style chips first. Built on the shared TaskStudio kit: the model picker switches models by task with
 // feature + licence badges, the parameter form comes from the registry, ✨ Improve writes the selected model's prompt
-// format with game-art style chips. Results: batches, A/B compare (select two), alpha checkerboard zoom (drawer),
+// format with style chips (profile first). Results: batches, A/B compare (select two), alpha checkerboard zoom (drawer),
 // send-to Edit / Extract / Upscale / 3D.
 import * as S from '../core/sdk.js';
 import { css, EDIT_PRESETS, alphaBgToggle } from './i3d/common.js';
 const { h, ic, btn } = S;
 
 const IMG = ['image'];
+const IDEAS = {
+  game: 'A stylized treasure chest with gold trim, game asset… (Thai or English)',
+  video: 'Wide b-roll still: misty harbour at sunrise, soft light, shallow depth of field… (Thai or English)',
+  podcast: 'Cover art for a late-night history podcast: lamp, old microphone, warm tones… (Thai or English)',
+  social: 'Vertical product shot of a matte black bottle on wet stone, neon rim light… (Thai or English)',
+  film: 'Storyboard frame: detective at a rain-soaked window, low-key light, wide lens… (Thai or English)',
+  general: 'A lighthouse at dusk, painterly, calm sea… (Thai or English)',
+};
 const TASKS = [
-  { id: 't2i', label: 'Generate', result: 'image', prompt: true, placeholder: 'A stylized treasure chest with gold trim, game asset… (Thai or English)' },
+  { id: 't2i', label: 'Generate', result: 'image', prompt: true, placeholder: p => IDEAS[p.id] || IDEAS.general },
   { id: 'edit', label: 'Edit', result: 'image', prompt: true, receives: ['edit'],
     placeholder: 'Change the wood to red lacquer, keep everything else identical. Refer to references as "image 2"…',
     inputs: [{ key: 'image', label: 'Image to edit (image 1)', types: IMG, role: 'image', required: true },
       { key: 'refs', label: 'References (image 2, 3 …)', types: IMG, role: 'ref', multiple: true, max: 9, hint: 'Qwen-Image: up to 9 extra references (style, outfit, object). Kontext: none.' }] },
-  { id: 'rgba', label: 'Transparent', result: 'image', prompt: true, placeholder: 'A glowing health potion bottle, game item… (gets the RGBA trigger automatically)' },
+  { id: 'rgba', label: 'Transparent', result: 'image', prompt: true, placeholder: 'A glowing health potion bottle, isolated item… (gets the RGBA trigger automatically)' },
   { id: 'extract', label: 'Extract', result: 'image', prompt: true, promptRequired: false, receives: ['extract'],
     placeholder: 'What to cut out, e.g. "the sword" or "the character in red" (empty = the main subject)',
     inputs: [{ key: 'image', label: 'Image', types: IMG, role: 'image', required: true, hint: 'Qwen-Image redraws the subject on a real transparent background (model-based, keeps thin parts).' }] },
@@ -89,7 +99,7 @@ function extraPanel(kit, t) {
     return h('div.img-tip', ic('cuboid', 13), ' Result: square PNG, object centred with a margin. Then send it to 3D › Image → 3D (remove background is skipped automatically for transparent images).');
   }
   if (t.id === 't2i') {
-    const ctxIn = h('input.input.input-sm', { placeholder: 'Project art direction for ✨ Improve, e.g. "cozy low-poly farming game"', value: S.prefs.get('image.context', ''),
+    const ctxIn = h('input.input.input-sm', { placeholder: 'Project art direction for ✨ Improve, e.g. "cozy low-poly farming game" or "warm 35mm documentary look"', value: S.prefs.get('image.context', ''),
       on: { change: e => S.prefs.set('image.context', e.target.value) } });
     return h('label.field', h('span.field-label', ic('palette', 14), 'Art direction (optional)'), ctxIn,
       h('span.field-help', 'Sent to the prompt improver as context, so every prompt keeps the same style.'));
