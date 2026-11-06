@@ -1,0 +1,207 @@
+# Media audio group (backend `media_audio` = envs/media_audio, workers/media_audio_worker.py): production audio tools
+# for video / podcast work, in the Sound studio.
+#
+#   subtitles  audio or video -> SRT + VTT + JSON (cues with word timestamps). Whisper large-v3-turbo transcribes;
+#              Whisper large-v3 also translates to English. Output: a `text` asset (main .srt or .vtt, the other format and
+#              the JSON attached).
+#   separate   stem separation. Demucs (htdemucs, htdemucs_ft, htdemucs_6s) and Mel-Band RoFormer (vocals).
+#              One job returns several audio assets (vocals, instrumental, +drums / bass / other ...): the worker simply
+#              lists several files in its `result`, the default handler ingests each as an asset (no contract change).
+#   dub        video or audio -> Whisper -> translate (prompt LLM) -> voice-clone TTS of the original speaker, each line
+#              time-fitted -> mixed over the instrumental -> dubbed audio + remuxed MP4. Server-side handler
+#              `media.dub` (app/plugins/media_audio.py) that calls the workers above and the chosen voice-clone model.
+#
+# Weights (all MIT) come from the HF cache; see docs/research/media_audio.md.
+
+tasks:
+  subtitles: {label: Subtitles (SRT / VTT), modality: text, studio: sound}
+  separate: {label: Stem separation, modality: audio, studio: sound}
+  dub: {label: Dub into another language, modality: audio, studio: sound}
+
+backends:
+  media_audio:
+    label: envs/media_audio (Whisper subtitles, Demucs, Mel-Band RoFormer, dubbing)
+    python: envs/media_audio/bin/python
+    script: workers/media_audio_worker.py
+    device: gpu
+    lock: media_audio
+    max_loaded: 2
+    kill_on_cancel: true
+
+models:
+  # ------------------------------------------------------------------ subtitles
+  - id: whisper-subs-turbo
+    name: Whisper large-v3 turbo (subtitles)
+    modality: text
+    tasks: [subtitles]
+    default_for: [subtitles]
+    order: 10
+    tags: [fast, asr, subtitles]
+    summary: "Fast, accurate transcription with word timestamps in 99 languages (Thai ok), cut into SRT / VTT cues. Transcribes only; use large-v3 to translate."
+    features: {engine: whisper, repo: openai/whisper-large-v3-turbo, languages: 99, translate: false, export: [srt, vtt, json]}
+    backend: media_audio
+    input_slots:
+      - {role: media, label: Audio or video, types: [audio, voice, video], required: true, hint: "Speech to subtitle. A video's first audio track is used."}
+    weights: [{hf: openai/whisper-large-v3-turbo}]
+    license: {name: MIT, commercial: true}
+    memory_gb: 4
+    speed: "~25x real time warm (60 s of speech in ~2.5 s)"
+    est: {load_s: 8, run_s: 8}
+    params: &subs_params
+      - {name: language, label: Spoken language, type: choice, choices: [auto, en, th, zh, ja, ko, fr, de, es, it, pt, ru, vi, id, ar, hi, nl, pl, tr, sv], default: auto, group: basic, help: "auto = detected from the first 30 s."}
+      - {name: main_format, label: Main file, type: choice, choices: [srt, vtt], default: srt, group: basic, help: "The other format and a JSON with the word timestamps are attached to the same asset."}
+      - {name: max_chars, label: Characters per line, type: int, min: 15, max: 90, default: 42, group: advanced}
+      - {name: max_lines, label: Lines per cue, type: int, min: 1, max: 3, default: 2, group: advanced}
+      - {name: max_cue_s, label: Longest cue, type: float, min: 2, max: 15, step: 0.5, default: 7, unit: s, group: advanced}
+      - {name: pause_s, label: Split on pauses longer than, type: float, min: 0.2, max: 3, step: 0.1, default: 0.7, unit: s, group: advanced}
+      - {name: split_sentences, label: Start a new cue after each sentence, type: bool, default: true, group: advanced}
+    presets: {}
+
+  - id: whisper-subs-large-v3
+    name: Whisper large-v3 (subtitles + translate to English)
+    modality: text
+    tasks: [subtitles]
+    order: 11
+    tags: [quality, asr, subtitles, translate]
+    summary: "Whisper large-v3: transcription plus translation of any spoken language into English subtitles (the turbo model cannot translate). About 2x slower."
+    features: {engine: whisper, repo: openai/whisper-large-v3, languages: 99, translate: true, export: [srt, vtt, json]}
+    backend: media_audio
+    input_slots:
+      - {role: media, label: Audio or video, types: [audio, voice, video], required: true, hint: "Speech to subtitle. A video's first audio track is used."}
+    weights: [{hf: openai/whisper-large-v3}]
+    license: {name: MIT, commercial: true}
+    memory_gb: 7
+    speed: "~12x real time warm"
+    est: {load_s: 12, run_s: 12}
+    params:
+      - {name: language, label: Spoken language, type: choice, choices: [auto, en, th, zh, ja, ko, fr, de, es, it, pt, ru, vi, id, ar, hi, nl, pl, tr, sv], default: auto, group: basic, help: "auto = detected from the first 30 s."}
+      - {name: translate, label: Translate to English, type: bool, default: false, group: basic, help: "Whisper's own translate task: English subtitles for speech in any language. Check names and numbers."}
+      - {name: main_format, label: Main file, type: choice, choices: [srt, vtt], default: srt, group: basic}
+      - {name: max_chars, label: Characters per line, type: int, min: 15, max: 90, default: 42, group: advanced}
+      - {name: max_lines, label: Lines per cue, type: int, min: 1, max: 3, default: 2, group: advanced}
+      - {name: max_cue_s, label: Longest cue, type: float, min: 2, max: 15, step: 0.5, default: 7, unit: s, group: advanced}
+      - {name: pause_s, label: Split on pauses longer than, type: float, min: 0.2, max: 3, step: 0.1, default: 0.7, unit: s, group: advanced}
+      - {name: split_sentences, label: Start a new cue after each sentence, type: bool, default: true, group: advanced}
+    presets: {}
+
+  # ------------------------------------------------------------------ stem separation
+  - id: demucs-htdemucs
+    name: Demucs htdemucs (4 stems)
+    modality: audio
+    tasks: [separate]
+    default_for: [separate]
+    order: 10
+    tags: [fast, stems]
+    summary: "Hybrid Transformer Demucs: vocals, drums, bass, other (+ an instrumental mix). Fast and solid for music, speech over music and podcasts."
+    features: {engine: demucs, demucs_name: htdemucs, stems: [vocals, drums, bass, other], sample_rate: 44100, channels: 2}
+    backend: media_audio
+    input_slots:
+      - {role: media, label: Audio or video, types: [audio, voice, video], required: true, hint: "A song, a mix, a video's soundtrack. Output is 44.1 kHz stereo."}
+    weights: [{hf: adefossez/HTDemucs}]
+    license: {name: MIT (Meta Demucs code and weights), commercial: true}
+    memory_gb: 5
+    speed: "~15-25x real time warm"
+    est: {load_s: 4, run_s: 12}
+    params: &sep_params
+      - {name: stems, label: Output, type: choice, choices: [{value: vocals_instrumental, label: Vocals + instrumental}, {value: all, label: All stems + instrumental}], default: vocals_instrumental, group: basic}
+      - {name: format, label: Format, type: choice, choices: [wav, flac], default: wav, group: basic, help: "24-bit, 44.1 kHz stereo."}
+      - {name: shifts, label: Random shifts, type: int, min: 1, max: 5, default: 1, group: advanced, help: "Each extra shift averages one more pass: slightly cleaner, proportionally slower."}
+      - {name: overlap, label: Chunk overlap, type: float, min: 0.1, max: 0.5, step: 0.05, default: 0.25, group: advanced}
+    presets: {fast: {shifts: 1}, balanced: {}, quality: {shifts: 3}}
+
+  - id: demucs-htdemucs-ft
+    name: Demucs htdemucs fine-tuned (4 stems)
+    modality: audio
+    tasks: [separate]
+    order: 11
+    tags: [quality, stems]
+    summary: "Four fine-tuned htdemucs models (one per stem): the cleanest Demucs result, 4x slower than htdemucs."
+    features: {engine: demucs, demucs_name: htdemucs_ft, stems: [vocals, drums, bass, other], sample_rate: 44100, channels: 2}
+    backend: media_audio
+    input_slots:
+      - {role: media, label: Audio or video, types: [audio, voice, video], required: true}
+    weights: [{hf: adefossez/HTDemucs-ft}]
+    license: {name: MIT (Meta Demucs code and weights), commercial: true}
+    memory_gb: 6
+    speed: "~4-6x real time warm"
+    est: {load_s: 8, run_s: 40}
+    params: *sep_params
+    presets: {fast: {shifts: 1}, balanced: {}, quality: {shifts: 2}}
+
+  - id: demucs-htdemucs-6s
+    name: Demucs htdemucs 6-stem (+ guitar, piano)
+    modality: audio
+    tasks: [separate]
+    order: 12
+    tags: [stems, experimental]
+    summary: "htdemucs with guitar and piano stems. The piano stem is known to be weak; use the 4-stem models for vocals."
+    features: {engine: demucs, demucs_name: htdemucs_6s, stems: [vocals, drums, bass, other, guitar, piano], sample_rate: 44100, channels: 2}
+    backend: media_audio
+    input_slots:
+      - {role: media, label: Audio or video, types: [audio, voice, video], required: true}
+    weights: [{hf: adefossez/HTDemucs-6s}]
+    license: {name: MIT (Meta Demucs code and weights), commercial: true}
+    memory_gb: 5
+    speed: "~15-25x real time warm"
+    est: {load_s: 4, run_s: 12}
+    params: *sep_params
+    presets: {}
+
+  - id: melband-roformer-vocals
+    name: Mel-Band RoFormer vocals (Kimberley Jensen)
+    modality: audio
+    tasks: [separate]
+    order: 20
+    tags: [quality, vocals]
+    summary: "Mel-Band RoFormer trained for vocal isolation: cleaner vocals than Demucs on dense mixes. Two outputs: vocals and instrumental (the mix minus the vocals)."
+    features: {engine: roformer, stems: [vocals], sample_rate: 44100, channels: 2}
+    backend: media_audio
+    input_slots:
+      - {role: media, label: Audio or video, types: [audio, voice, video], required: true}
+    weights: [{hf: KimberleyJSN/melbandroformer}]
+    license: {name: "MIT (weights); bs-roformer code MIT", commercial: true, note: "Model card says MIT; training data is not documented, so check before shipping commercially.", verify: true}
+    memory_gb: 6
+    speed: "~5-8x real time warm"
+    est: {load_s: 8, run_s: 25}
+    params:
+      - {name: format, label: Format, type: choice, choices: [wav, flac], default: wav, group: basic, help: "24-bit, 44.1 kHz stereo."}
+      - {name: overlap_factor, label: Chunk overlap factor, type: int, min: 2, max: 8, default: 4, group: advanced, help: "Higher = smoother seams, slower."}
+    presets: {}
+
+  # ------------------------------------------------------------------ dubbing
+  - id: dub-pipeline
+    name: Dubbing pipeline (Whisper + translate + voice clone + mix)
+    modality: audio
+    tasks: [dub]
+    default_for: [dub]
+    order: 10
+    tags: [pipeline, dubbing, video]
+    summary: "Video or audio in, dubbed audio (and MP4) out: separates the voice from the background, transcribes it, translates the lines with the prompt LLM, speaks them with a voice clone of the original speaker (time-fitted), and mixes them over the background."
+    features: {pipeline: true, video_input: true, export: [wav, mp4, srt], languages: tts}
+    backend: media_audio
+    handler: media.dub
+    input_slots:
+      - {role: media, label: Video or audio, types: [video, audio, voice], required: true, hint: "The speech to dub. One speaker works best (the voice is cloned from the first clean 6-12 s)."}
+      - {role: ref, label: Voice to use (optional), types: [voice, audio], required: false, hint: "Leave empty to clone the original speaker."}
+    weights:
+      - {hf: openai/whisper-large-v3-turbo}
+      - {hf: adefossez/HTDemucs}
+    license: {name: "MIT components; the voice-clone model's licence applies to the dub", commercial: true, verify: true, note: "Check the licence of the TTS model you pick (shown on the result). Only dub voices you have the right to clone."}
+    memory_gb: 6
+    speed: "1 min of speech: ~1 min for separation + transcription + translation, plus ~1 s of TTS per second of speech"
+    est: {load_s: 20, run_s: 120}
+    params:
+      - {name: target_language, label: Dub language, type: text, default: en, group: basic, help: "ISO code (en, th, ja, ...); the list depends on the voice model."}
+      - {name: source_language, label: Spoken language, type: text, default: auto, group: basic}
+      - {name: tts_model, label: Voice-clone model, type: text, default: "", group: basic, help: "A ready voice_clone model; empty = the default for voice_clone."}
+      - {name: stage, label: Run, type: choice, choices: [{value: all, label: Everything}, {value: draft, label: Transcript and translation only (edit, then render)}], default: all, group: basic}
+      - {name: separate_model, label: Separation model, type: text, default: "", group: advanced, help: "A ready `separate` model id; empty = the default (htdemucs). melband-roformer-vocals separates dense mixes better."}
+      - {name: segments, label: Lines (JSON), type: textarea, default: "", group: advanced, help: "Edited lines [{start,end,text,translation}] from a draft; empty = transcribe and translate."}
+      - {name: translate_backend, label: Translation backend, type: text, default: "", group: advanced, help: "Text backend id for the translation (local, cli:claude@haiku, api:openrouter/...). Empty = the local prompt LLM."}
+      - {name: max_speedup, label: Fastest speed-up of a line, type: float, min: 1.0, max: 1.8, step: 0.05, default: 1.3, group: advanced, help: "A dubbed line longer than its slot uses the silence after it first, then is sped up by at most this factor (ffmpeg atempo)."}
+      - {name: bg_gain_db, label: Background level, type: float, min: -24, max: 6, step: 1, default: 0, unit: dB, group: advanced}
+      - {name: duck_db, label: Lower the background under speech by, type: float, min: 0, max: 18, step: 1, default: 4, unit: dB, group: advanced}
+      - {name: lufs, label: Loudness target, type: float, min: -30, max: -8, step: 1, default: -16, unit: LUFS, group: advanced, help: "-16 is the usual podcast / web video level. The mix is also kept below -1 dBFS."}
+      - {name: keep_original_track, label: Keep the original audio as a second track in the MP4, type: bool, default: false, group: advanced}
+      - {name: seed, type: seed, default: -1}
+    presets: {}
