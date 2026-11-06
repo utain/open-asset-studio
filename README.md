@@ -210,6 +210,90 @@ Each of these envs has a `fix` / recipe in its report and a pip freeze in `env-l
 MusicGen-melody separates stems with demucs `htdemucs`; its weights come from the HF cache
 (`models--adefossez--HTDemucs`), so the melody slot works offline.
 
+## Use it from Claude Code and other MCP clients
+
+The core serves an MCP server at **`http://127.0.0.1:7860/api/x/mcp`** (Streamable HTTP, `app/plugins/mcp.py`). It
+starts and stops with the studio, so Claude Code, Claude Desktop, Cursor, VS Code or any MCP client can list models,
+search assets, **submit jobs** and get the output files back (local paths + URLs, image previews, live progress).
+Jobs go through the same queue, memory checks and commercial-safe filter as the UI; cloud jobs that cost money or
+upload inputs are refused unless the client passes `confirm_cost` / `confirm_upload` (the error carries the estimate,
+so the client can ask you first).
+
+Tools: `studio_status`, `list_models`, `get_model`, `list_tools`, `list_projects`, `create_project`,
+`search_assets`, `get_asset`, `submit_job` (waits up to `wait_s`, default 300 s, max 600), `get_job`, `list_jobs`,
+`cancel_job`, `import_file` (clients on the same machine only), `update_asset`.
+
+### Client configs
+
+Start the studio first (`./run_studio.sh`); the server name `studio` is free to change. Replace `127.0.0.1` with the
+studio machine's address to use it from another computer (needs `./run_studio.sh --host 0.0.0.0`; see Security below).
+
+**Claude Code**: in this repository, `.mcp.json` already registers it (approve it once when `claude` asks).
+Anywhere else:
+
+```bash
+claude mcp add --transport http studio http://127.0.0.1:7860/api/x/mcp              # this folder only
+claude mcp add --transport http --scope user studio http://127.0.0.1:7860/api/x/mcp # every folder
+```
+
+or a project's `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "studio": { "type": "http", "url": "http://127.0.0.1:7860/api/x/mcp" }
+  }
+}
+```
+
+**Claude Desktop**: `claude_desktop_config.json` (Settings > Developer > Edit Config) starts local servers over
+stdio, so point it at the stdio transport of the same tools (stdlib only, any `python3` >= 3.9):
+
+```json
+{
+  "mcpServers": {
+    "studio": {
+      "command": "python3",
+      "args": ["/path/to/open-asset-studio/scripts/mcp_server.py"],
+      "env": { "STUDIO_URL": "http://127.0.0.1:7860" }
+    }
+  }
+}
+```
+
+**Cursor**: `~/.cursor/mcp.json` (all projects) or `<project>/.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "studio": { "url": "http://127.0.0.1:7860/api/x/mcp" }
+  }
+}
+```
+
+**VS Code** (Copilot agent mode): `.vscode/mcp.json`:
+
+```json
+{
+  "servers": {
+    "studio": { "type": "http", "url": "http://127.0.0.1:7860/api/x/mcp" }
+  }
+}
+```
+
+**Any other client**: HTTP clients use the URL above. Stdio-only clients run
+`python3 /path/to/open-asset-studio/scripts/mcp_server.py`, with `STUDIO_URL` set when the core is not on
+`http://127.0.0.1:7860`. The stdio transport needs the studio's files on the same machine only for local file paths
+and `import_file`; everything else goes over `STUDIO_URL`.
+
+Check it: `claude mcp list` shows `studio ... ✔ Connected`, or
+`curl -s -X POST http://127.0.0.1:7860/api/x/mcp -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'`.
+
+Security: there is no authentication. Anyone who can reach the core's port can submit jobs through MCP, the same as
+through the REST API (see SECURITY.md). Requests with a browser `Origin` of another site are refused, and
+`import_file`, the only tool that reads a path on the studio's machine, is refused for clients that are not on that
+machine.
+
 ## Tests
 
 ```bash
