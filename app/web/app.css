@@ -124,6 +124,11 @@ a:hover { text-decoration: underline; }
   display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--line-soft); background: var(--bg);
   min-width: 0; z-index: 15;
 }
+.topbar > * { flex-shrink: 0; }   /* only the search box gives up space, so no pill overflows into its neighbour */
+.topbar > .search { flex: 0 1 360px; width: auto; min-width: 140px; }
+.topbar > .spacer { flex: 1 1 0; min-width: 0; }
+@media (min-width: 761px) and (max-width: 1600px) { .topbar .lic-toggle .lbl, .topbar .prof-btn .lbl { display: none; } }
+@media (min-width: 761px) and (max-width: 1200px) { .topbar .queue-btn .lbl { display: none; } }
 .topbar .title { font-weight: 650; font-size: 15px; letter-spacing: -.01em; white-space: nowrap; }
 .topbar .crumb { color: var(--text-3); white-space: nowrap; }
 .search {
@@ -538,7 +543,7 @@ model-viewer { width: 100%; height: 340px; background: radial-gradient(circle at
   .sidebar { display: none; }
   .topbar { padding: 0 10px; gap: 6px; }
   .topbar .crumb, .topbar .hide-sm { display: none; }
-  .search { width: auto; flex: 1 1 0; min-width: 0; }
+  .search, .topbar > .search { width: auto; flex: 1 1 0; min-width: 0; }
   .topbar .title, .topbar > .spacer { display: none; }
   .acard .meta .stars { display: none; }
   .hide-sm { display: none !important; }

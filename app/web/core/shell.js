@@ -48,7 +48,7 @@ export function buildShell(root) {
     on: { keydown: e => { if (e.key === 'Enter') { navigate('library', '', search.value ? { q: search.value } : null); } } } });
   const searchBox = h('label.search', ic('search', 16), search, h('kbd', '/'));
   addEventListener('keydown', e => { if (e.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName)) { e.preventDefault(); search.focus(); } });
-  const queueBtn = h('button.pill-btn', { type: 'button', title: 'Queue', on: { click: () => queuePopover(queueBtn) } });
+  const queueBtn = h('button.pill-btn.queue-btn', { type: 'button', title: 'Queue', on: { click: () => queuePopover(queueBtn) } });
   const drawQueue = () => {
     const c = store.counts || {}; const busy = (c.running || 0) + (c.queued || 0);
     queueBtn.replaceChildren(h(`span.dot${c.running ? '.live' : ''}`), ic('list-checks', 16), h('span.lbl', busy ? `${c.running || 0} running${c.queued ? ` · ${c.queued} queued` : ''}` : 'Queue idle'));
@@ -69,7 +69,7 @@ export function buildShell(root) {
   const drawTheme = t => themeTop.replaceChildren(ic(t === 'light' ? 'moon' : 'sun', 17));
   bus.on('theme', drawTheme); drawTheme(document.documentElement.dataset.theme);
   // use-case profile (game | video | podcast | social | film | general) and the "Commercial-safe models only" switch
-  const profBtn = h('button.pill-btn', { type: 'button', title: 'Use-case profile: style presets, aspect ratios and export defaults', on: { click: () => profileMenu(profBtn) } });
+  const profBtn = h('button.pill-btn.prof-btn', { type: 'button', title: 'Use-case profile: style presets, aspect ratios and export defaults', on: { click: () => profileMenu(profBtn) } });
   const drawProf = () => { const p = getProfile(); profBtn.replaceChildren(ic(p.icon || 'layers', 16), h('span.lbl.hide-sm', p.label || p.id), ic('chevron-down', 14)); };
   bus.on('profile', drawProf); drawProf();
   const licBtn = h('button.pill-btn.lic-toggle', { type: 'button', on: { click: async () => {
