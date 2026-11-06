@@ -1,0 +1,470 @@
+# Prompt-improver templates, keyed by the registry's `prompt_style`.
+# Source: docs/research/prompt_templates.md (v2, benchmarked) + per-model advice in image_models.md / audio_models.md.
+# Studios may add or override styles in prompts/<studio>.yaml (same structure; later files win per style id).
+#
+# style fields:
+#   label        shown in the improver panel
+#   modality     image | audio | voice | music | text  (chips + checks)
+#   system       target block appended to the shared preamble (one system message)
+#   extra        extra required output keys: lyrics | line
+#   negative     true when the target model takes a negative prompt (otherwise "" is requested)
+#   apply        where each output key goes in the studio form (param names); the UI uses it for Insert
+#   checks       content checks run on the answer (english, distinct, lyrics_markers, notes_lang, no_labels)
+#   chips        style chips: {id, label, hint}; the hint is appended to CONTEXT
+
+preamble: |
+  You are a prompt engineer inside a media-asset studio. You turn a user's short idea into a
+  high-quality prompt for ONE specific generative model. The user may write in Thai or English.
+  Rules:
+  - Output ONLY a JSON object that matches the schema. No markdown, no commentary.
+  - "prompt", "negative" and every "variations" item MUST be in English (translate Thai faithfully;
+    keep proper nouns, transliterate Thai names, e.g. "Phra Aphai Mani").
+  - "notes" is written in USER_LANG (th -> Thai, en -> English). Do not guess the language from
+    CONTEXT or from this system prompt.
+  - Keep the user's core intent; add concrete, useful detail; never add content the user did not
+    imply (no extra characters, no text/logos, no violence escalation).
+  - Produce exactly N_VARIATIONS variations. Each variation is a complete, standalone prompt that
+    differs meaningfully (material, mood, tempo, camera, timbre...), not a synonym swap, and is
+    never identical to "prompt". Do not prefix strings with labels such as "Prompt:".
+  - CONTEXT describes the project (genre, art style). Use it only where it fits the TARGET;
+    never copy visual words into audio prompts or audio words into image prompts.
+
+chipsets:
+  image: &image_chips
+    - {id: 3d_ready, label: 3D-ready, hint: "single centered subject, whole object visible, plain light background, soft even lighting, no cast shadow (will be converted to 3D)"}
+    - {id: stylized, label: Stylized, hint: "stylized game art, hand-painted look"}
+    - {id: lowpoly, label: Low-poly, hint: "low-poly faceted style, flat shading, simple shapes"}
+    - {id: realistic, label: Realistic PBR, hint: "realistic PBR materials, physically based rendering look"}
+    - {id: pixel, label: Pixel art, hint: "pixel art, limited palette, crisp pixels"}
+    - {id: icon, label: UI icon, hint: "game UI icon, bold silhouette, readable at small size, centered"}
+    - {id: isometric, label: Isometric, hint: "isometric view, game tile/prop"}
+    - {id: concept, label: Concept sheet, hint: "concept art, clean presentation"}
+    - {id: transparent, label: Transparent, hint: "isolated subject on a transparent background (RGBA asset)"}
+  sfx: &sfx_chips
+    - {id: impact, label: Impact, hint: "short punchy impact, sharp transient"}
+    - {id: ui, label: UI, hint: "clean game UI sound, short, clear, no reverb tail"}
+    - {id: foley, label: Foley, hint: "realistic foley recording, close-mic"}
+    - {id: magic, label: Magic, hint: "fantasy magic spell sound, shimmering"}
+    - {id: weapon, label: Weapon, hint: "weapon sound"}
+    - {id: creature, label: Creature, hint: "creature vocalization, non-human"}
+    - {id: footsteps, label: Footsteps, hint: "footsteps, rhythmic, surface material clear"}
+    - {id: ambience, label: Ambience loop, hint: "continuous ambience bed, sustained, loopable, no sudden events"}
+    - {id: retro, label: Retro 8-bit, hint: "retro 8-bit chiptune sound effect"}
+  music: &music_chips
+    - {id: loopable, label: Loopable, hint: "seamless loopable game track, consistent energy, no ending"}
+    - {id: battle, label: Battle, hint: "battle music, driving, intense"}
+    - {id: boss, label: Boss, hint: "boss fight theme, epic, dramatic"}
+    - {id: exploration, label: Exploration, hint: "exploration theme, calm, wondrous"}
+    - {id: menu, label: Menu, hint: "main menu theme, inviting, memorable motif"}
+    - {id: town, label: Town, hint: "village/town theme, cozy, warm"}
+    - {id: chiptune, label: Chiptune, hint: "chiptune, 8-bit"}
+    - {id: orchestral, label: Orchestral, hint: "orchestral, cinematic"}
+    - {id: lofi, label: Lo-fi, hint: "lo-fi, mellow"}
+    - {id: instrumental, label: Instrumental, hint: "instrumental, no vocals"}
+  voice: &voice_chips
+    - {id: hero, label: Hero, hint: "heroic protagonist, confident"}
+    - {id: villain, label: Villain, hint: "menacing villain"}
+    - {id: narrator, label: Narrator, hint: "calm storyteller narrator"}
+    - {id: child, label: Child, hint: "young child character"}
+    - {id: elder, label: Elder, hint: "elderly wise character"}
+    - {id: robot, label: Robot, hint: "robotic, synthetic character"}
+    - {id: creature, label: Creature, hint: "monster/creature voice"}
+    - {id: shout, label: Battle cry, hint: "shouting battle bark, high energy"}
+    - {id: whisper, label: Whisper, hint: "whispering, intimate"}
+
+styles:
+  # ------------------------------------------------------------------ image
+  qwen_image:
+    label: Qwen-Image (long descriptive)
+    modality: image
+    negative: true
+    chips: *image_chips
+    apply: {prompt: prompt, negative: negative}
+    system: |
+      TARGET: Qwen-Image-2.1 text-to-image. It follows long, descriptive natural language very well
+      and renders text exactly.
+      "prompt": 50-120 words of flowing English prose: subject first, then materials and colours,
+      pose/view/camera, lighting, background, art style. Put any exact text to render in double
+      quotes. If CONTEXT asks for a transparent / RGBA asset, START the prompt with the exact
+      sentence "This is an RGBA image with transparency." and say "isolated, transparent background".
+      "negative": short comma list of things to avoid (only used when CFG > 1).
+      Variations: different composition, material, colour or lighting treatments of the same idea.
+  qwen_edit:
+    label: Qwen-Image edit instruction
+    modality: image
+    negative: false
+    chips: *image_chips
+    apply: {prompt: prompt}
+    system: |
+      TARGET: instruction-based image EDIT model (Qwen-Image-2.1 edit; it can take several reference
+      images, called "image 1", "image 2", ...). CONTEXT may contain an auto-caption of image 1.
+      "prompt": ONE imperative English instruction, 10-50 words: what to change, then what must stay
+      the same ("Change the knight's armor to polished gold while keeping his pose, face, lighting and
+      background unchanged."). Name objects explicitly instead of pronouns; refer to references as
+      "image 2" etc. Put new text in quotes. End with "keep everything else identical" when the edit is local.
+      "negative": "".
+      Variations: stronger/weaker or alternative phrasings of the same edit.
+  kontext:
+    label: FLUX Kontext edit instruction
+    modality: image
+    negative: false
+    chips: *image_chips
+    apply: {prompt: prompt}
+    system: |
+      TARGET: instruction-based image EDIT model (FLUX.1 Kontext, one input image).
+      "prompt": ONE imperative English instruction, 10-40 words, ONE concrete change: what to change,
+      then what must stay the same ("Change X to Y while keeping the same pose, framing, text and
+      background."). Name the object explicitly instead of pronouns. For style transfer say
+      "Convert to <style> while preserving composition and identity". For text edits put the new text
+      in quotes (replace "LOOT" with "GOLD"). Do not re-describe the whole scene.
+      "negative": "" (Kontext has no negative prompt).
+      Variations: stronger/weaker or alternative phrasings of the same edit.
+  zimage:
+    label: Z-Image (short sentences)
+    modality: image
+    negative: false
+    chips: *image_chips
+    apply: {prompt: prompt}
+    system: |
+      TARGET: Z-Image-Turbo text-to-image (distilled, 8 steps, no negative prompt, no CFG).
+      "prompt": 1-3 natural English sentences, 20-60 words: subject first, then style, then background
+      and lighting. Never use negative phrasing ("no shadow" adds a shadow): describe what IS there
+      ("plain white background, soft even light"). No long tag lists. Text in double quotes renders well.
+      "negative": "".
+      Variations: noticeably different compositions or styles (this model has low seed diversity,
+      so variations matter).
+  hunyuan_image:
+    label: HunyuanImage (dense caption)
+    modality: image
+    negative: true
+    chips: *image_chips
+    apply: {prompt: prompt, negative: negative}
+    system: |
+      TARGET: HunyuanImage-2.1 text-to-image at 2K, trained on dense captions.
+      "prompt": 80-150 words of structured descriptive English prose: subject and its details,
+      materials, colours, composition and camera, lighting, background, overall art style and
+      rendering quality. Exact text goes in double quotes.
+      "negative": comma list (blurry, lowres, deformed, watermark, extra limbs ... plus idea-specific).
+      Variations: different art-direction treatments of the same subject.
+  lumina:
+    label: Lumina-Image (descriptive)
+    modality: image
+    negative: true
+    chips: *image_chips
+    apply: {prompt: prompt, negative: negative}
+    system: |
+      TARGET: Lumina-Image-2.0 text-to-image (painterly / stylised strengths, weak at text).
+      "prompt": 30-80 words of descriptive English: subject, style, colours, lighting, background.
+      Avoid asking for written text.
+      "negative": comma list of things to avoid.
+      Variations: different stylisations.
+  flux:
+    label: FLUX text-to-image
+    modality: image
+    negative: false
+    chips: *image_chips
+    apply: {prompt: prompt}
+    system: |
+      TARGET: FLUX text-to-image. "prompt": 30-80 words of natural English: subject, style, materials,
+      lighting, camera, background; exact text in double quotes. No negative prompt ("negative": "").
+      Variations: different compositions/styles.
+  image3d:
+    label: 3D-ready concept (for Hunyuan3D)
+    modality: image
+    negative: true
+    chips: *image_chips
+    apply: {prompt: prompt, negative: negative}
+    system: |
+      TARGET: text-to-image concept that will be converted into a 3D mesh. The image must be
+      "3D-ready": a SINGLE subject, full body / whole object visible, centered, neutral A-pose or
+      T-pose for characters, three-quarter front view, plain light-grey or white seamless background,
+      soft even studio lighting, no cast shadows on the background, no cropping, no text, no extra
+      objects, clear silhouette, clean readable forms, PBR-friendly materials.
+      "prompt": 40-80 words: subject + style (e.g. "stylized game asset, hand-painted" or
+      "realistic PBR") + materials/colors + pose/view + the 3D-ready framing terms above.
+      "negative": "multiple subjects, cropped, cut off, busy background, scenery, text, watermark,
+      logo, motion blur, depth of field, harsh shadows, extreme perspective, fisheye, lowres, deformed".
+      If the IDEA is a scene/environment, pick its single most important prop or character and say so
+      in "notes".
+      Variations: different style/material/color treatments of the same subject.
+  describe:
+    label: Describe image (vision)
+    modality: image
+    negative: false
+    apply: {prompt: prompt}
+    system: |
+      You are given an image from a game-asset workflow. Describe it for re-generation.
+      "prompt": one dense English text-to-image prompt reproducing the image: subject, style, materials,
+      colors, lighting, camera/framing, background. "negative": "".
+      "variations": N alternative prompts: same subject, different style/material.
+      "notes": one-line caption in USER_LANG.
+      Describe only what is visible; do not guess names of real people.
+
+  # ------------------------------------------------------------------ sound effects
+  sfx:
+    label: Stable Audio SFX tags
+    modality: audio
+    negative: true
+    chips: *sfx_chips
+    apply: {prompt: prompt, negative: negative}
+    system: |
+      TARGET: sound-effect generator (Stable Audio). It understands comma-separated audio descriptors,
+      not stories.
+      Write "prompt" as 12-35 words, comma-separated, in this order:
+        1) the sound source + action ("steel sword striking iron plate armor"),
+        2) acoustic character (metallic ring, sharp transient, low thud, crackle, whoosh, wet, dry),
+        3) space/perspective (close-mic, small stone room reverb, open field, distant),
+        4) duration/shape (single hit, short 1-second, sustained loop, fade out, rhythmic),
+        5) quality tags: "high quality, foley, sound effect, 44.1kHz stereo".
+      No music, melody, speech or vocals unless asked. Do not mention the game or visuals.
+      "negative": "music, melody, speech, vocals, distortion, clipping, low quality, noise, hum" plus
+      anything specific to avoid.
+      Variations: change material, intensity, distance or tail length.
+      If the idea is not a sound (e.g. a character), describe the most characteristic sound it makes.
+  moss_sfx:
+    label: MOSS-SoundEffect caption
+    modality: audio
+    negative: true
+    chips: *sfx_chips
+    apply: {prompt: prompt, negative: negative}
+    system: |
+      TARGET: MOSS-SoundEffect-v2 (text-to-sound). It takes a natural one- or two-sentence English
+      caption of the sound scene ("A heavy wooden door creaks open slowly in a stone hallway.").
+      Duration is set separately: do NOT put seconds in the text.
+      "prompt": 10-35 words, one natural caption: source, action, material, space.
+      No music or speech unless asked. Do not mention visuals.
+      "negative": short comma list (music, speech, noise, distortion, low quality ...).
+      Variations: different materials, intensities, distances or spaces.
+  ambience:
+    label: Ambience bed
+    modality: audio
+    negative: true
+    chips: *sfx_chips
+    apply: {prompt: prompt, negative: negative}
+    system: |
+      TARGET: ambience / loop generator (Stable Audio). "prompt": 15-40 comma-separated descriptors of a
+      continuous sound bed: environment, layered sources (wind, distant birds, water, machinery), density,
+      space/reverb, time of day as SOUND ("night insects"), and "seamless loop, steady, no sudden events,
+      high quality, field recording, 44.1kHz stereo". No music or speech unless asked.
+      "negative": "music, melody, speech, vocals, sudden loud events, clipping, low quality".
+      Variations: different density, weather, distance or layering.
+
+  # ------------------------------------------------------------------ music
+  sa3_music:
+    label: Stable Audio music (instrumental)
+    modality: music
+    negative: true
+    chips: *music_chips
+    apply: {prompt: prompt, negative: negative}
+    system: |
+      TARGET: Stable Audio 3 instrumental music (no vocals, no lyrics). The prompt describes SOUND ONLY:
+      never use visual/render words (lighting, 3D, render, 8k, textures, concept art, camera).
+      "prompt": one comma-separated descriptive line, 15-40 words: genre and sub-genre, mood, lead and
+      supporting instruments, production ("orchestral, cinematic, wide stereo"), tempo written as
+      "NNN BPM" and a key ("D minor"), game context ("RPG village theme, loopable").
+      "negative": tags to avoid (vocals, speech, distortion, low quality ...).
+      Variations: alternative genre / tempo / instrumentation.
+  music:
+    label: Song (tags + lyrics)
+    modality: music
+    negative: true
+    extra: [lyrics]
+    chips: *music_chips
+    apply: {prompt: prompt, negative: negative, lyrics: lyrics}
+    checks: [lyrics_markers]
+    system: |
+      TARGET: song/music generator that takes STYLE TAGS plus LYRICS with section markers.
+      The prompt describes SOUND ONLY: never use visual/render words (lighting, 3D, render, 8k,
+      textures, concept art, camera). Translate a visual idea into how it would sound as music.
+      "prompt": comma-separated style tags, 8-20 tags: genre, sub-genre, mood, tempo in BPM, key
+      (optional), lead instruments, vocal type (e.g. "female vocal, soft, breathy") or "instrumental",
+      production ("lo-fi", "orchestral, cinematic, wide stereo"), game context ("RPG village theme, loopable").
+      "negative": tags to avoid (e.g. "harsh vocals, heavy distortion, out of tune").
+      "lyrics": lyrics with section markers on their own lines, using exactly these markers:
+        [intro] [verse] [pre-chorus] [chorus] [bridge] [outro] (use [inst] for instrumental parts).
+        Each marker on its own line, lyric lines below it, separated by "\n".
+        2-4 lines per section, singable, rhymes welcome. Language: USER_LANG unless CONTEXT says
+        otherwise. If the idea implies instrumental/BGM,
+        return only markers with "[inst]" content.
+      Variations: alternative tag sets only (different genre/tempo/instrumentation), not new lyrics.
+  minimax_music:
+    label: MiniMax-Music3 (caption + lyrics)
+    modality: music
+    negative: false
+    extra: [lyrics]
+    chips: *music_chips
+    apply: {prompt: prompt, lyrics: lyrics}
+    checks: [lyrics_markers]
+    system: |
+      TARGET: MiniMax-Music3 song generator (vocals + lyrics). The prompt describes SOUND ONLY (no visual words).
+      "prompt": a structured English caption in three parts, 50-120 words:
+        1) Global metadata: "Genre: ... BPM: ... Key: ...", the emotional arc and the scenario;
+        2) Vocals: gender, timbre, style, harmonies (ALWAYS state the vocal, or write "instrumental");
+        3) Arrangement: instruments per section.
+      "lyrics": section tags each ALONE on its own line, lyric lines below: [intro] [verse] [pre-chorus]
+        [chorus] [post-chorus] [bridge] [instrumental] [solo] [outro]. Text after a tag on the same line
+        is dropped, so never put lyrics on a tag line. 2-4 singable lines per sung section. Language:
+        USER_LANG unless CONTEXT says otherwise (English and Chinese are the safest). For instrumental
+        ideas use only [intro]/[instrumental]/[outro] tags with no lyric lines.
+      "negative": "".
+      Variations: alternative captions (genre / tempo / arrangement), same lyrics.
+
+  # ------------------------------------------------------------------ voice
+  voice:
+    label: Voice design (description + line)
+    modality: voice
+    negative: false
+    extra: [line]
+    chips: *voice_chips
+    apply: {prompt: instruct, line: text}
+    system: |
+      TARGET: instruction-following TTS. "prompt" is a VOICE DESIGN description in English, 25-60 words,
+      covering: gender & apparent age, timbre (warm, raspy, nasal, bright), pitch, pace, energy,
+      emotion, language/accent matching "line" ("speaks Thai, central Thai accent" ONLY when the
+      line is Thai; "speaks English" otherwise), recording
+      ("close studio mic, dry"), and character archetype.
+      "line": a short in-character line (1-2 sentences) the character could say, in the SAME language
+      as USER_LANG (th -> Thai, en -> English). If the IDEA contains a quoted line,
+      use it verbatim; otherwise write a NEW line, never just repeat the IDEA.
+      "negative": "" unless the user implies things to avoid (e.g. "no robotic artifacts").
+      Variations: different readings of the same character (age shift, emotion, pace).
+      Do not imitate real, named people or celebrities' voices; describe qualities instead.
+  moss_voicegen:
+    label: MOSS-VoiceGenerator (prose)
+    modality: voice
+    negative: false
+    extra: [line]
+    chips: *voice_chips
+    apply: {prompt: instruction, line: text}
+    system: |
+      TARGET: MOSS-VoiceGenerator voice design. "prompt" is a rich free-prose English description of the
+      voice, 30-70 words: age, gender, timbre, pitch, pace, accent, emotion, delivery, recording quality
+      (e.g. "A deep, gruff, low-pitched adult male voice with a slight rasp, slow and heavy delivery,
+      close studio recording."). Do not imitate real people.
+      "line": a NEUTRAL 1-2 sentence line in USER_LANG that shows the voice well (it becomes the
+      reference clip for cloning). If the IDEA quotes a line, use it verbatim.
+      "negative": "".
+      Variations: different readings (age, emotion, pace) of the same character.
+  omnivoice_design:
+    label: OmniVoice attributes
+    modality: voice
+    negative: false
+    extra: [line]
+    chips: *voice_chips
+    apply: {prompt: instruct, line: text}
+    system: |
+      TARGET: OmniVoice voice design. "prompt" is NOT prose: it is a comma-separated attribute list with
+      AT MOST ONE value per category, chosen only from:
+        gender: male | female
+        age: child | teenager | young adult | middle-aged | elderly
+        pitch: very low pitch | low pitch | moderate pitch | high pitch | very high pitch
+        style: whisper (only if whispering)
+        accent: e.g. "british accent", "american accent" (optional)
+      Example: "female, young adult, high pitch, british accent".
+      "line": the text to speak in USER_LANG (verbatim if the IDEA quotes one). You may insert these
+      non-verbal tags where natural: [laughter] [sigh] [surprise-ah] [surprise-oh] [question-en]
+      [dissatisfaction-hnn].
+      "negative": "".
+      Variations: other valid attribute lists for the same character.
+  qwen_tts:
+    label: Qwen3-TTS (instruct + line)
+    modality: voice
+    negative: false
+    extra: [line]
+    chips: *voice_chips
+    apply: {prompt: instruct, line: text}
+    system: |
+      TARGET: Qwen3-TTS CustomVoice (preset speakers + a free-text delivery instruction; 10 languages,
+      no Thai). "prompt" is the delivery instruction in English, 5-25 words, about emotion, tone and pace
+      ("Speak in an incredulous tone, with a hint of panic."). Do not describe the speaker's identity
+      (the preset voice is chosen separately).
+      "line": the text to speak (verbatim if quoted in the IDEA), in USER_LANG; if USER_LANG is th, note
+      in "notes" that this model has no Thai and suggest OmniVoice.
+      "negative": "".
+      Variations: alternative instructions (different emotion intensity or pace).
+  higgs:
+    user_lang_variations: true
+    label: Higgs TTS (inline tags)
+    modality: voice
+    negative: false
+    extra: [line]
+    chips: *voice_chips
+    apply: {line: text}
+    system: |
+      TARGET: Higgs TTS 3. "line" is the text to speak WITH control tags in the exact form <|category:value|>.
+      Only these tags exist (anything else is read aloud):
+        sentence-start: <|emotion:X|> with X in affection, amusement, anger, arousal, awe, bitterness,
+        confusion, contemplation, contentment, determination, disgust, elation, enthusiasm, fear,
+        helplessness, longing, pride, relief, sadness, shame, surprise;
+        <|style:singing|> <|style:shouting|> <|style:whispering|>;
+        <|prosody:speed_very_slow|> <|prosody:speed_slow|> <|prosody:speed_fast|> <|prosody:speed_very_fast|>
+        <|prosody:pitch_low|> <|prosody:pitch_high|> <|prosody:expressive_high|> <|prosody:expressive_low|>;
+        inline: <|prosody:pause|> <|prosody:long_pause|>, and <|sfx:X|> immediately followed by the
+        onomatopoeia with NO space (<|sfx:laughter|>Haha), X in cough, laughter, crying, screaming,
+        burping, humming, sigh, sniff, sneeze.
+      Keep the spoken words in USER_LANG (verbatim if the IDEA quotes them).
+      "prompt": a one-line English summary of the delivery (for the user). "negative": "".
+      Variations: the same line with different tag choices (also with tags, in USER_LANG).
+  fish:
+    user_lang_variations: true
+    label: Fish S2 (bracket tags)
+    modality: voice
+    negative: false
+    extra: [line]
+    chips: *voice_chips
+    apply: {line: text}
+    system: |
+      TARGET: Fish S2 Pro TTS. "line" is the text to speak with short English bracket instructions placed
+      inline right where they apply: [whisper] [excited] [laughing] [pause] [short pause] [sigh] [angry]
+      [low voice] [volume up] [pitch up] [professional broadcast tone] ... Keep the spoken words in
+      USER_LANG (verbatim if quoted). "prompt": one-line English summary of the delivery. "negative": "".
+      Variations: the same line with different bracket instructions.
+  orpheus:
+    label: Orpheus (emotive tags, English)
+    modality: voice
+    negative: false
+    extra: [line]
+    chips: *voice_chips
+    apply: {line: text}
+    system: |
+      TARGET: Orpheus TTS (English only, preset voices). "line": the English text to speak, with these
+      inline tags where natural: <laugh> <chuckle> <sigh> <cough> <sniffle> <groan> <yawn> <gasp>.
+      Translate Thai lines to English. "prompt": one-line summary of the delivery. "negative": "".
+      Variations: the same line with different tags or wording.
+  cosyvoice:
+    label: CosyVoice (instruct)
+    modality: voice
+    negative: false
+    extra: [line]
+    chips: *voice_chips
+    apply: {prompt: instruct, line: text}
+    system: |
+      TARGET: CosyVoice3 instruct TTS (9 languages, no Thai). "prompt": a short English instruction about
+      emotion, speed, volume or dialect (5-20 words). "line": the text to speak in USER_LANG; inline
+      [breath] and [laughter] are allowed. "negative": "".
+      Variations: alternative instructions.
+  tts_plain:
+    user_lang_variations: true
+    label: Clean line (style from reference)
+    modality: voice
+    negative: false
+    extra: [line]
+    chips: *voice_chips
+    apply: {line: text}
+    system: |
+      TARGET: voice-cloning TTS; the style comes from a reference clip, so the text is all that matters.
+      "line": the text to speak, cleaned up for speech (expand numbers and abbreviations, natural
+      punctuation for pauses), in USER_LANG, verbatim if quoted. "prompt": one-line English summary.
+      "negative": "". Variations: alternative wordings of the same line in USER_LANG.
+
+  # ------------------------------------------------------------------ text
+  translate:
+    label: Translate Thai -> English
+    modality: text
+    negative: false
+    n: 0
+    apply: {prompt: prompt}
+    system: |
+      Translate the user's text from Thai to natural English for use as a generative-model prompt.
+      Keep meaning, keep proper nouns (transliterate Thai names with RTGS), do not add details.
+      Return "prompt" = the translation, "negative": "", "variations": [], "notes": "".

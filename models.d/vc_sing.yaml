@@ -1,0 +1,119 @@
+# Voice conversion + singing voice (group vc_sing). See docs/research/audio_more/vc_sing.md
+#   voice_convert  source audio (+ target voice clip for Seed-VC) -> converted audio. Same id/label as Vevo (tts_clone_b).
+#   sing           DiffSinger: a score (notes + lyrics) -> singing.
+# UI inputs: voice_convert needs an audio input `source` and, for Seed-VC, an audio input `ref` (a 3-25 s clip of the
+# target voice); RVC needs `source` only and a `voice` name (a model dropped into data/rvc_voices/).
+
+tasks:
+  voice_convert: {label: Voice conversion, modality: audio, studio: sound}
+  sing:          {label: Singing voice,    modality: audio, studio: sound}
+
+backends:
+  vc:
+    label: envs/vc (Seed-VC, RVC; torch 2.9 cu130, transformers 4.57)
+    python: envs/vc/bin/python
+    script: workers/vc_worker.py
+    device: gpu
+    lock: vc
+    max_loaded: 1
+    fix: "uv venv --python 3.12 envs/vc && see docs/research/audio_more/vc_sing.md (env section); git clone https://github.com/Plachtaa/seed-vc vendor/seed-vc; git clone https://github.com/RVC-Project/Retrieval-based-Voice-Conversion-WebUI vendor/rvc"
+
+  vc_diffsinger:
+    label: envs/vc_diffsinger (original DiffSinger; torch 2.9 cu130, librosa 0.9.2)
+    python: envs/vc_diffsinger/bin/python
+    script: workers/vc_diffsinger_worker.py
+    device: gpu
+    lock: vc_diffsinger
+    max_loaded: 1
+    fix: "see docs/research/audio_more/vc_sing.md (env section); git clone https://github.com/MoonInTheRiver/DiffSinger vendor/diffsinger-legacy"
+
+models:
+  - id: seed-vc
+    name: Seed-VC
+    modality: audio
+    tasks: [voice_convert]
+    default_for: [voice_convert]
+    order: 80
+    tags: [voice, clone, singing, zero-shot]
+    summary: "Zero-shot voice conversion: keeps the words and timing of the source audio and swaps in the voice of a short reference clip. Singing mode follows the melody (44.1 kHz). GPL-3.0."
+    features: {needs_ref: true, sample_rate: 22050, singing: true, languages: [any]}
+    backend: vc
+    input_slots:
+      - {role: "source", label: "Source clip", types: ["voice", "audio"], required: true, hint: "The recording whose voice changes (speech or singing)."}
+      - {role: "ref", label: "Reference voice", types: ["voice", "audio"], required: true, hint: "3-25 s of clean speech in the target voice. Use voices you have the right to use."}
+    weights:
+      - {hf: Plachta/Seed-VC, files: [DiT_seed_v2_uvit_whisper_small_wavenet_bigvgan_pruned.pth, config_dit_mel_seed_uvit_whisper_small_wavenet.yml, DiT_seed_v2_uvit_whisper_base_f0_44k_bigvgan_pruned_ft_ema_v2.pth, config_dit_mel_seed_uvit_whisper_base_f0_44k.yml]}
+      - {hf: funasr/campplus, files: [campplus_cn_common.bin]}
+      - {hf: nvidia/bigvgan_v2_22khz_80band_256x}
+      - {hf: nvidia/bigvgan_v2_44khz_128band_512x}
+      - {hf: openai/whisper-small, files: [model.safetensors, config.json]}
+      - {hf: lj1995/VoiceConversionWebUI, files: [rmvpe.pt]}
+    license: {name: GPL-3.0 (code and weights), commercial: true, note: "Copyleft: the weights card says GPL-3.0; pulling the code into a closed product is the issue, using the output is not. Reference voices need the speaker's consent."}
+    memory_gb: 5
+    speed: "load ~10 s (2.7 GB resident); 7 s of speech at 30 steps in ~2.3 s (peak 3.0 GB)"
+    est: {load_s: 10, run_s: 3}
+    params:
+      - {name: singing, label: Singing mode, type: bool, default: false, group: basic, help: "On = F0-conditioned 44.1 kHz model that follows the melody of the source. Off = speech model (22.05 kHz)."}
+      - {name: pitch_shift, label: Pitch shift, type: int, min: -24, max: 24, default: 0, unit: semitones, group: basic, show_if: {singing: true}}
+      - {name: steps, label: Diffusion steps, type: int, min: 4, max: 60, default: 30, group: basic, help: "10 is a fast preview, 30-50 for final quality."}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: cfg_rate, label: CFG rate, type: float, min: 0, max: 1, step: 0.05, default: 0.7, group: advanced}
+      - {name: length_adjust, label: Speed (length factor), type: float, min: 0.5, max: 2, step: 0.05, default: 1.0, group: advanced, help: "Above 1 = slower, below 1 = faster."}
+      - {name: auto_f0_adjust, label: Auto pitch match, type: bool, default: true, group: advanced, show_if: {singing: true}, help: "Shift the source melody to the reference voice's range."}
+    presets: {fast: {steps: 10}, balanced: {steps: 30}, quality: {steps: 50, batch: 2}}
+
+  - id: rvc
+    name: RVC (Retrieval-based Voice Conversion)
+    modality: audio
+    tasks: [voice_convert]
+    order: 81
+    tags: [voice, singing, fast, trained-voices]
+    summary: "Fast pitch-following conversion into a trained voice model. Needs a voice: drop <name>.pth (+ .index) into data/rvc_voices/. Speech and singing."
+    features: {needs_ref: false, voice_folder: data/rvc_voices, singing: true, languages: [any]}
+    backend: vc
+    input_slots:
+      - {role: "source", label: "Source clip", types: ["voice", "audio"], required: true, hint: "The recording whose voice changes. The target voice is the RVC model named in Settings → Voice."}
+    weights:
+      - {hf: lj1995/VoiceConversionWebUI, files: ["hubert_base/*", rmvpe.pt]}
+      - {path: data/rvc_voices, fix: "mkdir -p data/rvc_voices and put RVC v1/v2 voice models (<name>.pth + <name>.index) in it"}
+    license: {name: MIT (code), commercial: true, note: "The tool is MIT. Each voice model has its own licence and the consent of the person it imitates: check it. Bundled test voice maobailing: Apache-2.0, trained on synthetic speech only."}
+    memory_gb: 3
+    speed: "load ~3-5 s (0.35 GB + voice); 7 s of audio in ~2.5 s (peak 1.2 GB)"
+    est: {load_s: 4, run_s: 3}
+    params:
+      - {name: voice, label: Voice model, type: text, default: maobailing, group: basic, placeholder: "name of a .pth in data/rvc_voices", help: "File name without .pth (or its folder name) of an RVC voice in data/rvc_voices/."}
+      - {name: pitch_shift, label: Pitch shift, type: int, min: -24, max: 24, default: 0, unit: semitones, group: basic, help: "+12 for a male source into a female voice, -12 for the reverse."}
+      - {name: index_rate, label: Index (accent) strength, type: float, min: 0, max: 1, step: 0.05, default: 0.6, group: basic, help: "How much of the voice's training features replace the source's. 0 = off (also when the voice has no .index)."}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: f0_method, label: Pitch tracker, type: choice, choices: [rmvpe, pm], default: rmvpe, group: advanced, help: "rmvpe is robust (also for singing); pm is faster but noisy."}
+      - {name: protect, label: Consonant protection, type: float, min: 0, max: 0.5, step: 0.01, default: 0.33, group: advanced, help: "Lower keeps more of the source's breaths and consonants. 0.5 = off."}
+      - {name: rms_mix_rate, label: Loudness follow, type: float, min: 0, max: 1, step: 0.05, default: 0.25, group: advanced, help: "1 = keep the output loudness, 0 = follow the source envelope."}
+      - {name: speaker_id, label: Speaker id, type: int, min: 0, max: 255, default: 0, group: advanced, help: "Only for multi-speaker voice files."}
+    presets: {}
+
+  - id: diffsinger-opencpop
+    name: DiffSinger (Opencpop, Mandarin)
+    modality: audio
+    tasks: [sing]
+    default_for: [sing]
+    order: 90
+    tags: [singing, score, mandarin, non-commercial]
+    summary: "Score to singing: one Mandarin lyric syllable, note and length per line, sung by the Opencpop female voice (24 kHz). Non-commercial voice data."
+    features: {lyrics: true, score: true, sample_rate: 24000, channels: 1, languages: [zh], speakers: 1}
+    prompt_style: sing_score
+    backend: vc_diffsinger
+    weights:
+      - {hf: PillowTa1k/DiffSinger, files: ["0228_opencpop_ds100_rel/*", "0109_hifigan_bigpopcs_hop128/*", "0102_xiaoma_pe/*"]}
+    license: {name: "MIT code; Opencpop voice data CC BY-NC-ND 4.0", commercial: false, verify: true, note: "The model is trained on the Opencpop corpus, which forbids commercial use. The HF repo that hosts the checkpoints is tagged Apache-2.0 but cannot override the data licence."}
+    memory_gb: 2
+    speed: "load ~3 s; 5 s of singing in ~1 s on the GPU (peak 0.3 GB), ~36 s on CPU"
+    est: {load_s: 3, run_s: 2}
+    params:
+      - {name: score, label: Score, type: textarea, default: "", group: basic, help: "One word per line: '<syllable> <note> <seconds>', e.g. '你 C4 0.5'. Syllable = one Chinese character or pinyin (ni), SP = pause, AP = breath. A slur: 'a C4,E4 0.3,0.4'."}
+      - {name: key, label: Transpose, type: int, min: -12, max: 12, default: 0, unit: semitones, group: basic}
+      - {name: speed, label: Tempo, type: float, min: 0.5, max: 2, step: 0.05, default: 1.0, group: basic, help: "Above 1 = faster (all note lengths are divided by it)."}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+    presets: {}

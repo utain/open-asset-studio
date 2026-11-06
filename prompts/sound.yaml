@@ -1,0 +1,100 @@
+# Sound studio additions to the prompt improver (merged per style id over prompts/core.yaml).
+# Only `chips` are extended here: game-audio style chips for every sound / music / voice target, so the ✨ panel
+# offers the same vocabulary a sound designer uses (impact, UI, foley, creature, loopable ambience, battle music…).
+# The formats themselves (SA3 tags + negative, MiniMax caption + lyric structure, TTS instruct / tags) stay in core.yaml.
+
+chipsets:
+  sound_sfx: &sound_sfx
+    - {id: impact, label: Impact, hint: "short punchy impact, sharp transient, tight low end"}
+    - {id: ui, label: UI, hint: "clean game UI sound, short, clear, no reverb tail"}
+    - {id: ui_confirm, label: UI confirm, hint: "positive UI confirm / select sound, bright, short rising tone"}
+    - {id: pickup, label: Pickup / coin, hint: "item pickup or coin collect sound, sparkly, short, satisfying"}
+    - {id: foley, label: Foley, hint: "realistic foley recording, close-mic, dry"}
+    - {id: footsteps, label: Footsteps, hint: "footsteps, rhythmic, surface material clear"}
+    - {id: whoosh, label: Whoosh, hint: "fast whoosh / swish, air movement, short"}
+    - {id: weapon, label: Weapon, hint: "weapon sound, metallic, aggressive"}
+    - {id: explosion, label: Explosion, hint: "explosion, deep boom, debris tail"}
+    - {id: magic, label: Magic, hint: "fantasy magic spell sound, shimmering"}
+    - {id: creature, label: Creature, hint: "creature vocalization, non-human, no speech"}
+    - {id: hurt, label: Hit / hurt, hint: "character hit reaction / damage sound, non-verbal, short"}
+    - {id: mechanical, label: Mechanical, hint: "mechanical device, gears, servo, clicks"}
+    - {id: scifi, label: Sci-fi, hint: "futuristic sci-fi sound, synthetic, energy"}
+    - {id: retro, label: Retro 8-bit, hint: "retro 8-bit chiptune sound effect"}
+    - {id: ambience, label: Loopable ambience, hint: "continuous ambience bed, sustained, loopable, no sudden events"}
+  sound_amb: &sound_amb
+    - {id: ambience, label: Loopable ambience, hint: "continuous ambience bed, steady, seamless loop, no sudden events"}
+    - {id: forest, label: Forest, hint: "forest ambience: wind in leaves, distant birds, insects"}
+    - {id: dungeon, label: Dungeon, hint: "dungeon / cave ambience: dripping water, low drone, stone reverb"}
+    - {id: city, label: City / town, hint: "town ambience: distant crowd murmur, footsteps, carts (no intelligible speech)"}
+    - {id: night, label: Night, hint: "night ambience: crickets, soft wind, distant owl"}
+    - {id: rain, label: Rain / storm, hint: "rain ambience, steady rainfall, distant thunder"}
+    - {id: interior, label: Interior / room tone, hint: "interior room tone, quiet hum, subtle"}
+    - {id: scifi, label: Sci-fi ship, hint: "spaceship interior hum, machinery, air vents"}
+    - {id: battle, label: Battlefield, hint: "distant battlefield ambience: clashes, shouts as texture, no clear speech"}
+    - {id: water, label: Water, hint: "water ambience: river, waves or stream"}
+  sound_music: &sound_music
+    - {id: loopable, label: Loopable, hint: "seamless loopable game track, consistent energy, no ending, no fade out"}
+    - {id: battle, label: Battle music, hint: "battle music, driving percussion, intense, 140-160 BPM"}
+    - {id: boss, label: Boss fight, hint: "boss fight theme, epic, dramatic, heavy"}
+    - {id: exploration, label: Exploration, hint: "exploration theme, calm, wondrous, open"}
+    - {id: menu, label: Menu / title, hint: "main menu theme, inviting, memorable motif"}
+    - {id: town, label: Town / village, hint: "village / town theme, cozy, warm, acoustic"}
+    - {id: tension, label: Stealth / tension, hint: "tense stealth music, sparse, pulsing, suspense"}
+    - {id: victory, label: Victory sting, hint: "short victory fanfare / stinger, triumphant, 5-10 seconds"}
+    - {id: sad, label: Sad / emotional, hint: "emotional, melancholic, slow, piano and strings"}
+    - {id: chiptune, label: Chiptune, hint: "chiptune, 8-bit, retro console"}
+    - {id: orchestral, label: Orchestral, hint: "orchestral, cinematic, wide stereo"}
+    - {id: thai, label: Thai traditional, hint: "Thai traditional instruments: ranat ek, khim, pi, ching, khong wong"}
+    - {id: lofi, label: Lo-fi, hint: "lo-fi, mellow, soft"}
+    - {id: instrumental, label: Instrumental, hint: "instrumental, no vocals"}
+  sound_voice: &sound_voice
+    - {id: hero, label: Hero, hint: "heroic protagonist, confident"}
+    - {id: villain, label: Villain, hint: "menacing villain, cold"}
+    - {id: narrator, label: Narrator, hint: "calm storyteller narrator"}
+    - {id: merchant, label: Merchant / NPC, hint: "friendly shopkeeper NPC, chatty"}
+    - {id: child, label: Child, hint: "young child character"}
+    - {id: elder, label: Elder, hint: "elderly wise character"}
+    - {id: robot, label: Robot, hint: "robotic, synthetic character"}
+    - {id: creature, label: Creature, hint: "monster / creature voice"}
+    - {id: shout, label: Battle cry, hint: "shouting battle bark, high energy"}
+    - {id: hurt, label: Pain / effort, hint: "pain, effort grunt, short bark"}
+    - {id: whisper, label: Whisper, hint: "whispering, intimate"}
+    - {id: tutorial, label: Tutorial / UI voice, hint: "clear neutral announcer voice for tutorials and UI"}
+
+styles:
+  sfx: {chips: *sound_sfx}
+  moss_sfx: {chips: *sound_sfx}
+  ambience: {chips: *sound_amb}
+  sa3_music: {chips: *sound_music}
+  music: {chips: *sound_music}
+  minimax_music: {chips: *sound_music}
+  voice: {chips: *sound_voice}
+  moss_voicegen: {chips: *sound_voice}
+  omnivoice_design: {chips: *sound_voice}
+  qwen_tts: {chips: *sound_voice}
+  higgs: {chips: *sound_voice}
+  fish: {chips: *sound_voice}
+  orpheus: {chips: *sound_voice}
+  cosyvoice: {chips: *sound_voice}
+  tts_plain: {chips: *sound_voice}
+  sing_score:
+    label: DiffSinger score (Mandarin)
+    modality: music
+    negative: false
+    apply: {prompt: prompt}
+    system: |
+      TARGET: DiffSinger (Opencpop), a Mandarin singing-voice model that sings a SCORE, not a description.
+      "prompt" is the score: one syllable per line, exactly "<word> <note> <seconds>", lines joined with "\n".
+        - <word>: ONE Chinese character (or one pinyin syllable like "xiao") per line. "SP" is a breath / pause.
+        - <note>: a note name with octave: C4, D4, F#4, Bb3 ... ; "rest" for SP. Keep to A3-E5 (one female voice).
+          A slur (one syllable over two notes) is written "A#4,F#4 0.51,0.18" (notes and durations comma-separated).
+        - <seconds>: positive decimal, 0.2-0.8 for normal syllables, 0.8-1.6 for the last note of a phrase.
+      Write 8-24 syllables in short phrases (4-7 syllables), an "SP rest 0.2" between phrases. Stepwise melody,
+      a clear contour, end on the tonic. Lyrics in Mandarin that fit the user's idea (translate Thai / English
+      ideas into simple Mandarin). No explanations or code fences inside "prompt".
+      Example of the format:
+      你 C4 0.5
+      好 E4 0.5
+      SP rest 0.2
+      歌 G4,E4 0.4,0.4
+      "negative": "". Variations: other melodies and wording for the same idea.

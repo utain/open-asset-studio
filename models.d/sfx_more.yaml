@@ -1,0 +1,227 @@
+# sfx_more: more open-weight text-to-audio models. Backend `sfxmore` = envs/sfxmore (torch 2.9.1+cu130, diffusers 0.39,
+# transformers 4.57.3) + workers/sfxmore_worker.py. Report with measurements and install recipe: docs/research/audio_more/sfx_more.md
+#   NOTE on prompts: AudioLDM / Tango were trained on AudioCaps-style captions (one plain English sentence), so they use the
+#   `moss_sfx` improver style (natural caption) for sfx, not Stable Audio tags.
+#   NOTE on CLAP scores: AudioLDM 1/2 are conditioned on CLAP embeddings, so CLAP-prompt scores flatter them (see the report).
+backends:
+  sfxmore:
+    label: envs/sfxmore (AudioLDM 1/2, Tango 2, TangoFlux)
+    python: envs/sfxmore/bin/python
+    script: workers/sfxmore_worker.py
+    device: gpu
+    lock: sfxmore
+    max_loaded: 1
+
+models:
+  - id: audioldm-l-full
+    name: AudioLDM L (full)
+    modality: audio
+    tasks: [sfx, ambience]
+    order: 110
+    tags: [fast, sfx, non-commercial, 16k]
+    summary: "Original AudioLDM (CLAP-conditioned latent diffusion): quick one-shot SFX from a plain caption. 16 kHz mono, short clips; ambience is weak. Non-commercial."
+    features: {max_seconds: 20, sample_rate: 16000, channels: 1, negative: true, languages: [en]}
+    backend: sfxmore
+    weights: [{hf: cvssp/audioldm-l-full}]
+    license: {name: CC-BY-NC-SA-4.0, commercial: false}
+    memory_gb: 5
+    speed: "5 s clip, 100 steps: ~3 s warm, load 3-5 s, peak 2.0 GB"
+    est: {load_s: 5, run_s: 3}
+    prompt_style: {sfx: moss_sfx, ambience: ambience}
+    params:
+      - {name: seconds, label: Duration, type: float, min: 1, max: 20, step: 0.5, default: 5, unit: s, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 8, default: 4, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: steps, type: int, min: 10, max: 200, default: 100, group: advanced, help: "DDIM steps. 50 is a usable draft, 200 is the paper setting."}
+      - {name: guidance, label: Guidance, type: float, min: 1, max: 8, step: 0.5, default: 2.5, group: advanced}
+    presets: {fast: {batch: 2, steps: 50}, balanced: {batch: 4, steps: 100}, quality: {batch: 8, steps: 200}}
+
+  - id: tangoflux
+    name: TangoFlux
+    modality: audio
+    tasks: [sfx, ambience, music]
+    order: 115
+    tags: [fast, stereo, non-commercial, 44k]
+    summary: "Flow-matching text-to-audio (FluxTransformer + Flan-T5): 44.1 kHz stereo, up to 30 s in seconds. Good prompt adherence for SFX and ambience; non-commercial."
+    features: {max_seconds: 30, sample_rate: 44100, channels: 2, negative: false, languages: [en]}
+    backend: sfxmore
+    weights: [{hf: declare-lab/TangoFlux}, {hf: google/flan-t5-large, files: ["model.safetensors", "spiece.model"]}]
+    license: {name: "Stability AI Community + WavCaps (academic only)", commercial: false, note: "The model card says non-commercial / research only (WavCaps training data)."}
+    memory_gb: 10
+    speed: "25 steps: 3.5-4 s per take (always a 30 s latent), load 6 s, peak 7.0 GB (fp32)"
+    est: {load_s: 6, run_s: 4}
+    prompt_style: {sfx: moss_sfx, ambience: ambience, music: music}
+    params:
+      - {name: seconds, label: Duration, type: float, min: 1, max: 30, step: 0.5, default: 10, unit: s, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 8, default: 4, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: steps, type: int, min: 5, max: 100, default: 25, group: advanced}
+      - {name: guidance, label: Guidance, type: float, min: 1, max: 10, step: 0.5, default: 4.5, group: advanced}
+    presets: {fast: {batch: 2, steps: 15}, balanced: {batch: 4}, quality: {batch: 8, steps: 50}}
+
+  - id: audioldm2
+    name: AudioLDM 2
+    modality: audio
+    tasks: [sfx, ambience, music]
+    order: 111
+    tags: [sfx, music, non-commercial, 16k]
+    summary: "AudioLDM 2 (GPT-2 + Flan-T5 conditioning): SFX, ambience and short music from a plain caption. 16 kHz mono, about 10 s per clip. Non-commercial."
+    features: {max_seconds: 20, sample_rate: 16000, channels: 1, negative: true, languages: [en]}
+    backend: sfxmore
+    weights: [{hf: cvssp/audioldm2, files: ["unet/*.safetensors", "text_encoder_2/*.safetensors", "language_model/*.safetensors", "vae/*.safetensors", "vocoder/*.safetensors"]}]
+    license: {name: CC-BY-NC-SA-4.0, commercial: false}
+    memory_gb: 5
+    speed: "5-10 s clip, 100 steps: ~3 s warm, load 5-6 s, peak 2.5 GB"
+    est: {load_s: 6, run_s: 3}
+    prompt_style: {sfx: moss_sfx, ambience: ambience, music: music}
+    params:
+      - {name: seconds, label: Duration, type: float, min: 1, max: 20, step: 0.5, default: 10, unit: s, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 8, default: 3, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: steps, type: int, min: 10, max: 200, default: 100, group: advanced, help: "DDIM steps. 50 is a usable draft, 200 is the default of the paper."}
+      - {name: guidance, label: Guidance, type: float, min: 1, max: 8, step: 0.5, default: 3.5, group: advanced}
+    presets: {fast: {batch: 2, steps: 50}, balanced: {}, quality: {batch: 6, steps: 200}}
+
+  - id: audioldm2-large
+    name: AudioLDM 2 Large
+    modality: audio
+    tasks: [sfx, ambience, music]
+    order: 112
+    tags: [sfx, music, quality, non-commercial, 16k]
+    summary: "Bigger UNet of AudioLDM 2 (750 M): slightly better fidelity and prompt match than the base model, 2x slower. Non-commercial."
+    features: {max_seconds: 20, sample_rate: 16000, channels: 1, negative: true, languages: [en]}
+    backend: sfxmore
+    weights: [{hf: cvssp/audioldm2-large, files: ["unet/*.safetensors", "text_encoder_2/*.safetensors", "language_model/*.safetensors", "vae/*.safetensors", "vocoder/*.safetensors"]}]
+    license: {name: CC-BY-NC-SA-4.0, commercial: false}
+    memory_gb: 6
+    speed: "5-10 s clip, 100 steps: 8-12 s warm, load 15 s, peak 3.2 GB"
+    est: {load_s: 15, run_s: 10}
+    prompt_style: {sfx: moss_sfx, ambience: ambience, music: music}
+    params:
+      - {name: seconds, label: Duration, type: float, min: 1, max: 20, step: 0.5, default: 10, unit: s, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 8, default: 3, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: steps, type: int, min: 10, max: 200, default: 100, group: advanced}
+      - {name: guidance, label: Guidance, type: float, min: 1, max: 8, step: 0.5, default: 3.5, group: advanced}
+    presets: {fast: {batch: 2, steps: 50}, balanced: {}, quality: {batch: 6, steps: 200}}
+
+  - id: audioldm2-music
+    name: AudioLDM 2 Music
+    modality: audio
+    tasks: [music]
+    order: 113
+    tags: [music, non-commercial, 16k]
+    summary: "AudioLDM 2 fine-tuned on music: short instrumental loops from a caption (genre, instruments, mood). 16 kHz mono, quality is lo-fi. Non-commercial."
+    features: {max_seconds: 20, sample_rate: 16000, channels: 1, negative: true, languages: [en]}
+    backend: sfxmore
+    weights: [{hf: cvssp/audioldm2-music, files: ["unet/*.safetensors", "text_encoder_2/*.safetensors", "language_model/*.safetensors", "vae/*.safetensors", "vocoder/*.safetensors"]}]
+    license: {name: CC-BY-NC-SA-4.0, commercial: false}
+    memory_gb: 5
+    speed: "10 s clip, 100 steps: ~3 s warm, load 8 s, peak 2.5 GB"
+    est: {load_s: 8, run_s: 3}
+    prompt_style: music
+    params:
+      - {name: seconds, label: Duration, type: float, min: 2, max: 20, step: 0.5, default: 10, unit: s, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 6, default: 2, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: steps, type: int, min: 10, max: 200, default: 100, group: advanced}
+      - {name: guidance, label: Guidance, type: float, min: 1, max: 8, step: 0.5, default: 3.5, group: advanced}
+    presets: {fast: {batch: 1, steps: 50}, balanced: {}, quality: {batch: 4, steps: 200}}
+
+  - id: tango2
+    name: Tango 2
+    modality: audio
+    tasks: [sfx, ambience]
+    order: 114
+    tags: [sfx, non-commercial, 16k]
+    summary: "Flan-T5 conditioned latent diffusion, DPO-tuned for prompt adherence: AudioCaps-style sound scenes. 16 kHz mono, fixed 10 s window (trimmed to the length you ask). Non-commercial."
+    features: {max_seconds: 10, sample_rate: 16000, channels: 1, negative: false, languages: [en]}
+    backend: sfxmore
+    weights:
+      - {hf: declare-lab/tango2}
+      - {hf: google/flan-t5-large, files: ["model.safetensors", "spiece.model"]}
+      - {hf: sd2-community/stable-diffusion-2-1, files: ["scheduler/scheduler_config.json"]}
+    license: {name: CC-BY-NC-SA-4.0, commercial: false}
+    memory_gb: 9
+    speed: "100 steps (CFG): ~16 s per take at any length, load 15 s, peak 6.2 GB"
+    est: {load_s: 15, run_s: 17}
+    prompt_style: {sfx: moss_sfx, ambience: ambience}
+    params:
+      - {name: seconds, label: Duration, type: float, min: 1, max: 10, step: 0.5, default: 5, unit: s, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 8, default: 3, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: steps, type: int, min: 10, max: 200, default: 100, group: advanced}
+      - {name: guidance, label: Guidance, type: float, min: 1, max: 8, step: 0.5, default: 3.0, group: advanced}
+    presets: {fast: {batch: 2, steps: 50}, balanced: {}, quality: {batch: 6, steps: 200}}
+
+  - id: make-an-audio-2
+    name: Make-An-Audio 2
+    modality: audio
+    tasks: [sfx, ambience]
+    order: 116
+    tags: [sfx, temporal, 16k]
+    summary: "Structured-caption text-to-audio with good event ordering: describe it as '<event& start>@<event& end>' or let the plain prompt be used for one event. 16 kHz mono, up to 10 s."
+    features: {max_seconds: 10, sample_rate: 16000, channels: 1, negative: false, languages: [en]}
+    backend: sfxmore
+    weights:
+      - {hf: ByteDance/Make-An-Audio-2, files: ["maa2.ckpt"]}
+      - {hf: SC4949/make-an-audio-models, files: ["bigvgan/*"], label: "BigVGAN vocoder (HF copy of the Google Drive file named in the MAA2 README)"}
+      - {hf: google/t5-v1_1-large}
+      - {hf: google-bert/bert-base-uncased, files: ["vocab.txt", "tokenizer_config.json", "config.json", "model.safetensors"]}
+    license: {name: MIT, commercial: true, verify: true, note: "Code and maa2.ckpt are MIT; the training data (AudioSet, AudioCaps, Audiostock and others) carries its own terms, and the vocoder is a third-party HF copy of the Google Drive file."}
+    memory_gb: 8
+    speed: "100 DDIM steps: 2-3 s per take, load 22 s, peak 4.2 GB"
+    est: {load_s: 22, run_s: 3}
+    prompt_style: {sfx: moss_sfx, ambience: ambience}
+    params:
+      - {name: struct_prompt, label: "Structured caption (optional)", type: text, default: "", group: basic, placeholder: "<man speaking& start>@<popping noise& mid>@<laughter& end>", help: "Events with start / mid / end / all. Empty = the prompt as one event over the whole clip."}
+      - {name: seconds, label: Duration, type: float, min: 1, max: 10, step: 0.5, default: 5, unit: s, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 8, default: 3, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: steps, type: int, min: 10, max: 200, default: 100, group: advanced}
+      - {name: guidance, label: Guidance, type: float, min: 1, max: 8, step: 0.5, default: 4.0, group: advanced}
+    presets: {fast: {batch: 2, steps: 50}, balanced: {}, quality: {batch: 6, steps: 200}}
+
+  # ---- gated on Hugging Face (HTTP 401 without a login); weights cannot be downloaded here, no inference code wired
+  - id: stable-audio-open-1.0
+    name: Stable Audio Open 1.0
+    modality: audio
+    tasks: [sfx, ambience, music]
+    order: 130
+    tags: [stereo, 44k, blocked]
+    summary: "Stability's open 47 s stereo text-to-audio model (DiT). Gated: accept the licence on Hugging Face and log in. The studio already has Stable Audio 3."
+    features: {max_seconds: 47, sample_rate: 44100, channels: 2, negative: true, languages: [en], blocked: "gated on Hugging Face (401 without a login); accept the licence, hf auth login, then add a loader for diffusers StableAudioPipeline"}
+    backend: sfxmore
+    weights: [{hf: stabilityai/stable-audio-open-1.0, files: ["transformer/*.safetensors", "vae/*.safetensors", "text_encoder/*.safetensors"], fix: "Gated repo: accept the licence at huggingface.co/stabilityai/stable-audio-open-1.0, run hf auth login, then hf download stabilityai/stable-audio-open-1.0"}]
+    license: {name: Stability AI Community, commercial: true, note: "Free under USD 1 M revenue; training data includes CC-BY content that needs attribution."}
+    memory_gb: 10
+    speed: "-"
+    prompt_style: {sfx: sfx, ambience: ambience, music: sa3_music}
+    params:
+      - {name: seconds, label: Duration, type: float, min: 1, max: 47, step: 1, default: 10, unit: s, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 2, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: steps, type: int, min: 10, max: 250, default: 100, group: advanced}
+      - {name: guidance, label: Guidance, type: float, min: 1, max: 12, step: 0.5, default: 7, group: advanced}
+    presets: {}
+
+  - id: stable-audio-open-small
+    name: Stable Audio Open Small
+    modality: audio
+    tasks: [sfx, ambience]
+    order: 131
+    tags: [fast, stereo, 44k, blocked]
+    summary: "Stability's 341 M open SFX model, 11 s stereo, built for fast on-device use. Gated: accept the licence on Hugging Face and log in. The studio already has Stable Audio 3 Small."
+    features: {max_seconds: 11, sample_rate: 44100, channels: 2, negative: false, languages: [en], blocked: "gated on Hugging Face (401 without a login); needs stable-audio-tools format loading (model.safetensors + model_config.json)"}
+    backend: sfxmore
+    weights: [{hf: stabilityai/stable-audio-open-small, files: ["model.safetensors"], fix: "Gated repo: accept the licence at huggingface.co/stabilityai/stable-audio-open-small, run hf auth login, then hf download stabilityai/stable-audio-open-small"}]
+    license: {name: Stability AI Community, commercial: true, note: "Free under USD 1 M revenue."}
+    memory_gb: 4
+    speed: "-"
+    prompt_style: sfx
+    params:
+      - {name: seconds, label: Duration, type: float, min: 1, max: 11, step: 0.5, default: 5, unit: s, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 8, default: 4, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: steps, type: int, min: 4, max: 16, default: 8, group: advanced}
+    presets: {}

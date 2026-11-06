@@ -1,0 +1,97 @@
+/* Image / 3D / Pipelines pages. Prefixes: .i3d- (shared), .img- (Image), .m3d- (3D), .pl- (Pipelines). */
+
+/* ---- alpha background toggle (applies to every .checker inside the container) */
+.i3d-bg-white .checker { background: #fff !important; }
+.i3d-bg-black .checker { background: #000 !important; }
+.i3d-bg-grey .checker { background: #808080 !important; }
+.i3d-bgseg button { padding: 3px 8px; }
+
+/* ---- off-screen thumbnail renderer */
+/* model-viewer only loads / renders while it intersects the viewport: keep the host on screen, invisible, behind the page */
+.i3d-thumbhost { position: fixed; left: 0; top: 0; width: 384px; height: 384px; pointer-events: none; opacity: 0; z-index: -1; overflow: hidden; }
+.i3d-thumbhost model-viewer { width: 384px; height: 384px; background: transparent; }
+
+/* ---- mesh viewer */
+.i3d-viewer-wrap { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.i3d-viewer { border-radius: 14px; overflow: hidden; border: 1px solid var(--line-soft); background: var(--panel-2); min-height: 160px; }
+.i3d-viewer model-viewer { height: var(--vh, 420px); width: 100%; }
+.i3d-viewer > .empty { height: var(--vh, 420px); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 18px; }
+.i3d-vbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
+.i3d-vstats { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; min-width: 0; }
+.i3d-vstats > * { min-width: 0; max-width: 100%; }
+
+/* ---- image preview */
+.i3d-img { border-radius: 12px; overflow: hidden; border: 1px solid var(--line-soft); display: grid; place-items: center; cursor: zoom-in; aspect-ratio: 1 / 1; background: var(--panel-2); }
+.i3d-img img { width: 100%; height: 100%; object-fit: contain; display: block; }
+
+/* help text under segmented choices (ParamForm renders it inline after the .seg) */
+section.page[data-studio="image"] div.field > .field-help, section.page[data-studio="3d"] div.field > .field-help,
+section.page[data-studio="pipelines"] div.field > .field-help { display: block; margin-top: 4px; }
+
+/* ---- Image studio */
+.img-presets { display: flex; flex-wrap: wrap; gap: 6px; }
+.img-presets .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.img-tip { font-size: 12px; color: var(--text-3); line-height: 1.45; }
+.img-headtools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* ---- 3D studio */
+.m3d-top { margin-bottom: 16px; }
+.m3d-top .i3d-viewer model-viewer, .m3d-top .i3d-viewer > .empty { height: min(var(--vh, 420px), 56vh); }
+
+/* ---- Pipelines */
+.pl { display: grid; grid-template-columns: 290px minmax(0, 1fr); height: 100%; min-height: 0; }
+.pl-side { border-right: 1px solid var(--line-soft); background: var(--bg-2); overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.pl-main { overflow-y: auto; min-width: 0; padding: 18px 22px 60px; }
+.pl-start { display: flex; flex-direction: column; gap: 8px; }
+.pl-kind { display: flex; gap: 10px; align-items: flex-start; padding: 11px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; text-align: left; color: var(--text); width: 100%; }
+.pl-kind:hover { border-color: var(--accent); }
+.pl-kind .pl-kind-t { font-weight: 650; }
+.pl-kind .pl-kind-s { font-size: 12px; color: var(--text-2); margin-top: 2px; }
+.pl-flows { display: flex; flex-direction: column; gap: 6px; }
+.pl-flow { display: flex; gap: 8px; align-items: center; padding: 7px 8px; border-radius: 10px; cursor: pointer; border: 1px solid transparent; min-width: 0; }
+.pl-flow:hover { background: var(--panel-2); }
+.pl-flow.on { border-color: var(--accent); background: var(--accent-soft); }
+.pl-flow img, .pl-flow .pl-ph { width: 38px; height: 38px; border-radius: 8px; object-fit: contain; background: var(--panel-2); flex: none; display: grid; place-items: center; }
+.pl-head { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; min-width: 0; }
+.pl-head h2 { margin: 0; font-size: 20px; letter-spacing: -.01em; min-width: 0; overflow-wrap: anywhere; }
+.pl-steps { display: flex; flex-direction: column; gap: 12px; max-width: 1100px; }
+.pl-step { border: 1px solid var(--line-soft); border-radius: 14px; background: var(--panel); min-width: 0; }
+.pl-step.active { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); box-shadow: 0 0 0 3px var(--accent-soft); }
+.pl-step-h { display: flex; align-items: center; gap: 10px; padding: 12px 14px; cursor: pointer; min-width: 0; }
+.pl-num { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 13px; background: var(--panel-3); color: var(--text-2); flex: none; }
+.pl-step.done .pl-num { background: var(--ok-soft); color: var(--ok); }
+.pl-step.active .pl-num { background: var(--accent); color: var(--accent-ink); }
+.pl-step.skipped .pl-num { background: var(--panel-2); color: var(--text-3); }
+.pl-step-t { font-weight: 650; min-width: 0; }
+.pl-step-s { font-size: 12px; color: var(--text-3); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-step-b { padding: 4px 14px 14px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.pl-cols { display: grid; grid-template-columns: minmax(0, 360px) minmax(0, 1fr); gap: 18px; align-items: start; }
+.pl-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.pl-pick .acard { cursor: pointer; }
+.pl-pick .acard.picked { border-color: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+.pl-pick .acard.picked::after { content: "✓ picked"; position: absolute; left: 8px; top: 8px; background: var(--ok); color: #fff; font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 6px; }
+.pl-mini { display: flex; gap: 8px; flex-wrap: wrap; }
+.pl-mini img { width: 54px; height: 54px; border-radius: 8px; object-fit: contain; background: var(--panel-2); border: 1px solid var(--line-soft); }
+.pl-needs { border: 1px dashed var(--warn); border-radius: 12px; padding: 12px; background: var(--warn-soft); display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; }
+.pl-profile { border: 1px solid var(--line-soft); border-radius: 12px; padding: 10px 12px; background: var(--accent-soft); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 12.5px; }
+.pl-profile .pl-profile-t { flex: 1 1 240px; min-width: 0; }
+.pl-profile .tg-pick { max-width: 260px; }
+.pl-lines { font-family: var(--mono); font-size: 12.5px; }
+.pl-prev { max-width: 360px; width: 100%; }
+.pl-sum { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+
+@media (max-width: 1100px) {
+  .pl-cols { grid-template-columns: minmax(0, 1fr); }
+}
+/* many task tabs: the tab row scrolls instead of widening the single-column phone layout */
+section.page[data-studio="image"] .studio-panel, section.page[data-studio="3d"] .studio-panel, .task-tabs { min-width: 0; }
+@media (max-width: 900px) {
+  section.page[data-studio="image"] .studio, section.page[data-studio="3d"] .studio { grid-template-columns: minmax(0, 1fr); }
+  .pl { grid-template-columns: minmax(0, 1fr); height: auto; }
+  .pl-side { border-right: 0; border-bottom: 1px solid var(--line-soft); overflow: visible; }
+  .pl-main { overflow: visible; padding: 14px 16px 40px; }
+}
+@media (max-width: 760px) {
+  .i3d-viewer model-viewer, .i3d-viewer > .empty { height: min(var(--vh, 420px), 360px); }
+  .pl-prev { max-width: 100%; }
+}

@@ -1,0 +1,6 @@
+Vendored front-end libraries (no CDN at runtime). Pinned versions:
+  model-viewer.min.js         @google/model-viewer 3.1.1 (file header BSD-3-Clause, package LICENSE Apache-2.0: model-viewer-LICENSE.txt) - from the @google/model-viewer 3.1.1 npm package
+  wavesurfer.esm.js           wavesurfer.js 7.10.1 (BSD-3-Clause: wavesurfer-LICENSE.txt) - npm pack, dist/wavesurfer.esm.js
+  wavesurfer-regions.esm.js   wavesurfer.js 7.10.1 plugins/regions.esm.js
+  fonts/inter-latin-wght.woff2  @fontsource-variable/inter 5.1.1 (OFL-1.1: fonts/inter-OFL-LICENSE.txt), latin, variable weight
+  ../core/icons.js            subset of lucide-static 0.468.0 (ISC), inlined SVG paths (lucide-LICENSE.txt)

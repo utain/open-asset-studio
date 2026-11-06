@@ -1,0 +1,387 @@
+# Music group: open-weight music / song models added next to models.d/sound.yaml.
+# One venv per incompatible dependency set (envs/music_*); the numbers (memory_gb, est) are measured on the DGX Spark,
+# see docs/research/audio_more/music.md. All AudioCraft weights and MuQ-based styles are non-commercial.
+
+backends:
+  music_audiocraft:
+    label: "envs/music_audiocraft (MusicGen, AudioGen, MAGNeT; torch 2.9 cu130, xformers stubbed)"
+    python: envs/music_audiocraft/bin/python
+    script: workers/music_audiocraft_worker.py
+    device: gpu
+    lock: music_audiocraft
+    max_loaded: 2
+    model_idle_s: 300
+
+  music_riffusion:
+    label: "envs/music_audiocraft (shared venv; diffusers + torchaudio)"
+    python: envs/music_audiocraft/bin/python
+    script: workers/music_riffusion_worker.py
+    device: gpu
+    lock: music_audiocraft
+    max_loaded: 1
+    model_idle_s: 300
+  music_acestep:
+    label: "envs/music_acestep (ACE-Step 1.5; torch 2.10 cu130)"
+    python: envs/music_acestep/bin/python
+    script: workers/music_acestep_worker.py
+    device: gpu
+    lock: music_acestep
+    max_loaded: 1
+    model_idle_s: 300
+  music_diffrhythm:
+    label: "envs/music_diffrhythm (DiffRhythm 1.2; espeak-ng from the system)"
+    python: envs/music_diffrhythm/bin/python
+    script: workers/music_diffrhythm_worker.py
+    device: gpu
+    lock: music_diffrhythm
+    max_loaded: 1
+    model_idle_s: 300
+  music_yue:
+    label: "envs/music_yue (YuE v1: 7B stage 1 + 1B stage 2 + xcodec)"
+    python: envs/music_yue/bin/python
+    script: workers/music_yue_worker.py
+    device: gpu
+    lock: music_yue
+    max_loaded: 1
+    model_idle_s: 300
+  music_heartmula:
+    label: "envs/music_heartmula (HeartMuLa + HeartCodec via heartlib)"
+    python: envs/music_heartmula/bin/python
+    script: workers/music_heartmula_worker.py
+    device: gpu
+    lock: music_heartmula
+    max_loaded: 1
+    model_idle_s: 300
+  music_magenta:
+    label: "envs/music_magenta (Magenta RealTime 2, JAX cuda13)"
+    python: envs/music_magenta/bin/python
+    script: workers/music_magenta_worker.py
+    device: gpu
+    lock: music_magenta
+    max_loaded: 1
+    model_idle_s: 300
+  music_levo:
+    label: "envs/music_levo (not installed: upstream code is not available)"
+    python: envs/music_levo/bin/python
+    script: workers/music_levo_worker.py
+    device: gpu
+    fix: "Not installed: the upstream SongGeneration code is not available, so there is no environment to recreate."
+    max_loaded: 1
+    model_idle_s: 300
+
+models:
+  - id: musicgen-medium
+    name: MusicGen Medium (1.5B)
+    modality: audio
+    tasks: [music]
+    order: 100
+    tags: [music, instrumental, non-commercial]
+    summary: "Meta MusicGen: instrumental music from a text description, 32 kHz mono, up to 30 s per window (longer = sliding window). Can continue a clip."
+    features: {max_seconds: 60, sample_rate: 32000, channels: 1, negative: false, extend: true, languages: [en]}
+    backend: music_audiocraft
+    weights: [{hf: facebook/musicgen-medium, files: [state_dict.bin, compression_state_dict.bin]}, {hf: google-t5/t5-base, files: [model.safetensors, config.json, spiece.model, tokenizer.json]}]
+    license: {name: CC-BY-NC-4.0, commercial: false, note: "Weights are non-commercial (Meta AudioCraft). Code is MIT."}
+    memory_gb: 8
+    est: {load_s: 18, run_s: 12}
+    prompt_style: sa3_music
+    params:
+      - {name: seconds, label: Duration, type: float, min: 2, max: 60, step: 1, default: 10, unit: s, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 2, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: extend_seconds, label: Extend by, type: float, min: 2, max: 40, step: 1, default: 10, unit: s, group: advanced, help: "Only when a clip to extend is set: how much new audio to add after the last 8 s of the clip."}
+      - {name: cfg_coef, label: CFG, type: float, min: 1, max: 10, step: 0.5, default: 3.0, group: advanced}
+      - {name: temperature, type: float, min: 0.1, max: 1.5, step: 0.05, default: 1.0, group: advanced}
+      - {name: top_k, type: int, min: 0, max: 1000, default: 250, group: advanced}
+    presets: {fast: {batch: 1, seconds: 8}, balanced: {}, quality: {batch: 4, seconds: 20}}
+
+  - id: musicgen-melody
+    name: MusicGen Melody (1.5B)
+    modality: audio
+    tasks: [music]
+    order: 101
+    tags: [music, instrumental, melody, non-commercial]
+    summary: "MusicGen with melody conditioning: text prompt plus a reference tune (hummed or played); the output follows its chroma (pitch contour). 32 kHz mono."
+    features: {max_seconds: 60, sample_rate: 32000, channels: 1, negative: false, extend: true, melody: true, languages: [en]}
+    backend: music_audiocraft
+    input_slots:
+      - {role: "melody", label: "Melody reference", types: ["audio"], required: false, hint: "A hummed or played tune: the output follows its pitch contour. Ignored when a clip to continue is set."}
+      - {role: "source", label: "Clip to continue", types: ["audio"], required: false, hint: "Generate the continuation of this clip (Advanced → Extend by). The prompt should describe the clip."}
+    weights: [{hf: facebook/musicgen-melody, files: [state_dict.bin, compression_state_dict.bin]}, {hf: google-t5/t5-base, files: [model.safetensors, config.json, spiece.model, tokenizer.json]}]
+    license: {name: CC-BY-NC-4.0, commercial: false, note: "Weights are non-commercial (Meta AudioCraft). Code is MIT."}
+    memory_gb: 8
+    est: {load_s: 18, run_s: 12}
+    prompt_style: sa3_music
+    params:
+      - {name: seconds, label: Duration, type: float, min: 2, max: 60, step: 1, default: 10, unit: s, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 2, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: extend_seconds, label: Extend by, type: float, min: 2, max: 40, step: 1, default: 10, unit: s, group: advanced, help: "Only when a clip to extend is set."}
+      - {name: cfg_coef, label: CFG, type: float, min: 1, max: 10, step: 0.5, default: 3.0, group: advanced}
+      - {name: temperature, type: float, min: 0.1, max: 1.5, step: 0.05, default: 1.0, group: advanced}
+      - {name: top_k, type: int, min: 0, max: 1000, default: 250, group: advanced}
+    presets: {fast: {batch: 1, seconds: 8}, balanced: {}, quality: {batch: 4, seconds: 20}}
+
+  - id: musicgen-stereo-medium
+    name: MusicGen Stereo Medium (1.5B)
+    modality: audio
+    tasks: [music]
+    order: 102
+    tags: [music, instrumental, stereo, non-commercial]
+    summary: "MusicGen Medium fine-tuned for stereo output (32 kHz, 2 channels). Same prompting as MusicGen Medium. Can continue a clip."
+    features: {max_seconds: 60, sample_rate: 32000, channels: 2, negative: false, extend: true, languages: [en]}
+    backend: music_audiocraft
+    weights: [{hf: facebook/musicgen-stereo-medium, files: [state_dict.bin, compression_state_dict.bin]}, {hf: facebook/encodec_32khz, files: [config.json, model.safetensors]}, {hf: google-t5/t5-base, files: [model.safetensors, config.json, spiece.model, tokenizer.json]}]
+    license: {name: CC-BY-NC-4.0, commercial: false, note: "Weights are non-commercial (Meta AudioCraft). Code is MIT."}
+    memory_gb: 8
+    est: {load_s: 18, run_s: 12}
+    prompt_style: sa3_music
+    params:
+      - {name: seconds, label: Duration, type: float, min: 2, max: 60, step: 1, default: 10, unit: s, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 2, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: extend_seconds, label: Extend by, type: float, min: 2, max: 40, step: 1, default: 10, unit: s, group: advanced, help: "Only when a clip to extend is set."}
+      - {name: cfg_coef, label: CFG, type: float, min: 1, max: 10, step: 0.5, default: 3.0, group: advanced}
+      - {name: temperature, type: float, min: 0.1, max: 1.5, step: 0.05, default: 1.0, group: advanced}
+      - {name: top_k, type: int, min: 0, max: 1000, default: 250, group: advanced}
+    presets: {fast: {batch: 1, seconds: 8}, balanced: {}, quality: {batch: 4, seconds: 20}}
+
+  - id: audiogen-medium
+    name: AudioGen Medium (1.5B)
+    modality: audio
+    tasks: [sfx]
+    order: 110
+    tags: [sfx, ambience, non-commercial]
+    summary: "Meta AudioGen: sound effects and environmental audio from a text description, 16 kHz mono (lo-fi, good for prototyping). Describe the sound, not the scene."
+    features: {max_seconds: 30, sample_rate: 16000, channels: 1, negative: false, extend: true, languages: [en]}
+    backend: music_audiocraft
+    weights: [{hf: facebook/audiogen-medium, files: [state_dict.bin, compression_state_dict.bin]}, {hf: google-t5/t5-large, files: [model.safetensors, config.json, spiece.model, tokenizer.json]}]
+    license: {name: CC-BY-NC-4.0, commercial: false, note: "Weights are non-commercial (Meta AudioCraft). Code is MIT."}
+    memory_gb: 8
+    est: {load_s: 17, run_s: 7}
+    prompt_style: sfx
+    params:
+      - {name: seconds, label: Duration, type: float, min: 1, max: 30, step: 0.5, default: 5, unit: s, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 6, default: 3, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: extend_seconds, label: Extend by, type: float, min: 2, max: 20, step: 1, default: 5, unit: s, group: advanced, help: "Only when a clip to extend is set."}
+      - {name: cfg_coef, label: CFG, type: float, min: 1, max: 10, step: 0.5, default: 3.0, group: advanced}
+      - {name: temperature, type: float, min: 0.1, max: 1.5, step: 0.05, default: 1.0, group: advanced}
+      - {name: top_k, type: int, min: 0, max: 1000, default: 250, group: advanced}
+    presets: {fast: {batch: 1, seconds: 4}, balanced: {}, quality: {batch: 6, seconds: 8}}
+
+  - id: magnet-medium-10secs
+    name: MAGNeT Medium (10 s)
+    modality: audio
+    tasks: [music]
+    order: 103
+    tags: [music, instrumental, fast, non-commercial]
+    summary: "Meta MAGNeT: non-autoregressive masked-token music model, always 10 s at 32 kHz mono, several times faster than MusicGen. Quality is below MusicGen."
+    features: {max_seconds: 10, fixed_seconds: 10, sample_rate: 32000, channels: 1, negative: false, languages: [en]}
+    backend: music_audiocraft
+    weights: [{hf: facebook/magnet-medium-10secs, files: [state_dict.bin, compression_state_dict.bin]}, {hf: google-t5/t5-base, files: [model.safetensors, config.json, spiece.model, tokenizer.json]}]
+    license: {name: CC-BY-NC-4.0, commercial: false, note: "Weights are non-commercial (Meta AudioCraft). Code is MIT."}
+    memory_gb: 8
+    est: {load_s: 19, run_s: 12}
+    prompt_style: sa3_music
+    params:
+      - {name: batch, label: Takes, type: int, min: 1, max: 6, default: 3, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: steps, label: Decoding steps (codebook 1), type: int, min: 10, max: 60, default: 20, group: advanced}
+      - {name: cfg_coef, label: Max CFG, type: float, min: 1, max: 20, step: 1, default: 10, group: advanced}
+      - {name: temperature, type: float, min: 0.5, max: 5, step: 0.5, default: 3.0, group: advanced}
+      - {name: top_p, type: float, min: 0.5, max: 1, step: 0.05, default: 0.9, group: advanced}
+    presets: {fast: {batch: 1, steps: 12}, balanced: {}, quality: {batch: 6, steps: 40}}
+
+  - id: riffusion-v1
+    name: Riffusion v1 (spectrogram diffusion)
+    modality: audio
+    tasks: [music]
+    order: 150
+    tags: [music, instrumental, loops, quirky]
+    summary: "Stable Diffusion 1.5 fine-tuned on spectrogram images: ~5 s lo-fi loops (44.1 kHz mono, Griffin-Lim phase). Cheap, fast and quirky; a spectrogram image is attached to every take."
+    features: {max_seconds: 5, fixed_seconds: 5, sample_rate: 44100, channels: 1, negative: true, languages: [en]}
+    backend: music_riffusion
+    weights: [{hf: riffusion/riffusion-model-v1, files: ["unet/diffusion_pytorch_model.bin", "unet/config.json", "vae/diffusion_pytorch_model.bin", "vae/config.json", "text_encoder/pytorch_model.bin", "text_encoder/config.json", "tokenizer/*", "scheduler/scheduler_config.json", "model_index.json"]}]
+    license: {name: CreativeML OpenRAIL-M, commercial: true, note: "Commercial use allowed with the OpenRAIL-M use restrictions (no harmful use); the model is old and low fidelity."}
+    memory_gb: 4
+    est: {load_s: 3, run_s: 3}
+    prompt_style: sa3_music
+    params:
+      - {name: batch, label: Takes, type: int, min: 1, max: 8, default: 4, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: steps, type: int, min: 10, max: 80, default: 30, group: advanced}
+      - {name: guidance, label: CFG, type: float, min: 1, max: 15, step: 0.5, default: 7.0, group: advanced}
+    presets: {fast: {batch: 2, steps: 20}, balanced: {}, quality: {batch: 8, steps: 50}}
+
+  - id: acestep-1.5-turbo
+    name: ACE-Step 1.5 Turbo (+ 1.7B planner)
+    modality: audio
+    tasks: [song, music]
+    order: 120
+    tags: [vocals, lyrics, fast, multilingual, commercial]
+    summary: "Open-source song model: lyrics + vocals + style caption, 10 s to 10 min, 50+ languages, 48 kHz stereo. Few diffusion steps (8, turbo) after an optional 1.7B language-model planner that writes BPM/key/structure. MIT."
+    features: {max_seconds: 600, sample_rate: 48000, channels: 2, lyrics: true, negative: false, languages: [en, zh, ja, ko, es, fr, de, th]}
+    backend: music_acestep
+    weights: [{hf: ACE-Step/Ace-Step1.5, files: ["acestep-v15-turbo/*", "acestep-5Hz-lm-1.7B/*", "vae/*", "Qwen3-Embedding-0.6B/*", "config.json"]}]
+    license: {name: MIT, commercial: true, note: "Code and weights MIT (ACE-Step 1.5). Training data claimed licensed / synthetic."}
+    memory_gb: 14
+    est: {load_s: 48, run_s: 14}
+    prompt_style: {song: minimax_music, music: sa3_music}
+    params:
+      - {name: lyrics, type: lyrics, default: "", group: basic, help: "Section tags alone on their own line: [Verse] [Chorus] [Bridge] [Instrumental]. Empty = instrumental."}
+      - {name: seconds, label: Duration, type: float, min: 10, max: 300, step: 5, default: 60, unit: s, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: language, label: Vocal language, type: choice, choices: [unknown, en, zh, ja, ko, es, fr, de, th], default: unknown, group: advanced}
+      - {name: bpm, label: BPM (0 = let the planner choose), type: int, min: 0, max: 220, default: 0, group: advanced}
+      - {name: keyscale, label: Key, type: text, default: "", group: advanced, help: "e.g. D minor. Empty = planner chooses."}
+      - {name: steps, label: Diffusion steps, type: int, min: 4, max: 20, default: 8, group: advanced, help: "Turbo is trained for 8."}
+      - {name: thinking, label: Use the planner LM, type: bool, default: true, group: advanced}
+      - {name: lm_temperature, type: float, min: 0.1, max: 1.5, step: 0.05, default: 0.85, group: advanced}
+    presets: {fast: {seconds: 30, thinking: false}, balanced: {}, quality: {seconds: 120, steps: 12, batch: 2}}
+
+  - id: diffrhythm-1.2-full
+    name: DiffRhythm 1.2 Full (up to 4:45)
+    modality: audio
+    tasks: [song, music]
+    order: 130
+    tags: [vocals, lyrics, long, non-commercial]
+    summary: "Latent-diffusion full-length songs (96 s to 4:45) with vocals from lyrics + a text style or a reference clip; 44.1 kHz stereo. Fast for its length; vocals are less intelligible than ACE-Step. Plain lyrics are auto-timed."
+    features: {max_seconds: 285, min_seconds: 96, sample_rate: 44100, channels: 2, lyrics: true, ref_audio: true, negative: false, languages: [en, zh]}
+    backend: music_diffrhythm
+    input_slots:
+      - {role: "ref", label: "Style reference", types: ["audio"], required: false, hint: "A song or loop whose style to follow (MuQ-MuLan embedding). Used when the style prompt is empty; a written style wins when both are given.", replaces_prompt: true}
+    weights: [{hf: ASLP-lab/DiffRhythm-1_2-full, files: [cfm_model.pt]}, {hf: ASLP-lab/DiffRhythm-vae, files: [vae_model.pt]}, {hf: OpenMuQ/MuQ-MuLan-large}, {hf: OpenMuQ/MuQ-large-msd-iter, files: [config.json, model.safetensors]}, {hf: FacebookAI/xlm-roberta-base, files: [config.json, sentencepiece.bpe.model, tokenizer.json, model.safetensors]}]
+    license: {name: "Apache-2.0 (code) / CC-BY-NC (MuQ-MuLan)", commercial: false, note: "DiffRhythm itself is Apache-2.0 but its style encoder MuQ-MuLan-large is CC-BY-NC 4.0, so the pipeline is non-commercial."}
+    memory_gb: 10
+    est: {load_s: 16, run_s: 11}
+    prompt_style: {song: music, music: sa3_music}
+    params:
+      - {name: lyrics, type: lyrics, default: "", group: basic, help: "Plain lines (auto-timed over the song) or LRC lines like [00:12.50] text. Give about one line per 6-8 s: sparse lyrics make the vocals mumble. [section] tag lines are dropped. Empty (or the music task) = no words."}
+      - {name: seconds, label: Duration, type: float, min: 96, max: 285, step: 1, default: 120, unit: s, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 3, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: steps, label: Diffusion steps, type: int, min: 8, max: 64, default: 32, group: advanced}
+      - {name: cfg_scale, label: CFG, type: float, min: 1, max: 8, step: 0.5, default: 4.0, group: advanced}
+    presets: {fast: {seconds: 96, steps: 16}, balanced: {}, quality: {seconds: 180, steps: 48}}
+
+  - id: diffrhythm-1.2
+    name: DiffRhythm 1.2 (95 s)
+    modality: audio
+    tasks: [song, music]
+    order: 131
+    tags: [vocals, lyrics, fast, non-commercial]
+    summary: "DiffRhythm 1.2 base: fixed 95 s songs with vocals from lyrics + a text style or reference clip; 44.1 kHz stereo. Quicker than the full model, same style encoder."
+    features: {max_seconds: 95, fixed_seconds: 95, sample_rate: 44100, channels: 2, lyrics: true, ref_audio: true, negative: false, languages: [en, zh]}
+    backend: music_diffrhythm
+    input_slots:
+      - {role: "ref", label: "Style reference", types: ["audio"], required: false, hint: "A song or loop whose style to follow (MuQ-MuLan embedding). Used when the style prompt is empty; a written style wins when both are given.", replaces_prompt: true}
+    weights: [{hf: ASLP-lab/DiffRhythm-1_2, files: [cfm_model.pt]}, {hf: ASLP-lab/DiffRhythm-vae, files: [vae_model.pt]}, {hf: OpenMuQ/MuQ-MuLan-large}, {hf: OpenMuQ/MuQ-large-msd-iter, files: [config.json, model.safetensors]}, {hf: FacebookAI/xlm-roberta-base, files: [config.json, sentencepiece.bpe.model, tokenizer.json, model.safetensors]}]
+    license: {name: "Apache-2.0 (code) / CC-BY-NC (MuQ-MuLan)", commercial: false, note: "DiffRhythm itself is Apache-2.0 but its style encoder MuQ-MuLan-large is CC-BY-NC 4.0, so the pipeline is non-commercial."}
+    memory_gb: 9
+    est: {load_s: 25, run_s: 20}
+    prompt_style: {song: music, music: sa3_music}
+    params:
+      - {name: lyrics, type: lyrics, default: "", group: basic, help: "Plain lines (auto-timed over the song) or LRC lines like [00:12.50] text. Give about one line per 6-8 s: sparse lyrics make the vocals mumble. [section] tag lines are dropped. Empty (or the music task) = no words."}
+      - {name: batch, label: Takes, type: int, min: 1, max: 3, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: steps, label: Diffusion steps, type: int, min: 8, max: 64, default: 32, group: advanced}
+      - {name: cfg_scale, label: CFG, type: float, min: 1, max: 8, step: 0.5, default: 4.0, group: advanced}
+    presets: {fast: {steps: 16}, balanced: {}, quality: {steps: 48}}
+
+  - id: yue-s1-7b
+    name: YuE (7B + 1B, English)
+    modality: audio
+    tasks: [song]
+    order: 140
+    tags: [vocals, lyrics, heavy, apache]
+    summary: "HKUST/M-A-P YuE v1: lyrics-to-song with vocals and accompaniment (LLaMA 7B stage 1 + 1B upsampler). Heavy and slow (~minutes per 30 s segment); one segment of lyrics per take by default. Lyrics need [verse]/[chorus] tags, genre tags as one line."
+    features: {max_seconds: 90, sample_rate: 44100, channels: 1, lyrics: true, ref_audio: true, negative: false, languages: [en]}
+    backend: music_yue
+    input_slots:
+      - {role: "ref", label: "Audio prompt", types: ["audio"], required: false, hint: "Optional clip (first 30 s are used): the song follows its voice and style. The genre tags are still required."}
+    weights: [{hf: m-a-p/YuE-s1-7B-anneal-en-cot, files: ["*.json", "*.safetensors"]}, {hf: m-a-p/YuE-s2-1B-general, files: ["*.json", "model.safetensors"]}, {hf: m-a-p/xcodec_mini_infer}]
+    license: {name: Apache-2.0, commercial: true, note: "YuE v1 weights Apache-2.0 (credit 'YuE by HKUST/M-A-P' if you publish output). xcodec_mini_infer: see its model card."}
+    memory_gb: 26
+    est: {load_s: 93, run_s: 470}
+    kill_on_cancel: true
+    prompt_style: {song: music}
+    params:
+      - {name: lyrics, type: lyrics, default: "", group: basic, help: "Required. Sections as [verse] / [chorus] / [bridge] / [outro] ... each tag alone on its own line, lyric lines below."}
+      - {name: seconds, label: Seconds per segment, type: float, min: 12, max: 30, step: 2, default: 12, unit: s, group: basic, help: "Length of each generated lyric section (the model may stop earlier). 12 s keeps a test run to a few minutes."}
+      - {name: segments, label: Lyric sections to sing, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 2, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: cfg_scale, label: CFG (first section), type: float, min: 1, max: 3, step: 0.1, default: 1.5, group: advanced}
+      - {name: repetition_penalty, type: float, min: 1, max: 1.6, step: 0.05, default: 1.1, group: advanced}
+      - {name: top_p, type: float, min: 0.5, max: 1, step: 0.01, default: 0.93, group: advanced}
+      - {name: temperature, type: float, min: 0.5, max: 1.5, step: 0.05, default: 1.0, group: advanced}
+    presets: {fast: {seconds: 12}, balanced: {seconds: 20}, quality: {seconds: 30, segments: 2}}
+
+  - id: heartmula-3b
+    name: HeartMuLa 3B (2026)
+    modality: audio
+    tasks: [song, music]
+    order: 125
+    tags: [vocals, lyrics, multilingual, commercial, new]
+    summary: "HeartMuLa (Jan 2026, Apache-2.0): 3B autoregressive song model with HeartCodec, 48 kHz stereo; lyrics + comma-separated style tags, multilingual (en, zh, ja, ko, es). Seconds of audio = 12.5 frames/s of tokens."
+    features: {max_seconds: 240, sample_rate: 48000, channels: 2, lyrics: true, negative: false, languages: [en, zh, ja, ko, es]}
+    backend: music_heartmula
+    weights: [{hf: HeartMuLa/HeartMuLaGen, files: [tokenizer.json, gen_config.json]}, {hf: HeartMuLa/HeartMuLa-oss-3B-happy-new-year}, {hf: HeartMuLa/HeartCodec-oss-20260123}]
+    license: {name: Apache-2.0, commercial: true, note: "Code and weights Apache-2.0."}
+    memory_gb: 20
+    est: {load_s: 11, run_s: 40}
+    prompt_style: {song: music, music: sa3_music}
+    params:
+      - {name: lyrics, type: lyrics, default: "", group: basic, help: "[intro] [verse] [chorus] [bridge] [outro] tags alone on their own line. Empty = [instrumental]."}
+      - {name: seconds, label: Max duration, type: float, min: 10, max: 240, step: 5, default: 60, unit: s, group: basic, help: "Upper bound; the model may end the song earlier."}
+      - {name: batch, label: Takes, type: int, min: 1, max: 3, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: cfg_scale, label: CFG, type: float, min: 1, max: 4, step: 0.1, default: 1.5, group: advanced}
+      - {name: temperature, type: float, min: 0.5, max: 1.5, step: 0.05, default: 1.0, group: advanced}
+      - {name: top_k, type: int, min: 1, max: 200, default: 50, group: advanced}
+    presets: {fast: {seconds: 30}, balanced: {}, quality: {seconds: 150, batch: 2}}
+
+  - id: magenta-rt2-small
+    name: Magenta RealTime 2 Small (JAX)
+    modality: audio
+    tasks: [music]
+    order: 160
+    tags: [music, instrumental, realtime, jax]
+    summary: "Google Magenta RealTime 2 (230M): streaming instrumental music from a text style (MusicCoCa embedding), 25 steps/s, 48 kHz stereo; generated here offline in 5 s chunks. Style-driven loops rather than structured songs."
+    features: {max_seconds: 120, sample_rate: 48000, channels: 2, negative: false, languages: [en]}
+    backend: music_magenta
+    weights: [{hf: google/magenta-realtime-2, files: ["resources/*", "checkpoints/mrt2_small.safetensors"]}]
+    license: {name: CC-BY-4.0 (weights) / Apache-2.0 (code), commercial: true, note: "Weights CC-BY-4.0 (credit Google Magenta); code Apache-2.0."}
+    memory_gb: 6
+    est: {load_s: 16, run_s: 5}
+    prompt_style: sa3_music
+    params:
+      - {name: seconds, label: Duration, type: float, min: 5, max: 120, step: 5, default: 20, unit: s, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 3, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: cfg_style, label: Style strength, type: float, min: 0, max: 8, step: 0.5, default: 3.0, group: advanced}
+      - {name: temperature, type: float, min: 0.5, max: 2, step: 0.1, default: 1.3, group: advanced}
+      - {name: top_k, type: int, min: 1, max: 200, default: 40, group: advanced}
+    presets: {fast: {seconds: 10}, balanced: {}, quality: {seconds: 60}}
+
+  - id: songgeneration-levo
+    name: SongGeneration / LeVo (Tencent)
+    modality: audio
+    tasks: [song]
+    order: 190
+    tags: [vocals, lyrics, blocked]
+    summary: "Tencent AI Lab SongGeneration (LeVo): lyrics-to-song with separate vocal / accompaniment tracks. Not runnable: the upstream code repository is gone (see features.blocked)."
+    features: {max_seconds: 270, sample_rate: 48000, channels: 2, lyrics: true, negative: false, languages: [en, zh], blocked: "upstream code repo tencent-ailab/SongGeneration is 404 on GitHub and tencent/SongGeneration is not public on HF; only third-party weights remain, licence unclear"}
+    backend: music_levo
+    weights: [{hf: lglg666/SongGeneration-v2-large}]
+    license: {name: unknown (Tencent), commercial: false, note: "Licence not verifiable: the official repo is unavailable. Treated as non-commercial."}
+    memory_gb: 28
+    est: {load_s: 90, run_s: 120}
+    prompt_style: {song: minimax_music}
+    params:
+      - {name: lyrics, type: lyrics, default: "", group: basic}
+      - {name: seconds, label: Max duration, type: float, min: 30, max: 270, step: 10, default: 60, unit: s, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 2, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+    presets: {fast: {seconds: 30}, balanced: {}, quality: {seconds: 150}}

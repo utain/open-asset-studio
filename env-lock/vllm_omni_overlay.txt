@@ -1,0 +1,14 @@
+absl_py==2.5.1
+argbind==0.3.9
+descript_audio_codec==1.0.0
+descript_audiotools==0.7.2
+ffmpy==1.0.0
+fish_speech==3.0.0
+flatten_dict==0.5.0
+importlib_resources==7.1.0
+julius==0.2.8
+onnx==1.23.2
+randomname==0.2.1
+s3tokenizer==0.3.0
+soxr==1.1.0
+tensorboard==2.21.0

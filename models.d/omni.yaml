@@ -1,0 +1,351 @@
+# Conversational speech ("omni") models: speech-to-speech voice replies + a few TTS front doors.
+# One venv per incompatible dependency set (envs/omni_*), see docs/research/audio_more/omni.md.
+# New task `s2s`: input = one audio clip (role `audio`, or any audio/voice asset) + optional `instruction` (system prompt)
+# and `text` (typed message instead of / besides the clip). Output = reply wav + reply text (asset meta `worker.reply_text`
+# and an attached take_N.txt). Batch, one turn per job; real-time full-duplex streaming is out of scope.
+
+tasks:
+  s2s: {label: "Voice reply (speech-to-speech)", modality: audio, studio: sound}
+
+backends:
+  omni_moshi:
+    label: envs/omni_moshi (moshi 0.2.13, torch 2.9 cu130)
+    python: envs/omni_moshi/bin/python
+    script: workers/omni_moshi_worker.py
+    device: gpu
+    lock: omni_moshi
+    max_loaded: 1
+    kill_on_cancel: true
+  omni_qwen:
+    label: envs/omni_qwen (transformers 4.57.3, qwen-omni-utils)
+    python: envs/omni_qwen/bin/python
+    script: workers/omni_qwen_worker.py
+    device: gpu
+    lock: omni_qwen
+    max_loaded: 1
+    kill_on_cancel: true
+
+  omni_glm:
+    label: envs/omni_glm (transformers 4.44.2, vendor/GLM-4-Voice)
+    python: envs/omni_glm/bin/python
+    script: workers/omni_glm_worker.py
+    device: gpu
+    lock: omni_glm
+    max_loaded: 1
+    kill_on_cancel: true
+  omni_minicpm:
+    label: envs/omni_minicpm (transformers 4.51.0, minicpmo-utils)
+    python: envs/omni_minicpm/bin/python
+    script: workers/omni_minicpm_worker.py
+    device: gpu
+    lock: omni_minicpm
+    max_loaded: 1
+    kill_on_cancel: true
+  omni_step:
+    label: envs/omni_step (transformers 4.49.0, vendor/Step-Audio2)
+    python: envs/omni_step/bin/python
+    script: workers/omni_step_worker.py
+    device: gpu
+    lock: omni_step
+    max_loaded: 1
+    kill_on_cancel: true
+  omni_kimi:
+    label: envs/omni_kimi (transformers 4.44.1, vendor/Kimi-Audio, SDPA flash_attn stand-in)
+    python: envs/omni_kimi/bin/python
+    script: workers/omni_kimi_worker.py
+    device: gpu
+    lock: omni_kimi
+    max_loaded: 1
+    kill_on_cancel: true
+  omni_llama2:
+    label: envs/omni_llama2 (transformers 4.43.4, vendor/LLaMA-Omni2)
+    python: envs/omni_llama2/bin/python
+    script: workers/omni_llama2_worker.py
+    device: gpu
+    lock: omni_llama2
+    max_loaded: 1
+    kill_on_cancel: true
+
+models:
+  # ------------------------------------------------------------------------------------------------ Kyutai
+  - id: kyutai-tts
+    name: Kyutai TTS 1.6B
+    modality: audio
+    tasks: [tts]
+    order: 70
+    tags: [voice, streaming, fr]
+    summary: "Kyutai's delayed-streams TTS (1.8B, English + French), 24 kHz. Voice = a pre-computed embedding from the CC0/CC-BY voice bank (no free cloning by design). ~1.1x real time."
+    features: {voices: 12, languages: [en, fr], thai: false, sample_rate: 24000, max_seconds: 120, instruct: false}
+    backend: omni_moshi
+    weights:
+      - {hf: kyutai/tts-1.6b-en_fr}
+      - {hf: kyutai/tts-voices, files: ["unmute-prod-website/default_voice.wav.*.safetensors"], fix: "hf download kyutai/tts-voices --include 'unmute-prod-website/*.safetensors' 'alba-mackenna/*.safetensors' 'vctk/p22[5-9]_023.*.safetensors'"}
+    license: {name: "CC-BY-4.0 (weights)", commercial: true, note: "Credit Kyutai. Only voices from CC0 / CC-BY sets are listed here; the Expresso and EARS voices in the repo are non-commercial and not offered."}
+    memory_gb: 8
+    speed: "load 23 s, ~1.1x real time (5.8 s of audio in 6.5 s)"
+    est: {load_s: 25, run_s: 7}
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic}
+      - name: voice
+        type: choice
+        default: unmute-prod-website/default_voice.wav
+        group: basic
+        choices:
+          - {value: unmute-prod-website/default_voice.wav, label: "Default (neutral, CC0)"}
+          - {value: alba-mackenna/announcer.wav, label: "Announcer (game, CC-BY)"}
+          - {value: alba-mackenna/casual.wav, label: "Casual (CC-BY)"}
+          - {value: alba-mackenna/merchant.wav, label: "Merchant (RPG shopkeeper, CC-BY)"}
+          - {value: alba-mackenna/a-moment-by.wav, label: "Storyteller (CC-BY)"}
+          - {value: unmute-prod-website/developpeuse-3.wav, label: "Developer, f (CC0)"}
+          - {value: unmute-prod-website/fabieng-enhanced-v2.wav, label: "Fabien, fr (CC0)"}
+          - {value: vctk/p225_023.wav, label: "VCTK p225 (f, CC-BY)"}
+          - {value: vctk/p226_023.wav, label: "VCTK p226 (m, CC-BY)"}
+          - {value: vctk/p227_023.wav, label: "VCTK p227 (m, CC-BY)"}
+          - {value: vctk/p228_023.wav, label: "VCTK p228 (f, CC-BY)"}
+          - {value: vctk/p229_023.wav, label: "VCTK p229 (f, CC-BY)"}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: temperature, type: float, min: 0.1, max: 1.2, step: 0.05, default: 0.6, group: advanced}
+      - {name: cfg_coef, label: Voice strength, type: float, min: 1.0, max: 4.0, step: 0.5, default: 2.0, group: advanced, help: "CFG-distilled: the value only scales the voice conditioning (2 is the trained setting)."}
+    presets: {}
+
+  # ------------------------------------------------------------------------------------------------ Kyutai Moshi
+  - id: moshi
+    name: Kyutai Moshi (Moshiko)
+    modality: audio
+    tasks: [s2s]
+    order: 80
+    tags: [s2s, fullduplex, en]
+    summary: "7B full-duplex speech-text model, English only, 24 kHz. Run as one offline turn: your clip, then silence while it answers (it may start talking before the clip ends). Chatty but small-talk grade; no instruction following."
+    features: {languages: [en], instruct: false, sample_rate: 24000, max_seconds: 60}
+    backend: omni_moshi
+    input_slots:
+      - {role: "audio", label: "Question clip", types: ["voice", "audio"], required: true, hint: "Moshi answers this spoken clip (English).", tasks: ["s2s"]}
+    weights: [{hf: kyutai/moshiko-pytorch-bf16}]
+    license: {name: CC-BY-4.0, commercial: true, note: "Credit Kyutai."}
+    memory_gb: 20
+    speed: "real-time-ish (80 ms/frame)"
+    est: {load_s: 105, run_s: 26}
+    params:
+      - {name: seconds, label: Reply window, type: float, min: 3, max: 30, step: 1, default: 10, unit: s, group: basic, help: "Silence appended after your clip so Moshi can answer."}
+      - {name: batch, label: Takes, type: int, min: 1, max: 3, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: temperature, label: Audio temperature, type: float, min: 0.1, max: 1.5, step: 0.05, default: 0.8, group: advanced}
+      - {name: temperature_text, label: Text temperature, type: float, min: 0.1, max: 1.5, step: 0.05, default: 0.7, group: advanced}
+    presets: {}
+
+  # ------------------------------------------------------------------------------------------------ Qwen Omni
+  - id: qwen25-omni-3b
+    name: Qwen2.5-Omni 3B
+    modality: audio
+    tasks: [s2s]
+    order: 81
+    tags: [s2s, multilingual, small]
+    summary: "Thinker-talker speech assistant (3B), 2 voices, spoken replies in English/Chinese. Research license: not for commercial use."
+    features: {languages: [en, zh], instruct: true, sample_rate: 24000, speakers: [Chelsie, Ethan]}
+    backend: omni_qwen
+    input_slots:
+      - {role: "audio", label: "Question clip", types: ["voice", "audio"], required: false, hint: "A spoken question. Or type a message below, or both.", tasks: ["s2s"]}
+    weights: [{hf: Qwen/Qwen2.5-Omni-3B}]
+    license: {name: Qwen Research License, commercial: false}
+    memory_gb: 18
+    est: {load_s: 65, run_s: 60}
+    params:
+      - {name: instruction, label: Instruction, type: textarea, default: "", group: basic, help: "Optional system prompt / persona, e.g. 'You are a gruff dwarven blacksmith. Answer in two sentences.'"}
+      - {name: text, label: Typed message, type: textarea, default: "", group: basic, help: "Optional: a typed question instead of (or besides) the clip."}
+      - name: voice
+        type: choice
+        default: Chelsie
+        group: basic
+        choices: [Chelsie, Ethan]
+      - {name: seconds, label: Max reply, type: float, min: 3, max: 60, step: 1, default: 20, unit: s, group: basic, help: "Upper bound for the spoken answer."}
+      - {name: batch, label: Takes, type: int, min: 1, max: 3, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: temperature, type: float, min: 0.1, max: 1.5, step: 0.05, default: 0.7, group: advanced}
+    presets: {}
+
+  - id: qwen25-omni-7b
+    name: Qwen2.5-Omni 7B
+    modality: audio
+    tasks: [s2s]
+    order: 82
+    tags: [s2s, multilingual, quality]
+    summary: "Thinker-talker speech assistant (7B), 2 voices; the commercial-friendly Qwen Omni."
+    features: {languages: [en, zh], instruct: true, sample_rate: 24000, speakers: [Chelsie, Ethan]}
+    backend: omni_qwen
+    input_slots:
+      - {role: "audio", label: "Question clip", types: ["voice", "audio"], required: false, hint: "A spoken question. Or type a message below, or both.", tasks: ["s2s"]}
+    weights: [{hf: Qwen/Qwen2.5-Omni-7B}]
+    license: {name: Apache-2.0, commercial: true}
+    memory_gb: 28
+    est: {load_s: 135, run_s: 50}
+    params:
+      - {name: instruction, label: Instruction, type: textarea, default: "", group: basic, help: "Optional system prompt / persona, e.g. 'You are a gruff dwarven blacksmith. Answer in two sentences.'"}
+      - {name: text, label: Typed message, type: textarea, default: "", group: basic, help: "Optional: a typed question instead of (or besides) the clip."}
+      - name: voice
+        type: choice
+        default: Chelsie
+        group: basic
+        choices: [Chelsie, Ethan]
+      - {name: seconds, label: Max reply, type: float, min: 3, max: 60, step: 1, default: 20, unit: s, group: basic, help: "Upper bound for the spoken answer."}
+      - {name: batch, label: Takes, type: int, min: 1, max: 3, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: temperature, type: float, min: 0.1, max: 1.5, step: 0.05, default: 0.7, group: advanced}
+    presets: {}
+
+  - id: qwen3-omni-30b-a3b
+    name: Qwen3-Omni 30B-A3B Instruct
+    modality: audio
+    tasks: [s2s]
+    order: 83
+    tags: [s2s, multilingual, quality, big]
+    summary: "30B MoE (3B active) omni model with a multi-codebook talker; 119 text / 10 speech languages. About 70 GB in bf16, so it evicts everything else."
+    features: {languages: [en, zh, ja, ko, de, fr, ru, es, it, pt], instruct: true, sample_rate: 24000, speakers: [Ethan, Chelsie, Aiden]}
+    backend: omni_qwen
+    input_slots:
+      - {role: "audio", label: "Question clip", types: ["voice", "audio"], required: false, hint: "A spoken question. Or type a message below, or both.", tasks: ["s2s"]}
+    weights: [{hf: Qwen/Qwen3-Omni-30B-A3B-Instruct}]
+    license: {name: Apache-2.0, commercial: true}
+    memory_gb: 76
+    est: {load_s: 450, run_s: 30}
+    params:
+      - {name: instruction, label: Instruction, type: textarea, default: "", group: basic, help: "Optional system prompt / persona, e.g. 'You are a gruff dwarven blacksmith. Answer in two sentences.'"}
+      - {name: text, label: Typed message, type: textarea, default: "", group: basic, help: "Optional: a typed question instead of (or besides) the clip."}
+      - name: voice
+        type: choice
+        default: Ethan
+        group: basic
+        choices: [Ethan, Chelsie, Aiden]
+      - {name: seconds, label: Max reply, type: float, min: 3, max: 60, step: 1, default: 20, unit: s, group: basic, help: "Upper bound for the spoken answer."}
+      - {name: batch, label: Takes, type: int, min: 1, max: 3, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: temperature, type: float, min: 0.1, max: 1.5, step: 0.05, default: 0.7, group: advanced}
+    presets: {}
+
+  # ------------------------------------------------------------------------------------------------ others
+  - id: glm-4-voice-9b
+    name: GLM-4-Voice 9B
+    modality: audio
+    tasks: [s2s]
+    order: 84
+    tags: [s2s, zh, en]
+    summary: "End-to-end Chinese/English spoken chat (9B LM + 12.5 Hz speech tokenizer + flow decoder, 22.05 kHz). Emotion and speed follow the instruction."
+    features: {languages: [zh, en], instruct: true, sample_rate: 22050}
+    backend: omni_glm
+    input_slots:
+      - {role: "audio", label: "Question clip", types: ["voice", "audio"], required: false, hint: "A spoken question (Chinese or English). Or type a message below.", tasks: ["s2s"]}
+    weights:
+      - {hf: zai-org/glm-4-voice-9b}
+      - {hf: zai-org/glm-4-voice-tokenizer}
+      - {hf: zai-org/glm-4-voice-decoder}
+    license: {name: GLM-4-Voice License, commercial: true, verify: true, note: "Free for research; commercial use needs a free registration at open.bigmodel.cn/mla/form."}
+    memory_gb: 24
+    est: {load_s: 120, run_s: 60}
+    params:
+      - {name: instruction, label: Instruction, type: textarea, default: "", group: basic, help: "Optional system prompt / persona, e.g. 'You are a gruff dwarven blacksmith. Answer in two sentences.'"}
+      - {name: text, label: Typed message, type: textarea, default: "", group: basic, help: "Optional: a typed question instead of (or besides) the clip."}
+      - {name: seconds, label: Max reply, type: float, min: 3, max: 60, step: 1, default: 20, unit: s, group: basic, help: "Upper bound for the spoken answer."}
+      - {name: batch, label: Takes, type: int, min: 1, max: 3, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: temperature, type: float, min: 0.1, max: 1.5, step: 0.05, default: 0.2, group: advanced}
+      - {name: top_p, type: float, min: 0.1, max: 1.0, step: 0.05, default: 0.8, group: advanced}
+    presets: {}
+
+  - id: minicpm-o-4_5
+    name: MiniCPM-o 4.5
+    modality: audio
+    tasks: [s2s, tts, voice_clone]
+    order: 85
+    tags: [s2s, clone, zh, en]
+    summary: "9B (Qwen3-8B + Whisper + CosyVoice2-style TTS) half-duplex speech assistant. Replies in the voice of a reference clip (bundled by default); also reads text aloud in a cloned voice (en/zh)."
+    features: {languages: [en, zh], instruct: true, sample_rate: 24000, needs_ref: clone}
+    backend: omni_minicpm
+    input_slots:
+      - {role: "audio", label: "Question clip", types: ["voice", "audio"], required: false, hint: "A spoken question. Or type a message below, or both.", tasks: ["s2s"]}
+      - {role: "voice_ref", label: "Voice to answer in", types: ["voice", "audio"], required: false, hint: "Optional: the reply is spoken in this voice (3-20 s of clean speech). Empty = the model's default voice.", tasks: ["s2s"]}
+    weights: [{hf: openbmb/MiniCPM-o-4_5}]
+    license: {name: Apache-2.0, commercial: true}
+    memory_gb: 26
+    est: {load_s: 90, run_s: 15}
+    params:
+      - {name: instruction, label: Instruction, type: textarea, default: "", group: basic, help: "Optional system prompt / persona, e.g. 'You are a gruff dwarven blacksmith. Answer in two sentences.'"}
+      - {name: text, label: Typed message, type: textarea, default: "", group: basic, help: "Optional: a typed question instead of (or besides) the clip."}
+      - {name: seconds, label: Max reply, type: float, min: 3, max: 60, step: 1, default: 20, unit: s, group: basic, help: "Upper bound for the spoken answer."}
+      - {name: batch, label: Takes, type: int, min: 1, max: 3, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: temperature, type: float, min: 0.1, max: 1.5, step: 0.05, default: 0.7, group: advanced, help: 'TTS / voice clone: 0.1 is used unless you change it.'}
+    presets: {}
+
+  - id: step-audio-2-mini
+    name: Step-Audio 2 mini
+    modality: audio
+    tasks: [s2s]
+    order: 86
+    tags: [s2s, zh, en]
+    summary: "8B audio-language model with CosyVoice2 speech tokens: spoken English/Chinese (and dialect) replies, female/male default voices or any reference clip (role voice_ref)."
+    features: {languages: [en, zh], instruct: true, sample_rate: 24000}
+    backend: omni_step
+    input_slots:
+      - {role: "audio", label: "Question clip", types: ["voice", "audio"], required: false, hint: "A spoken question (Chinese or English). Or type a message below, or both.", tasks: ["s2s"]}
+      - {role: "voice_ref", label: "Voice to answer in", types: ["voice", "audio"], required: false, hint: "Optional: the reply is spoken in this voice. Empty = Settings → Voice.", tasks: ["s2s"]}
+    weights: [{hf: stepfun-ai/Step-Audio-2-mini}]
+    license: {name: Apache-2.0, commercial: true}
+    memory_gb: 24
+    est: {load_s: 105, run_s: 95}
+    params:
+      - {name: instruction, label: Instruction, type: textarea, default: "", group: basic, help: "Optional system prompt / persona, e.g. 'You are a gruff dwarven blacksmith. Answer in two sentences.'"}
+      - {name: text, label: Typed message, type: textarea, default: "", group: basic, help: "Optional: a typed question instead of (or besides) the clip."}
+      - {name: voice, type: choice, choices: [female, male], default: female, group: basic}
+      - {name: seconds, label: Max reply, type: float, min: 3, max: 60, step: 1, default: 20, unit: s, group: basic, help: "Upper bound for the spoken answer."}
+      - {name: batch, label: Takes, type: int, min: 1, max: 3, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: temperature, type: float, min: 0.1, max: 1.5, step: 0.05, default: 0.7, group: advanced}
+    presets: {}
+
+  - id: kimi-audio-7b
+    name: Kimi-Audio 7B Instruct
+    modality: audio
+    tasks: [s2s]
+    order: 87
+    tags: [s2s, zh, en]
+    summary: "7B audio foundation model (Qwen2.5-7B + Whisper features) with a flow-matching + BigVGAN detokenizer; spoken replies in one fixed voice. Slow: the detokenizer checkpoint is 19 GB."
+    features: {languages: [zh, en], sample_rate: 24000}
+    backend: omni_kimi
+    input_slots:
+      - {role: "audio", label: "Question clip", types: ["voice", "audio"], required: true, hint: "The spoken clip to answer (English or Chinese).", tasks: ["s2s"]}
+    weights: [{hf: moonshotai/Kimi-Audio-7B-Instruct}, {hf: zai-org/glm-4-voice-tokenizer}]
+    license: {name: MIT (Qwen2.5 parts Apache-2.0), commercial: true}
+    memory_gb: 32
+    est: {load_s: 50, run_s: 30}
+    params:
+      - {name: instruction, label: Instruction, type: textarea, default: "", group: basic, help: "Optional system prompt / persona, e.g. 'You are a gruff dwarven blacksmith. Answer in two sentences.'"}
+      - {name: text, label: Typed message, type: textarea, default: "", group: basic, help: "Optional: a typed question instead of (or besides) the clip."}
+      - {name: seconds, label: Max reply, type: float, min: 3, max: 60, step: 1, default: 20, unit: s, group: basic, help: "Upper bound for the spoken answer."}
+      - {name: batch, label: Takes, type: int, min: 1, max: 3, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: temperature, type: float, min: 0.1, max: 1.5, step: 0.05, default: 0.8, group: advanced}
+    presets: {}
+
+  - id: llama-omni2-0_5b
+    name: LLaMA-Omni2 0.5B
+    modality: audio
+    tasks: [s2s]
+    order: 88
+    tags: [s2s, small, en]
+    summary: "Tiny speech chatbot (Qwen2.5-0.5B + Whisper-large-v3 encoder + autoregressive speech-unit decoder + CosyVoice2 flow). English only, academic license."
+    features: {languages: [en], sample_rate: 24000}
+    backend: omni_llama2
+    input_slots:
+      - {role: "audio", label: "Question clip", types: ["voice", "audio"], required: true, hint: "The spoken question to answer (this model only takes speech; English).", tasks: ["s2s"]}
+    weights: [{hf: ICTNLP/LLaMA-Omni2-0.5B}, {hf: ICTNLP/cosy2_decoder}]
+    license: {name: "Academic research only (Apache-2.0 code)", commercial: false}
+    memory_gb: 8
+    est: {load_s: 32, run_s: 8}
+    params:
+      - {name: instruction, label: Instruction, type: textarea, default: "", group: basic, help: "Optional system prompt / persona, e.g. 'You are a gruff dwarven blacksmith. Answer in two sentences.'"}
+      - {name: seconds, label: Max reply, type: float, min: 3, max: 60, step: 1, default: 20, unit: s, group: basic, help: "Upper bound for the spoken answer."}
+      - {name: batch, label: Takes, type: int, min: 1, max: 3, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: temperature, type: float, min: 0, max: 1.5, step: 0.05, default: 0.0, group: advanced}
+    presets: {}

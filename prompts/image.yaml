@@ -1,0 +1,45 @@
+# Image studio prompt-improver styles (merged after core.yaml; a style id that exists is updated key by key).
+# Adds the Qwen RGBA style (trained trigger sentence) and a game-production chip set on every image style.
+
+chipsets:
+  image_game: &chips
+    - {id: 3d_ready, label: 3D-ready, hint: "single centered subject, whole object visible, three-quarter front view, plain light background, soft even lighting, no cast shadow (will be converted to 3D)"}
+    - {id: transparent, label: Transparent, hint: "isolated subject on a transparent background (RGBA asset)"}
+    - {id: stylized, label: Stylized, hint: "stylized game art, hand-painted look"}
+    - {id: lowpoly, label: Low-poly, hint: "low-poly faceted style, flat shading, simple shapes"}
+    - {id: realistic, label: Realistic PBR, hint: "realistic PBR materials, physically based rendering look"}
+    - {id: pixel, label: Pixel art, hint: "pixel art, limited palette, crisp pixels, no anti-aliasing"}
+    - {id: icon, label: UI icon, hint: "game UI icon, bold silhouette, readable at small size, centered, simple background"}
+    - {id: isometric, label: Isometric, hint: "isometric view, game tile/prop"}
+    - {id: concept, label: Concept sheet, hint: "concept art sheet, clean presentation, a few views of the same design side by side"}
+    - {id: turnaround, label: Character A-pose, hint: "full-body character, neutral A-pose, front view, arms slightly away from the body, plain background"}
+    - {id: sprite, label: 2D sprite, hint: "2D game sprite, side view, clean outline, flat background"}
+    - {id: texture, label: Tileable texture, hint: "seamless tileable texture, flat even lighting, top-down orthographic, no perspective, no objects"}
+    - {id: cozy, label: Cozy / cute, hint: "cute cozy game style, soft rounded shapes, warm pastel colours"}
+    - {id: dark, label: Dark fantasy, hint: "dark fantasy mood, desaturated, dramatic rim light"}
+
+styles:
+  qwen_rgba:
+    label: Qwen-Image RGBA (transparent asset)
+    modality: image
+    negative: true
+    chips: *chips
+    apply: {prompt: prompt, negative: negative}
+    system: |
+      TARGET: Qwen-Image-2.1 generating a TRANSPARENT game asset (true RGBA output).
+      "prompt": START with the exact sentence "This is an RGBA image with transparency." then 40-100
+      words of flowing English prose: ONE isolated subject, fully visible and not cropped, its materials,
+      colours, view (three-quarter front unless the idea says otherwise), soft even lighting, art style,
+      and end with "isolated on a transparent background". No scenery, no ground, no cast shadow, no text
+      unless the idea asks for text (then put it in double quotes).
+      "negative": short comma list of things to avoid (only used when CFG > 1).
+      Variations: different material, colour or style treatments of the same isolated subject; every
+      variation also starts with "This is an RGBA image with transparency.".
+  qwen_image: {chips: *chips}
+  qwen_edit: {chips: *chips}
+  kontext: {chips: *chips}
+  zimage: {chips: *chips}
+  hunyuan_image: {chips: *chips}
+  lumina: {chips: *chips}
+  flux: {chips: *chips}
+  image3d: {chips: *chips}

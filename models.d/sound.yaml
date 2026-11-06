@@ -1,0 +1,242 @@
+# Sound studio overrides (merged after models.yaml; an entry with the same id replaces the original).
+# Why each entry is here:
+#   sa3-small-sfx   also does ambience (research matrix); negative prompt only works with CFG > 1 (ARC-distilled)
+#   sa3-medium      + extend (inpaint the continuation of a clip); negative only with CFG > 1
+#   minimax-music3  `steps` are flow steps PER 200-frame window (pipeline default 30), + takes
+#   clap / whisper  run through the sound plugin's QA handler (scores are written onto the takes)
+#   higgs / fish / voxtral / cosyvoice   measured through workers/vllm_omni_worker.py (engine start, presets)
+#   moss-tts-nano   clearer reason: needs a codec download AND the upstream package
+
+models:
+  - id: sa3-small-sfx
+    name: Stable Audio 3 Small SFX
+    modality: audio
+    tasks: [sfx, ambience]
+    default_for: [sfx]
+    order: 10
+    tags: [fast, sfx]
+    summary: "One-shot SFX and UI sounds; sub-second warm generation, 2 GB. English prompts."
+    features: {max_seconds: 120, sample_rate: 44100, channels: 2, negative: cfg, languages: [en]}
+    backend: audio
+    weights: [{hf: stabilityai/stable-audio-3-small-sfx, files: [model.safetensors]}]
+    license: {name: Stability AI Community, commercial: true, note: "Free under USD 1 M revenue; register and show 'Powered by Stability AI'."}
+    memory_gb: 4
+    speed: "warm ~1-2 s per clip (cold 4 s load)"
+    est: {load_s: 5, run_s: 2}
+    prompt_style: {sfx: sfx, ambience: ambience}
+    params:
+      - {name: seconds, label: Duration, type: float, min: 0.5, max: 120, step: 0.5, default: 3, unit: s, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 8, default: 4, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: steps, type: int, min: 4, max: 50, default: 8, group: advanced, help: "ARC-distilled: 8 steps is the trained setting."}
+      - {name: cfg_scale, label: CFG, type: float, min: 1, max: 7, step: 0.5, default: 1.0, group: advanced, help: "1 = the trained setting. The negative prompt is used only above 1."}
+    presets: {fast: {batch: 2}, balanced: {batch: 4}, quality: {batch: 8}}
+
+  - id: sa3-medium
+    name: Stable Audio 3 Medium
+    modality: audio
+    tasks: [sfx, ambience, music]
+    default_for: [ambience, music]
+    order: 20
+    tags: [music, ambience, stereo, quality]
+    summary: "Instrumental music, ambience beds up to ~6 min and richer SFX; 44.1 kHz stereo. Can extend a clip. Add BPM and key for music."
+    features: {max_seconds: 380, sample_rate: 44100, channels: 2, negative: cfg, inpaint: true, extend: true, languages: [en]}
+    backend: audio
+    weights: [{hf: stabilityai/stable-audio-3-medium}]
+    license: {name: Stability AI Community, commercial: true, note: "Free under USD 1 M revenue; register and show 'Powered by Stability AI'."}
+    memory_gb: 10
+    speed: "30 s of music in ~15 s cold, faster warm"
+    est: {load_s: 17, run_s: 8}
+    prompt_style: {sfx: sfx, ambience: ambience, music: sa3_music}
+    params:
+      - {name: seconds, label: Duration, type: float, min: 1, max: 370, step: 1, default: 30, unit: s, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 2, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: extend_seconds, label: Extend by, type: float, min: 1, max: 120, step: 1, default: 15, unit: s, group: advanced, help: "Only when a clip to extend is set: generates its continuation (inpainting)."}
+      - {name: steps, type: int, min: 4, max: 50, default: 8, group: advanced}
+      - {name: cfg_scale, label: CFG, type: float, min: 1, max: 7, step: 0.5, default: 1.0, group: advanced, help: "1 = the trained setting. The negative prompt is used only above 1."}
+    presets: {fast: {batch: 1, seconds: 15}, balanced: {batch: 2}, quality: {batch: 4}}
+
+  - id: minimax-music3
+    name: MiniMax-Music 3
+    modality: audio
+    tasks: [song, music]
+    default_for: [song]
+    order: 40
+    tags: [vocals, lyrics, long]
+    summary: "The only local model that sings: full songs with lyrics and vocals, up to ~5 min. Slow (RTF ~9). Credit 'MiniMax-Music3' in the product."
+    features: {max_seconds: 300, sample_rate: 44100, channels: 2, lyrics: true, negative: false, languages: [en, zh]}
+    backend: audio
+    weights: [{hf: MiniMaxAI/MiniMax-Music3}]
+    license: {name: MiniMax-Music3 Community, commercial: true, note: "Show 'MiniMax-Music3' prominently in the product; >USD 20 M revenue needs authorisation."}
+    memory_gb: 28
+    speed: "20 s song: 160 s load + 188 s generation; 2-3 min song ~20-30 min"
+    est: {load_s: 160, run_s: 190}
+    kill_on_cancel: true
+    prompt_style: minimax_music
+    params:
+      - {name: lyrics, type: lyrics, default: "", group: basic, help: "Section tags alone on their own line: [verse] [chorus] [bridge] ... [instrumental]. Empty = instrumental (music task)."}
+      - {name: seconds, label: Max duration, type: float, min: 10, max: 300, step: 5, default: 30, unit: s, group: basic, help: "Upper bound: the model may end the song earlier."}
+      - {name: batch, label: Takes, type: int, min: 1, max: 3, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: cfg_scale, label: CFG, type: float, min: 1, max: 4, step: 0.1, default: 1.7, group: advanced}
+      - {name: steps, label: Flow steps (per window), type: int, min: 10, max: 100, default: 30, group: advanced}
+    presets: {fast: {seconds: 20, steps: 20}, balanced: {seconds: 30}, quality: {seconds: 90, steps: 50}}
+
+  # =================================================================== vLLM-Omni voices (numbers from workers/vllm_omni_worker.py runs)
+  - id: higgs-tts-3
+    name: Higgs TTS 3 (4B)
+    modality: audio
+    tasks: [tts, voice_clone]
+    order: 60
+    tags: [voice, expressive, tags, non-commercial]
+    summary: "Most expressive control (43 inline emotion/style/prosody/SFX tags), 100+ languages incl. Thai. vLLM engine; non-commercial."
+    features: {needs_ref: clone, thai: true, tags: true, sample_rate: 24000, engine_start_s: 80}
+    backend: vllm_omni
+    weights: [{hf: bosonai/higgs-tts-3-4b}, {hf: bosonai/higgs-audio-v2-tokenizer}]
+    license: {name: Boson research / non-commercial (creator grant), commercial: false}
+    memory_gb: 30
+    speed: "engine start ~80 s, then RTF ~1.4"
+    est: {load_s: 80, run_s: 7}
+    prompt_style: higgs
+    params:
+      - {name: text, label: Line (with tags), type: textarea, default: "", group: basic}
+      - {name: ref_text, label: Reference transcript, type: text, default: "", group: basic, tasks: [voice_clone]}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: temperature, type: float, min: 0.1, max: 1.5, step: 0.05, default: 0.8, group: advanced}
+      - {name: top_k, type: int, min: 1, max: 200, default: 50, group: advanced}
+    presets: {}
+
+  - id: fish-s2-pro
+    name: Fish Audio S2 Pro
+    modality: audio
+    tasks: [tts, voice_clone]
+    order: 61
+    tags: [voice, tags, non-commercial]
+    summary: "Cloning in 80+ languages with free-form inline [bracket] directions. vLLM engine; non-commercial."
+    features: {needs_ref: clone, thai: weak, tags: true, sample_rate: 44100, engine_start_s: 95}
+    backend: vllm_omni
+    weights: [{hf: fishaudio/s2-pro}]
+    license: {name: Fish Audio Research License, commercial: false}
+    memory_gb: 32
+    speed: "engine start ~95 s; ~8 s per take"
+    est: {load_s: 95, run_s: 8}
+    prompt_style: fish
+    params:
+      - {name: text, label: "Line (with [tags])", type: textarea, default: "", group: basic}
+      - {name: ref_text, label: Reference transcript (required to clone), type: text, default: "", group: basic, tasks: [voice_clone]}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: temperature, type: float, min: 0.1, max: 1.5, step: 0.05, default: 0.8, group: advanced}
+      - {name: top_k, type: int, min: 1, max: 200, default: 30, group: advanced}
+    presets: {}
+
+  - id: voxtral-tts
+    name: Voxtral 4B TTS
+    modality: audio
+    tasks: [tts]
+    order: 62
+    tags: [voice, presets, non-commercial]
+    summary: "20 preset voices in 9 languages (no Thai, no cloning with open weights). vLLM engine; non-commercial."
+    features: {voices: [casual_male, casual_female, cheerful_male, cheerful_female, neutral_male, neutral_female, ar_male, de_male, de_female, es_male, es_female, fr_male, fr_female, hi_male, hi_female, it_male, it_female, nl_male, nl_female, pt_male, pt_female], thai: false, sample_rate: 24000, engine_start_s: 65}
+    backend: vllm_omni
+    weights: [{hf: mistralai/Voxtral-4B-TTS-2603}]
+    license: {name: CC-BY-NC-4.0, commercial: false}
+    memory_gb: 26
+    speed: "engine start ~65 s, RTF ~0.8"
+    est: {load_s: 65, run_s: 5}
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic}
+      - {name: voice, type: choice, choices: [casual_male, casual_female, cheerful_male, cheerful_female, neutral_male, neutral_female, ar_male, de_male, de_female, es_male, es_female, fr_male, fr_female, hi_male, hi_female, it_male, it_female, nl_male, nl_female, pt_male, pt_female], default: neutral_male, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+    presets: {}
+
+  - id: cosyvoice3
+    name: CosyVoice 3 (0.5B)
+    modality: audio
+    tasks: [voice_clone]
+    order: 63
+    tags: [voice, clone, instruct]
+    summary: "Cross-lingual cloning (9 languages + Chinese dialects, no Thai). Needs a reference clip. vLLM engine."
+    features: {needs_ref: true, thai: false, instruct: true, sample_rate: 24000, engine_start_s: 55}
+    backend: vllm_omni
+    weights: [{hf: FunAudioLLM/Fun-CosyVoice3-0.5B-2512}]
+    license: {name: Apache-2.0, commercial: true}
+    memory_gb: 20
+    speed: "engine start ~55 s, ~4 s per take"
+    est: {load_s: 55, run_s: 4}
+    prompt_style: cosyvoice
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic}
+      - {name: ref_text, label: Reference transcript, type: text, default: "", group: basic}
+      - {name: instruct, label: Direction (experimental), type: text, default: "", group: advanced}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+    presets: {}
+
+  - id: moss-tts-nano
+    name: MOSS-TTS Nano
+    modality: audio
+    tasks: [voice_clone]
+    order: 56
+    tags: [voice, clone, tiny]
+    summary: "0.1 B cloner (20 languages, no Thai). Not set up: needs its 88 MB codec AND the upstream MOSS-TTS-Nano package (+WeTextProcessing)."
+    features: {needs_ref: true, thai: false, sample_rate: 48000}
+    backend: moss
+    weights:
+      - {hf: OpenMOSS-Team/MOSS-TTS-Nano}
+      - {hf: OpenMOSS-Team/MOSS-Audio-Tokenizer-Nano}
+      - {path: envs/moss/lib/python3.12/site-packages/moss_tts_nano, label: "MOSS-TTS-Nano python package",
+         fix: "Install the upstream package (github.com/OpenMOSS/MOSS-TTS-Nano, pip install -e . plus WeTextProcessing) into the moss venv, then add the Nano path to workers/moss_worker.py"}
+    download_note: "Downloads the 88 MB codec. The model still needs the upstream MOSS-TTS-Nano package before it can run."
+    license: {name: "Apache-2.0 (repo: not yet licensed for redistribution)", commercial: false, verify: true}
+    memory_gb: 2
+    speed: "-"
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic}
+      - {name: seed, type: seed, default: -1}
+    presets: {}
+
+  # =================================================================== QA helpers (handler: the sound plugin writes x_qa onto the takes)
+  - id: clap-htsat
+    name: LAION CLAP (scorer)
+    modality: audio
+    tasks: [qa_clap]
+    default_for: [qa_clap]
+    order: 90
+    tags: [qa]
+    summary: "Prompt-match score of SFX / music takes (cosine vs prompt, 'silence' and 'speech' anchors)."
+    features: {}
+    backend: audio
+    handler: sound.qa
+    weights: [{hf: laion/clap-htsat-unfused}]
+    license: {name: Apache-2.0, commercial: true}
+    memory_gb: 2
+    speed: "<1 s per clip"
+    est: {load_s: 5, run_s: 1}
+    params: []
+    presets: {}
+
+  - id: whisper-v3-turbo
+    name: Whisper large-v3 turbo
+    modality: audio
+    tasks: [qa_asr]
+    default_for: [qa_asr]
+    order: 91
+    tags: [qa, asr]
+    summary: "Transcribes voice takes and scores them against the script (word / character recall; Thai ok)."
+    features: {languages: 99}
+    backend: audio
+    handler: sound.qa
+    weights: [{hf: openai/whisper-large-v3-turbo}]
+    license: {name: MIT, commercial: true}
+    memory_gb: 3
+    speed: "<1 s per clip"
+    est: {load_s: 5, run_s: 1}
+    params:
+      - {name: language, type: choice, choices: [auto, en, th, zh, ja], default: auto, group: basic}
+    presets: {}

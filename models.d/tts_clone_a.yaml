@@ -1,0 +1,267 @@
+# Voice cloning group A: XTTS-v2, Chatterbox (+ Multilingual), Zonos, OpenVoice V2, Spark-TTS, Llasa.
+# All use the existing tasks (tts / voice_clone / voice_design). Reference clip = the `ref` input of the voice_clone task
+# (a library voice or any speech take); `ref_text` is only used by the models that profit from a transcript.
+# Numbers (memory_gb, est) are measured on the DGX Spark, see docs/research/audio_more/tts_clone_a.md.
+
+tasks: {}
+
+backends:
+  clonea_xtts:
+    label: envs/clonea_xtts (coqui-tts 0.28, torch 2.9 cu130, transformers 5.22)
+    python: envs/clonea_xtts/bin/python
+    script: workers/clonea_xtts_worker.py
+    device: gpu
+    lock: clonea_xtts
+    max_loaded: 1
+  clonea_chatterbox:
+    label: envs/clonea_chatterbox (chatterbox-tts 0.1.4 --no-deps, transformers 4.46.3)
+    python: envs/clonea_chatterbox/bin/python
+    script: workers/clonea_chatterbox_worker.py
+    device: gpu
+    lock: clonea_chatterbox
+    max_loaded: 1
+  clonea_zonos:
+    label: envs/clonea_zonos (Zonos 0.1 from vendor/Zonos, espeakng-loader)
+    python: envs/clonea_zonos/bin/python
+    script: workers/clonea_zonos_worker.py
+    device: gpu
+    lock: clonea_zonos
+    max_loaded: 1
+  clonea_openvoice:
+    label: envs/clonea_openvoice (OpenVoice V2 + MeloTTS from vendor/)
+    python: envs/clonea_openvoice/bin/python
+    script: workers/clonea_openvoice_worker.py
+    device: gpu
+    lock: clonea_openvoice
+    max_loaded: 1
+  clonea_codec:
+    label: envs/clonea_codec (Spark-TTS from vendor/Spark-TTS, Llasa + xcodec2, transformers 4.57)
+    python: envs/clonea_codec/bin/python
+    script: workers/clonea_codec_worker.py
+    device: gpu
+    lock: clonea_codec
+    max_loaded: 1
+
+models:
+  # =================================================================== XTTS-v2
+  - id: xtts-v2
+    name: XTTS-v2
+    modality: audio
+    tasks: [tts, voice_clone]
+    order: 70
+    tags: [voice, clone, multilingual, non-commercial]
+    summary: "Coqui XTTS-v2: clones a voice from a 3-30 s clip (no transcript) in 17 languages, or speaks with one of 58 built-in voices. CPML, non-commercial."
+    features: {needs_ref: clone, languages: [en, es, fr, de, it, pt, pl, tr, ru, nl, cs, ar, zh-cn, hu, ko, ja, hi], thai: false, sample_rate: 24000, voices: 58}
+    backend: clonea_xtts
+    weights: [{hf: coqui/XTTS-v2, files: [model.pth, config.json, vocab.json, speakers_xtts.pth, dvae.pth, mel_stats.pth]}]
+    license: {name: Coqui Public Model License 1.0 (CPML), commercial: false, note: "Non-commercial use only. The studio uses the maintained `coqui-tts` fork (Idiap) for the code."}
+    memory_gb: 6
+    speed: "load 16 s; 5 s of speech in ~1.5 s (RTF ~0.3), 1.8 GB resident"
+    est: {load_s: 16, run_s: 2}
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic}
+      - {name: language, type: choice, choices: [en, es, fr, de, it, pt, pl, tr, ru, nl, cs, ar, zh-cn, hu, ko, ja, hi], default: en, group: basic}
+      - {name: speaker, label: Built-in voice, type: choice, tasks: [tts], default: Claribel Dervla, group: basic,
+         choices: ["Claribel Dervla", "Daisy Studious", "Gracie Wise", "Tammie Ema", "Alison Dietlinde", "Ana Florence", "Annmarie Nele", "Asya Anara", "Brenda Stern", "Gitta Nikolina", "Henriette Usha", "Sofia Hellen", "Tammy Grit", "Tanja Adelina", "Vjollca Johnnie", "Andrew Chipper", "Badr Odhiambo", "Dionisio Schuyler", "Royston Min", "Viktor Eka", "Abrahan Mack", "Adde Michal", "Baldur Sanjin", "Craig Gutsy", "Damien Black", "Gilberto Mathias", "Ilkin Urbano", "Kazuhiko Atallah", "Ludvig Milivoj", "Suad Qasim", "Torcull Diarmuid", "Viktor Menelaos", "Zacharie Aimilios", "Nova Hogarth", "Maja Ruoho", "Uta Obando", "Lidiya Szekeres", "Chandra MacFarland", "Szofi Granger", "Camilla Holmström", "Lilya Stainthorpe", "Zofija Kendrick", "Narelle Moon", "Barbora MacLean", "Alexandra Hisakawa", "Alma María", "Rosemary Okafor", "Ige Behringer", "Filip Traverse", "Damjan Chapman", "Wulf Carlevaro", "Aaron Dreschner", "Kumar Dahl", "Eugenio Mataracı", "Ferran Simen", "Xavier Hayasaka", "Luis Moray", "Marcos Rudaski"]}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: speed, type: float, min: 0.6, max: 1.6, step: 0.05, default: 1.0, group: advanced}
+      - {name: temperature, type: float, min: 0.1, max: 1.2, step: 0.05, default: 0.75, group: advanced}
+      - {name: top_k, type: int, min: 1, max: 100, default: 50, group: advanced}
+      - {name: top_p, type: float, min: 0.1, max: 1.0, step: 0.05, default: 0.85, group: advanced}
+      - {name: repetition_penalty, label: Repetition penalty, type: float, min: 1.0, max: 20, step: 0.5, default: 10.0, group: advanced}
+    presets: {fast: {batch: 1}, balanced: {batch: 2}, quality: {batch: 4, temperature: 0.65}}
+
+  # =================================================================== Chatterbox
+  - id: chatterbox
+    name: Chatterbox (0.5B)
+    modality: audio
+    tasks: [tts, voice_clone]
+    order: 71
+    tags: [voice, clone, emotion, english, fast]
+    summary: "Resemble AI Chatterbox: English zero-shot cloning from a 5-15 s clip (no transcript) with an emotion-exaggeration dial and CFG pace control. MIT; output carries an inaudible Perth watermark."
+    features: {needs_ref: clone, languages: [en], thai: false, sample_rate: 24000, watermark: perth}
+    backend: clonea_chatterbox
+    weights: [{hf: ResembleAI/chatterbox, files: [ve.safetensors, t3_cfg.safetensors, s3gen.safetensors, tokenizer.json, conds.pt]}]
+    license: {name: MIT, commercial: true, note: "Generated audio carries the Resemble Perth implicit watermark (part of the upstream code)."}
+    memory_gb: 6
+    speed: "load 10 s; 5 s of speech in ~2.5 s, 3.0 GB resident"
+    est: {load_s: 10, run_s: 3}
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic}
+      - {name: exaggeration, label: Emotion exaggeration, type: float, min: 0.25, max: 2.0, step: 0.05, default: 0.5, group: basic, help: "0.5 = neutral. Higher = more dramatic and faster; above ~1 gets unstable."}
+      - {name: cfg_weight, label: CFG / pace, type: float, min: 0.0, max: 1.0, step: 0.05, default: 0.5, group: basic, help: "Lower = slower, more deliberate pacing (0 ignores the accent of the reference); ~0.3 suits fast reference speakers."}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: temperature, type: float, min: 0.05, max: 2.0, step: 0.05, default: 0.8, group: advanced}
+      - {name: repetition_penalty, label: Repetition penalty, type: float, min: 1.0, max: 3.0, step: 0.1, default: 1.2, group: advanced}
+      - {name: min_p, type: float, min: 0.0, max: 0.5, step: 0.01, default: 0.05, group: advanced}
+      - {name: top_p, type: float, min: 0.1, max: 1.0, step: 0.05, default: 1.0, group: advanced}
+    presets: {fast: {batch: 1}, balanced: {batch: 2}, dramatic: {exaggeration: 0.8, cfg_weight: 0.3}, calm: {exaggeration: 0.3, cfg_weight: 0.6}}
+
+  - id: chatterbox-multilingual
+    name: Chatterbox Multilingual (0.5B)
+    modality: audio
+    tasks: [tts, voice_clone]
+    order: 72
+    tags: [voice, clone, emotion, multilingual]
+    summary: "Chatterbox in 23 languages (ar da de el en es fi fr he hi it ja ko ms nl no pl pt ru sv sw tr zh) with the same exaggeration / CFG dials. No Thai. MIT; Perth watermark."
+    features: {needs_ref: clone, languages: [ar, da, de, el, en, es, fi, fr, he, hi, it, ja, ko, ms, nl, no, pl, pt, ru, sv, sw, tr, zh], thai: false, sample_rate: 24000, watermark: perth}
+    backend: clonea_chatterbox
+    weights: [{hf: ResembleAI/chatterbox, files: [ve.pt, t3_23lang.safetensors, s3gen.pt, mtl_tokenizer.json, conds.pt, Cangjie5_TC.json, grapheme_mtl_merged_expanded_v1.json]}]
+    license: {name: MIT, commercial: true, note: "Generated audio carries the Resemble Perth implicit watermark (part of the upstream code)."}
+    memory_gb: 6
+    speed: "load 12 s; 5 s of speech in ~2-4 s, 3.0 GB resident"
+    est: {load_s: 12, run_s: 4}
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic}
+      - {name: language, type: choice, choices: [en, ar, da, de, el, es, fi, fr, he, hi, it, ja, ko, ms, nl, no, pl, pt, ru, sv, sw, tr, zh], default: en, group: basic}
+      - {name: exaggeration, label: Emotion exaggeration, type: float, min: 0.25, max: 2.0, step: 0.05, default: 0.5, group: basic, help: "0.5 = neutral. Higher = more dramatic and faster."}
+      - {name: cfg_weight, label: CFG / pace, type: float, min: 0.0, max: 1.0, step: 0.05, default: 0.5, group: basic, help: "Set 0 to keep the reference's accent out of other languages."}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: temperature, type: float, min: 0.05, max: 2.0, step: 0.05, default: 0.8, group: advanced}
+      - {name: repetition_penalty, label: Repetition penalty, type: float, min: 1.0, max: 3.0, step: 0.1, default: 2.0, group: advanced}
+      - {name: min_p, type: float, min: 0.0, max: 0.5, step: 0.01, default: 0.05, group: advanced}
+      - {name: top_p, type: float, min: 0.1, max: 1.0, step: 0.05, default: 1.0, group: advanced}
+    presets: {fast: {batch: 1}, balanced: {batch: 2}, dramatic: {exaggeration: 0.8, cfg_weight: 0.3}, calm: {exaggeration: 0.3, cfg_weight: 0.6}}
+
+  # =================================================================== Zonos
+  - id: zonos-v0.1-transformer
+    name: Zonos v0.1 (transformer)
+    modality: audio
+    tasks: [tts, voice_clone]
+    order: 73
+    tags: [voice, clone, emotion, 44khz]
+    summary: "Zyphra Zonos 1.6B: 44.1 kHz speech with an 8-way emotion mix, pitch variation and speaking-rate dials; clones from a 5-30 s clip (no transcript). Best in en / ja / zh / fr / de. Apache-2.0."
+    features: {needs_ref: clone, emotion: true, languages: [en-us, en-gb, ja, cmn, fr-fr, de, es, it, ko, ru, pt-br], thai: false, sample_rate: 44100, hybrid: "blocked (mamba-ssm needs nvcc)"}
+    backend: clonea_zonos
+    weights: [{hf: Zyphra/Zonos-v0.1-transformer, files: [model.safetensors, config.json]}, {hf: Zyphra/Zonos-v0.1-speaker-embedding, files: [ResNet293_SimAM_ASP_base.pt, ResNet293_SimAM_ASP_base_LDA-128.pt]}, {hf: descript/dac_44khz}]
+    license: {name: Apache-2.0, commercial: true}
+    memory_gb: 8
+    speed: "load 26 s; 5 s of speech in ~8 s (RTF ~1.6, eager), 3.3 GB resident"
+    est: {load_s: 26, run_s: 8}
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic}
+      - {name: language, type: choice, choices: [en-us, en-gb, ja, cmn, fr-fr, de, es, it, ko, ru, pt-br], default: en-us, group: basic}
+      - {name: emo_happiness, label: Happiness, type: float, min: 0, max: 1, step: 0.05, default: 0.3077, group: basic}
+      - {name: emo_sadness, label: Sadness, type: float, min: 0, max: 1, step: 0.05, default: 0.0256, group: basic}
+      - {name: emo_disgust, label: Disgust, type: float, min: 0, max: 1, step: 0.05, default: 0.0256, group: advanced}
+      - {name: emo_fear, label: Fear, type: float, min: 0, max: 1, step: 0.05, default: 0.0256, group: advanced}
+      - {name: emo_surprise, label: Surprise, type: float, min: 0, max: 1, step: 0.05, default: 0.0256, group: advanced}
+      - {name: emo_anger, label: Anger, type: float, min: 0, max: 1, step: 0.05, default: 0.0256, group: basic}
+      - {name: emo_other, label: Other, type: float, min: 0, max: 1, step: 0.05, default: 0.2564, group: advanced}
+      - {name: emo_neutral, label: Neutral, type: float, min: 0, max: 1, step: 0.05, default: 0.3077, group: basic}
+      - {name: speaking_rate, label: Speaking rate, type: float, min: 5, max: 30, step: 0.5, default: 15, group: basic, help: "Phonemes per second: 10 slow, 15 normal, 25+ fast."}
+      - {name: pitch_std, label: Pitch variation, type: float, min: 0, max: 300, step: 5, default: 20, group: basic, help: "20-45 normal speech, 60-150 expressive, higher = wild."}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: cfg_scale, label: CFG, type: float, min: 1.5, max: 6, step: 0.1, default: 2.0, group: advanced}
+      - {name: fmax, type: float, min: 8000, max: 24000, step: 500, default: 22050, group: advanced, help: "22050 for cloning."}
+      - {name: min_p, type: float, min: 0, max: 0.5, step: 0.01, default: 0.1, group: advanced}
+    presets: {fast: {batch: 1}, balanced: {batch: 2}, expressive: {pitch_std: 90, emo_happiness: 0.6, emo_neutral: 0.1}, calm: {pitch_std: 15, speaking_rate: 12}}
+
+  - id: zonos-v0.1-hybrid
+    name: Zonos v0.1 (hybrid)
+    modality: audio
+    tasks: [tts, voice_clone]
+    order: 74
+    tags: [voice, clone, emotion, blocked]
+    summary: "Mamba-hybrid Zonos (better quality than the transformer). Blocked: needs mamba-ssm CUDA kernels, which need nvcc."
+    features: {needs_ref: clone, emotion: true, thai: false, sample_rate: 44100, blocked: "mamba-ssm / causal-conv1d CUDA kernels cannot be built here (no nvcc)"}
+    backend: clonea_zonos
+    weights: [{hf: Zyphra/Zonos-v0.1-hybrid, files: [model.safetensors, config.json]}, {hf: Zyphra/Zonos-v0.1-speaker-embedding}, {hf: descript/dac_44khz}]
+    license: {name: Apache-2.0, commercial: true}
+    memory_gb: 10
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic}
+      - {name: seed, type: seed, default: -1}
+    presets: {}
+
+  # =================================================================== OpenVoice V2
+  - id: openvoice-v2
+    name: OpenVoice V2 (MeloTTS + tone-colour converter)
+    modality: audio
+    tasks: [tts, voice_clone]
+    order: 74
+    tags: [voice, clone, fast, english]
+    summary: "MeloTTS base voice (5 English accents) re-coloured to a reference clip by the OpenVoice tone-colour converter. Very fast, copies timbre but not style. English only here. MIT."
+    features: {needs_ref: clone, languages: [en], thai: false, sample_rate: 22050, accents: [EN-US, EN-BR, EN_INDIA, EN-AU, EN-Default]}
+    backend: clonea_openvoice
+    weights: [{hf: myshell-ai/OpenVoiceV2}, {hf: myshell-ai/MeloTTS-English}, {hf: bert-base-uncased, files: [model.safetensors, config.json]}]
+    license: {name: MIT, commercial: true}
+    memory_gb: 3
+    speed: "load 6 s; 5 s of speech in ~0.5-3 s, 0.3 GB resident"
+    est: {load_s: 6, run_s: 1}
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic}
+      - {name: accent, label: Base accent, type: choice, choices: [EN-US, EN-BR, EN_INDIA, EN-AU, EN-Default], default: EN-US, group: basic}
+      - {name: speed, type: float, min: 0.6, max: 1.6, step: 0.05, default: 1.0, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: tau, label: Conversion strength (tau), type: float, min: 0.0, max: 1.0, step: 0.05, default: 0.3, group: advanced, tasks: [voice_clone], help: "Lower = closer to the base voice's style; higher = closer to the reference timbre."}
+      - {name: sdp_ratio, type: float, min: 0.0, max: 1.0, step: 0.05, default: 0.2, group: advanced}
+      - {name: noise_scale, type: float, min: 0.1, max: 1.2, step: 0.05, default: 0.6, group: advanced}
+      - {name: noise_scale_w, type: float, min: 0.1, max: 1.2, step: 0.05, default: 0.8, group: advanced}
+    presets: {fast: {batch: 1}, balanced: {batch: 2}, quality: {batch: 4}}
+
+  # =================================================================== Spark-TTS
+  - id: spark-tts
+    name: Spark-TTS (0.5B)
+    modality: audio
+    tasks: [tts, voice_clone, voice_design]
+    order: 75
+    tags: [voice, clone, design, english, chinese, non-commercial]
+    summary: "Qwen2.5-0.5B + BiCodec: clones a clip (transcript optional) or builds a voice from gender / pitch / speed levels. English and Chinese. HF card says CC-BY-NC-SA-4.0."
+    features: {needs_ref: clone, languages: [en, zh], thai: false, sample_rate: 16000, attributes: [gender, pitch, speed_level]}
+    backend: clonea_codec
+    weights: [{hf: SparkAudio/Spark-TTS-0.5B, files: [config.yaml, LLM/model.safetensors, LLM/config.json, BiCodec/model.safetensors, BiCodec/config.yaml, wav2vec2-large-xlsr-53/pytorch_model.bin, wav2vec2-large-xlsr-53/config.json]}]
+    license: {name: CC-BY-NC-SA-4.0 (HF model card; code Apache-2.0), commercial: false, verify: true}
+    memory_gb: 6
+    speed: "load 36 s; 5 s of speech in ~9 s (HF generate, RTF ~1.7), 2.7 GB resident"
+    est: {load_s: 36, run_s: 9}
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic}
+      - {name: ref_text, label: Reference transcript (optional), type: text, default: "", group: basic, tasks: [voice_clone], help: "Exact words of the reference clip; improves similarity. Empty = voice only."}
+      - {name: gender, type: choice, choices: [female, male], default: female, group: basic, tasks: [tts, voice_design]}
+      - {name: pitch, type: choice, choices: [very_low, low, moderate, high, very_high], default: moderate, group: basic, tasks: [tts, voice_design]}
+      - {name: speed_level, label: Speed, type: choice, choices: [very_low, low, moderate, high, very_high], default: moderate, group: basic, tasks: [tts, voice_design]}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: temperature, type: float, min: 0.1, max: 1.5, step: 0.05, default: 0.8, group: advanced}
+      - {name: top_k, type: int, min: 1, max: 200, default: 50, group: advanced}
+      - {name: top_p, type: float, min: 0.1, max: 1.0, step: 0.05, default: 0.95, group: advanced}
+    presets: {fast: {batch: 1}, balanced: {batch: 2}, quality: {batch: 4, temperature: 0.7}}
+
+  # =================================================================== Llasa
+  - id: llasa-1b
+    name: Llasa 1B (+ xcodec2)
+    modality: audio
+    tasks: [tts, voice_clone]
+    order: 76
+    tags: [voice, clone, llama, non-commercial]
+    summary: "Llama-3.2-1B speaking xcodec2 tokens: simple text to speech (en / zh) and prompt-continuation cloning from a clip plus its transcript (Whisper writes it if missing). CC-BY-NC-4.0."
+    features: {needs_ref: clone, languages: [en, zh], thai: false, sample_rate: 16000}
+    backend: clonea_codec
+    weights: [{hf: HKUSTAudio/Llasa-1B, files: [model.safetensors, config.json, tokenizer.json, tokenizer_config.json]}, {hf: HKUST-Audio/xcodec2, files: [model.safetensors, config.json]}]
+    license: {name: CC-BY-NC-4.0, commercial: false}
+    memory_gb: 9
+    speed: "load 23-34 s; 7 s of speech in ~6 s (RTF ~1.0), 5.6 GB resident"
+    est: {load_s: 30, run_s: 8}
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic}
+      - {name: ref_text, label: Reference transcript, type: text, default: "", group: basic, tasks: [voice_clone], help: "Exact words of the reference clip (<= 12 s used). Empty = transcribed with Whisper."}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: temperature, type: float, min: 0.1, max: 1.5, step: 0.05, default: 0.8, group: advanced}
+      - {name: top_p, type: float, min: 0.1, max: 1.0, step: 0.05, default: 1.0, group: advanced}
+      - {name: top_k, label: Top-k (0 = off), type: int, min: 0, max: 200, default: 0, group: advanced}
+    presets: {fast: {batch: 1}, balanced: {batch: 2}, quality: {batch: 4}}

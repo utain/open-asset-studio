@@ -1,0 +1,329 @@
+# Image + 3D studio registry overrides (merged after models.yaml; an entry with an existing id replaces it).
+# Why these overrides exist:
+#   * every Hunyuan3D engine knob of engines/hy3d/app/params.py is exposed (shape / texture / export), so no knob is dead;
+#   * the diffusers image models get the "3D-ready" framing toggle and the RGBA alpha clean-up (default 8, the same fix as in the Hunyuan3D engine);
+#   * two built-in CPU tools are registered as models so they run as normal jobs with forms and presets:
+#       recenter-3d  crop / recenter / pad an image for image-to-3D (imgtools worker, CPU)
+#       mesh-export  mesh clean-up, decimation, smoothing and GLB / OBJ / PLY / STL export (imgtools worker, CPU)
+# Numbers: docs/research/image_models.md (measured on this DGX Spark).
+
+tasks:
+  recenter:    {label: Crop / recenter for 3D, modality: image, studio: image}
+  mesh_export: {label: Mesh clean-up & export, modality: mesh,  studio: 3d}
+
+models:
+  # ================================================================== diffusers image models (backend qwen)
+  - id: qwen-image-2.1
+    name: Qwen-Image 2.1
+    modality: image
+    tasks: [t2i, edit, multi_ref, rgba, extract]
+    default_for: [t2i, edit, multi_ref, rgba, extract]
+    order: 10
+    tags: [quality, text, rgba, bilingual]
+    summary: "Best prompt adherence and text rendering (EN + ZH); real RGBA output; instruction edits with up to 10 references."
+    features: {rgba: true, max_refs: 10, mask: annotate, text_render: true, negative: cfg, languages: [en, zh], tileable: false}
+    backend: qwen
+    weights: [{hf: Qwen/Qwen-Image-2.1, files: ["transformer/*.safetensors", "text_encoder/*.safetensors"]}]
+    license: {name: "Apache-2.0 (verify on the 2.1 model card)", commercial: true, verify: true}
+    memory_gb: 56
+    speed: "1.9 s/step @1024 (idle GPU), ~41 s per image at 20 steps; edit adds ~30 s"
+    est: {load_s: 30, run_s: 50}
+    prompt_style: {t2i: qwen_image, rgba: qwen_rgba, edit: qwen_edit, multi_ref: qwen_edit, extract: qwen_edit}
+    params:
+      - {name: aspect, type: choice, choices: ["1:1", "4:3", "3:4", "3:2", "2:3", "16:9", "9:16"], default: "1:1", group: basic, tasks: [t2i, rgba]}
+      - {name: size, label: Long side, type: choice, choices: [768, 1024, 1328, 1536, 2048], default: 1024, unit: px, group: basic, help: "Edits keep the aspect ratio of image 1 at the area of a square of this side."}
+      - {name: steps, type: int, min: 4, max: 60, default: 25, group: basic, help: "25 is a good default; 12 is usable for previews (slightly over-sharpened)."}
+      - {name: batch, label: Images, type: int, min: 1, max: 4, default: 1, group: basic, tasks: [t2i, rgba, edit, multi_ref]}
+      - {name: transparent, label: Transparent (RGBA), type: bool, default: false, group: basic, tasks: [t2i, edit, multi_ref], help: "Official RGBA prompt format: true alpha straight from the VAE, no matting."}
+      - {name: threed_ready, label: 3D-ready framing, type: bool, default: false, group: basic, tasks: [t2i, rgba], help: "Appends: single centred object, fully visible, 3/4 view, even light, no cast shadow (input for Hunyuan3D)."}
+      - {name: seed, type: seed, default: -1}
+      - {name: true_cfg, label: True CFG, type: float, min: 1, max: 10, step: 0.5, default: 1.0, group: advanced, help: "1 = no CFG (as trained). >1 enables the negative prompt and doubles the cost."}
+      - {name: output_resolution, label: Reference encoding, type: choice, choices: [512, 1024, 2048], default: 1024, group: advanced, tasks: [edit, multi_ref, extract]}
+      - {name: alpha_clean, label: Transparency clean-up, type: int, min: 0, max: 64, default: 8, group: advanced, help: "Alpha at or below this (/255) becomes fully transparent: removes the faint haze Qwen leaves (it confuses 3D recentering)."}
+      - {name: kv_cache, label: KV cache, type: bool, default: true, group: advanced}
+    presets:
+      fast: {steps: 12, size: 768}
+      balanced: {steps: 25, size: 1024}
+      quality: {steps: 40, size: 1536}
+
+  - id: z-image-turbo
+    name: Z-Image Turbo
+    modality: image
+    tasks: [t2i]
+    order: 20
+    tags: [fastest, text, commercial]
+    summary: "Fastest draft model (about 18 s per 1024 image); clean product-render look, very good text. No negative prompt."
+    features: {rgba: false, text_render: true, negative: false, languages: [en, zh], low_seed_diversity: true}
+    backend: qwen
+    weights:
+      - {hf: unsloth/Z-Image-Turbo, files: ["text_encoder/*.safetensors", "vae/*.safetensors"]}
+      - {hf: unsloth/Z-Image-Turbo-FP8, files: [Z-Image-Turbo-INT8.safetensors]}
+    license: {name: Apache-2.0, commercial: true}
+    memory_gb: 30
+    speed: "1.9 s/step, 9 steps: ~19 s per 1024 image"
+    est: {load_s: 12, run_s: 19}
+    prompt_style: zimage
+    params:
+      - {name: aspect, type: choice, choices: ["1:1", "4:3", "3:4", "3:2", "2:3", "16:9", "9:16"], default: "1:1", group: basic}
+      - {name: size, label: Long side, type: choice, choices: [512, 768, 1024, 1280, 1536, 2048], default: 1024, unit: px, group: basic}
+      - {name: steps, type: int, min: 6, max: 12, default: 9, group: basic, help: "9 steps = 8 function evaluations (distilled)."}
+      - {name: batch, label: Images, type: int, min: 1, max: 4, default: 4, group: basic}
+      - {name: threed_ready, label: 3D-ready framing, type: bool, default: false, group: basic, help: "Appends single-object, fully visible, plain white background framing (input for Hunyuan3D)."}
+      - {name: seed, type: seed, default: -1}
+    presets:
+      fast: {steps: 7, size: 768}
+      balanced: {steps: 9, size: 1024}
+      quality: {steps: 12, size: 1536}
+
+  - id: flux1-kontext-dev
+    name: FLUX.1 Kontext [dev]
+    modality: image
+    tasks: [edit, t2i]
+    order: 30
+    tags: [edit, non-commercial]
+    summary: "Instruction edit of one image; keeps layout and text, tends to smooth materials. Non-commercial licence."
+    features: {rgba: false, max_refs: 1, text_render: true, negative: false, languages: [en]}
+    backend: qwen
+    weights: [{hf: unsloth/FLUX.1-Kontext-dev, files: ["transformer/*.safetensors"]}]
+    license: {name: "FLUX.1 [dev] Non-Commercial", commercial: false}
+    memory_gb: 55
+    speed: "edit 7.8 s/step (~156 s at 20 steps); t2i 2.3 s/step"
+    est: {load_s: 36, run_s: 156}
+    prompt_style: {edit: kontext, t2i: flux}
+    params:
+      - {name: aspect, type: choice, choices: ["1:1", "4:3", "3:4", "16:9", "9:16"], default: "1:1", group: basic, tasks: [t2i]}
+      - {name: size, label: Long side, type: choice, choices: [768, 1024], default: 1024, unit: px, group: basic, help: "Edits: output area of about size x size at the input's aspect ratio."}
+      - {name: steps, type: int, min: 12, max: 40, default: 28, group: basic}
+      - {name: guidance, type: float, min: 1.5, max: 4.0, step: 0.1, default: 2.5, group: basic, help: "Distilled guidance: 2.5 for edits, 3.5 for text-to-image."}
+      - {name: batch, label: Images, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: threed_ready, label: 3D-ready framing, type: bool, default: false, group: basic, tasks: [t2i]}
+      - {name: seed, type: seed, default: -1}
+    presets:
+      fast: {steps: 16}
+      balanced: {steps: 24}
+      quality: {steps: 28}
+
+  - id: hunyuanimage-2.1
+    name: HunyuanImage 2.1
+    modality: image
+    tasks: [t2i]
+    order: 40
+    tags: [2k, detail, stylized]
+    summary: "Richest detail at native 2K (stylised game-art look); real CFG with negative prompt. Heaviest model (61 GB)."
+    features: {rgba: false, text_render: true, negative: true, native_size: 2048, languages: [en, zh]}
+    backend: qwen
+    weights:
+      - {hf: hunyuanvideo-community/HunyuanImage-2.1-Diffusers, files: ["text_encoder/*.safetensors", "vae/*"]}
+      - {hf: unsloth/HunyuanImage-2.1-FP8, files: [HunyuanImage-2.1-INT8.pt]}
+    license: {name: Tencent Hunyuan Community, commercial: true, note: "Not licensed in the EU, UK and South Korea; >100 M MAU needs a licence."}
+    memory_gb: 65
+    speed: "2K: 8.3 s/step (~170 s at 20 steps); cold load ~4 min"
+    est: {load_s: 235, run_s: 170}
+    prompt_style: hunyuan_image
+    params:
+      - {name: aspect, type: choice, choices: ["1:1", "16:9", "9:16", "4:3", "3:4"], default: "1:1", group: basic, help: "2K sizes: 2048², 2560x1536, 1536x2560, 2304x1792."}
+      - {name: size, label: Long side, type: choice, choices: [1024, 2048, 2560], default: 2048, unit: px, group: basic}
+      - {name: steps, type: int, min: 10, max: 50, default: 30, group: basic}
+      - {name: guidance, type: float, min: 1, max: 8, step: 0.5, default: 3.5, group: advanced, help: "Real CFG (AdaptiveProjectedMixGuidance), 2 passes per step."}
+      - {name: batch, label: Images, type: int, min: 1, max: 2, default: 1, group: basic}
+      - {name: threed_ready, label: 3D-ready framing, type: bool, default: false, group: basic}
+      - {name: seed, type: seed, default: -1}
+    presets:
+      fast: {steps: 20, size: 1024}
+      balanced: {steps: 30, size: 2048}
+      quality: {steps: 50, size: 2048}
+
+  - id: lumina-image-2.0
+    name: Lumina-Image 2.0
+    modality: image
+    tasks: [t2i]
+    order: 50
+    tags: [stylized, light]
+    summary: "Light painterly / cel-shaded alternative for 2D art. Weak at text and prompt adherence."
+    features: {rgba: false, text_render: false, negative: true, languages: [en]}
+    backend: qwen
+    weights:
+      - {hf: unsloth/Lumina-Image-2.0, files: ["text_encoder/*.safetensors", "vae/*"]}
+      - {hf: unsloth/Lumina-Image-2.0-FP8, files: [Lumina-Image-2.0-INT8.pt]}
+    license: {name: Apache-2.0, commercial: true}
+    memory_gb: 25
+    speed: "1.6 s/step, ~50 s at 30 steps"
+    est: {load_s: 21, run_s: 50}
+    prompt_style: lumina
+    params:
+      - {name: aspect, type: choice, choices: ["1:1", "4:3", "3:4", "16:9", "9:16"], default: "1:1", group: basic}
+      - {name: size, label: Long side, type: choice, choices: [768, 1024], default: 1024, unit: px, group: basic}
+      - {name: steps, type: int, min: 20, max: 60, default: 30, group: basic}
+      - {name: guidance, type: float, min: 1, max: 8, step: 0.5, default: 4.0, group: advanced}
+      - {name: cfg_trunc_ratio, label: CFG truncation, type: float, min: 0.1, max: 1.0, step: 0.05, default: 0.25, group: advanced}
+      - {name: batch, label: Images, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: threed_ready, label: 3D-ready framing, type: bool, default: false, group: basic}
+      - {name: seed, type: seed, default: -1}
+    presets: {fast: {steps: 20}, balanced: {steps: 30}, quality: {steps: 50}}
+
+  # ================================================================== tools (imgtools worker, envs/hy3d)
+  - id: rembg-u2net
+    name: rembg u2net
+    modality: image
+    tasks: [rmbg]
+    default_for: [rmbg]
+    order: 81
+    tags: [tool, cpu]
+    summary: "Background removal on the CPU (0.4 s per 1024 image). Keeps existing transparency in mind (flattens on white first)."
+    features: {rgba: true}
+    backend: imgtools
+    device: cpu
+    weights: [{path: ~/.u2net/u2net.onnx}]
+    license: {name: Apache-2.0, commercial: true}
+    memory_gb: 0
+    speed: "0.4 s per 1024 image (CPU)"
+    est: {load_s: 3, run_s: 1}
+    params:
+      - {name: post_process, label: Smooth mask edges, type: bool, default: false, group: basic, help: "rembg post_process_mask: removes speckles, slightly rounder edges."}
+      - {name: alpha_matting, label: Alpha matting, type: bool, default: false, group: advanced, help: "Softer hair / fur edges; slower."}
+      - {name: alpha_clean, label: Transparency clean-up, type: int, min: 0, max: 64, default: 8, group: advanced}
+    presets: {}
+
+  - id: rembg-birefnet
+    name: BiRefNet general (rembg)
+    modality: image
+    tasks: [rmbg]
+    order: 82
+    tags: [tool, hair]
+    summary: "Better edges for hair and fur. The 973 MB onnx is not downloaded yet."
+    features: {rgba: true}
+    backend: imgtools
+    device: cpu
+    weights:
+      - path: ~/.u2net/birefnet-general.onnx
+        fix: "envs/hy3d/bin/python -c \"from rembg import new_session; new_session('birefnet-general')\" (one-time download, 973 MB)"
+        download_cmd: ["envs/hy3d/bin/python", "-c", "from rembg import new_session; new_session('birefnet-general')"]
+        size_bytes: 973000000
+        watch: ~/.u2net
+    license: {name: MIT, commercial: true}
+    memory_gb: 0
+    speed: "a few s per image (CPU)"
+    est: {load_s: 5, run_s: 4}
+    params:
+      - {name: post_process, label: Smooth mask edges, type: bool, default: false, group: basic}
+      - {name: alpha_matting, label: Alpha matting, type: bool, default: false, group: advanced}
+      - {name: alpha_clean, label: Transparency clean-up, type: int, min: 0, max: 64, default: 8, group: advanced}
+    presets: {}
+
+  - id: recenter-3d
+    name: Crop / recenter / pad
+    modality: image
+    tasks: [recenter]
+    default_for: [recenter]
+    order: 83
+    tags: [tool, cpu]
+    summary: "Crop to the object, centre it on a square canvas with a margin (Hunyuan3D border ratio), resize. Removes the background first if there is none."
+    features: {rgba: true}
+    backend: imgtools
+    device: cpu
+    weights: []
+    license: {name: "built-in (engines/hy3d imgtools)", commercial: true}
+    memory_gb: 0
+    speed: "< 1 s (CPU); +0.4 s when the background is removed first"
+    est: {load_s: 3, run_s: 1}
+    params:
+      - {name: margin, label: Margin, type: float, min: 0, max: 0.45, step: 0.01, default: 0.15, group: basic, help: "Fraction of the canvas left empty around the object (same meaning as Hunyuan3D's border ratio)."}
+      - {name: out_size, label: Output size, type: choice, choices: [{value: 0, label: keep}, 512, 768, 1024, 1536, 2048], default: 1024, unit: px, group: basic}
+      - {name: background, type: choice, choices: [transparent, white], default: transparent, group: basic}
+      - {name: remove_bg_first, label: Remove background if opaque, type: bool, default: true, group: basic, help: "Images without transparency get rembg u2net first; otherwise the whole frame is the object."}
+      - {name: alpha_threshold, label: Object threshold, type: int, min: 0, max: 128, default: 16, group: advanced, help: "Alpha above this counts as the object when cropping."}
+      - {name: alpha_clean, label: Transparency clean-up, type: int, min: 0, max: 64, default: 8, group: advanced}
+    presets:
+      fast: {margin: 0.15, out_size: 768}
+      balanced: {margin: 0.15, out_size: 1024}
+      quality: {margin: 0.12, out_size: 2048}
+
+  - id: mesh-export
+    name: Mesh clean-up & export
+    modality: mesh
+    tasks: [mesh_export]
+    default_for: [mesh_export]
+    order: 90
+    tags: [tool, cpu]
+    summary: "Floaters / degenerate faces, decimation (quadric edge collapse), Taubin smoothing, normals; GLB / OBJ (zip with textures) / PLY / STL."
+    features: {export: [glb, obj, ply, stl]}
+    backend: imgtools
+    device: cpu
+    weights: []
+    license: {name: "built-in (engines/hy3d postprocess)", commercial: true}
+    memory_gb: 0
+    speed: "seconds (CPU); decimation of 500k faces ~5-10 s"
+    est: {load_s: 4, run_s: 6}
+    params:
+      - {name: export_type, label: Format, type: choice, choices: [glb, obj, ply, stl], default: glb, group: basic}
+      - {name: include_texture, label: Keep texture, type: bool, default: true, group: basic, help: "Textured meshes keep their UVs, so geometry operations are skipped. Off = process and export the untextured shape."}
+      - {name: post_simplify, label: Decimate, type: bool, default: false, group: basic}
+      - {name: post_target_faces, label: Target faces, type: int, min: 100, max: 2000000, step: 100, default: 10000, group: basic}
+      - {name: post_floaters, label: Remove floaters, type: bool, default: true, group: basic}
+      - {name: floater_ratio, label: Floater size, type: float, min: 0.0005, max: 0.1, step: 0.0005, default: 0.005, group: advanced, help: "Components smaller than this fraction of all faces are deleted."}
+      - {name: post_degenerate, label: Remove degenerate faces, type: bool, default: true, group: advanced}
+      - {name: post_smooth, label: Smoothing iterations, type: int, min: 0, max: 50, default: 0, group: advanced, help: "Taubin (volume preserving)."}
+      - {name: post_fix_normals, label: Fix normals, type: bool, default: false, group: advanced}
+    presets:
+      mobile: {post_simplify: true, post_target_faces: 5000, include_texture: false, export_type: glb}
+      pc: {post_simplify: true, post_target_faces: 30000, include_texture: false, export_type: glb}
+      textured_glb: {include_texture: true, export_type: glb}
+
+  # ================================================================== 3D (backend hy3d, engines/hy3d/app/engine.py)
+  - id: hunyuan3d-2.1
+    name: Hunyuan3D 2.1
+    modality: mesh
+    tasks: [shape, texture]
+    default_for: [shape, texture]
+    order: 10
+    tags: [pbr, glb]
+    summary: "Image -> 3D shape (DiT) and PBR texture painting; GLB export. Runs on the bundled Hunyuan3D engine (engines/hy3d)."
+    features: {input: image, pbr: true, export: [glb, obj, ply, stl], max_refs: 1}
+    backend: hy3d
+    weights:
+      - {hf: tencent/Hunyuan3D-2.1, files: ["hunyuan3d-dit-v2-1/*", "hunyuan3d-paintpbr-v2-1/*"]}
+      - {hf: facebook/dinov2-giant}
+    license: {name: Tencent Hunyuan Community, commercial: true, note: "Not licensed in the EU, UK and South Korea; >1 M MAU needs a licence."}
+    memory_gb: 45
+    speed: "shape ~1 min, texture ~3-5 min (balanced)"
+    est: {load_s: 60, run_s: 240}
+    params:
+      # ---- shape (engines/hy3d/app/params.py SHAPE_KEYS)
+      - {name: steps, label: Shape steps, type: int, min: 1, max: 100, default: 30, group: basic, tasks: [shape]}
+      - {name: octree, label: Octree resolution, type: choice, choices: [128, 196, 256, 384, 512], default: 256, group: basic, tasks: [shape], help: "Mesh detail; 384+ is slower and needs more memory."}
+      - {name: remove_bg, label: Remove background, type: bool, default: true, group: basic, tasks: [shape], help: "Skipped automatically when the image already has transparency."}
+      - {name: textured, label: Paint texture too, type: bool, default: true, group: basic, tasks: [shape], help: "Shape + PBR texture in one job (texture settings: Texture tab)."}
+      - {name: seed, type: seed, default: -1, tasks: [shape]}
+      - {name: guidance, label: Shape guidance, type: float, min: 1, max: 20, step: 0.5, default: 5.0, group: advanced, tasks: [shape]}
+      - {name: border_ratio, label: Border ratio, type: float, min: 0, max: 0.3, step: 0.01, default: 0.15, group: advanced, tasks: [shape]}
+      - {name: num_chunks, label: Decode chunks, type: int, min: 1000, max: 2000000, step: 1000, default: 200000, group: advanced, tasks: [shape]}
+      - {name: box_v, label: Bounding box, type: float, min: 0.9, max: 1.5, step: 0.01, default: 1.01, group: advanced, tasks: [shape]}
+      - {name: mc_level, label: Iso level, type: float, min: -0.1, max: 0.1, step: 0.005, default: 0.0, group: advanced, tasks: [shape]}
+      - {name: sigma_shift, label: Scheduler shift, type: float, min: 0.5, max: 6, step: 0.1, default: 1.0, group: advanced, tasks: [shape]}
+      - {name: flashvdm, label: FlashVDM decode, type: bool, default: false, group: advanced, tasks: [shape], help: "Experimental faster volume decoding."}
+      - {name: shape_cleanup, label: Clean shape, type: bool, default: true, group: advanced, tasks: [shape], help: "Remove degenerate faces and floaters right after marching cubes."}
+      - {name: floater_ratio, label: Floater size, type: float, min: 0.0005, max: 0.1, step: 0.0005, default: 0.005, group: advanced, tasks: [shape]}
+      - {name: alpha_clean, label: Transparency clean-up, type: int, min: 0, max: 64, default: 8, group: advanced, tasks: [shape], help: "Zero faint alpha haze of the input before recentering."}
+      # ---- texture
+      - {name: tex_reference, label: Reference image, type: choice, choices: [cleaned, original, current], default: cleaned, group: basic, tasks: [texture], help: "cleaned / original = the image the shape was made from; current = the image in the slot above."}
+      - {name: tex_faces, label: Texture faces, type: int, min: 2000, max: 150000, step: 1000, default: 40000, group: basic, tasks: [texture]}
+      - {name: tex_size, label: Texture size, type: choice, choices: [2048, 4096, 8192], default: 4096, unit: px, group: basic, tasks: [texture]}
+      - {name: tex_views, label: Views, type: int, min: 6, max: 9, default: 8, group: basic, tasks: [texture]}
+      - {name: tex_seed, label: Texture seed, type: seed, default: 0, tasks: [texture]}
+      - {name: tex_resolution, label: View resolution, type: choice, choices: [512, 768], default: 512, group: advanced, tasks: [texture]}
+      - {name: tex_steps, label: Texture steps, type: int, min: 4, max: 50, default: 15, group: advanced, tasks: [texture]}
+      - {name: tex_guidance, label: Texture guidance, type: float, min: 1.5, max: 8, step: 0.5, default: 3.0, group: advanced, tasks: [texture]}
+      - {name: tex_render_size, label: Render size, type: choice, choices: [auto, 1024, 2048, 3072, 4096], default: auto, group: advanced, tasks: [texture], help: "auto = 4x the view resolution."}
+      - {name: tex_full_res, label: Full-res textures, type: bool, default: false, group: advanced, tasks: [texture], help: "Keep the atlas at full size instead of the vendor's downsample on save."}
+      - {name: super_res, label: Super-resolution, type: bool, default: true, group: advanced, tasks: [texture]}
+      - {name: sr_tile, label: SR tile, type: choice, choices: [0, 256, 512], default: 0, group: advanced, tasks: [texture], help: "Real-ESRGAN tile size; 0 = no tiling."}
+      - {name: bake_exp, label: Bake exponent, type: int, min: 1, max: 10, default: 4, group: advanced, tasks: [texture]}
+      - {name: bake_angle, label: Bake angle limit, type: int, min: 50, max: 89, default: 75, unit: °, group: advanced, tasks: [texture]}
+      - {name: vertex_inpaint, label: Vertex inpaint, type: bool, default: true, group: advanced, tasks: [texture]}
+      - {name: uv_padding, label: UV padding, type: int, min: 0, max: 8, default: 0, group: advanced, tasks: [texture], help: "xatlas atlas padding in px (0 = vendor default unwrap)."}
+      - {name: metallic_scale, label: Metallic factor, type: float, min: 0, max: 1, step: 0.05, default: 1.0, group: advanced, tasks: [texture]}
+      - {name: roughness_scale, label: Roughness factor, type: float, min: 0, max: 1, step: 0.05, default: 1.0, group: advanced, tasks: [texture]}
+    presets:
+      fast: {steps: 20, octree: 196, tex_faces: 20000, tex_views: 6, tex_resolution: 512, tex_steps: 15, tex_size: 2048, tex_full_res: false, sr_tile: 0}
+      balanced: {steps: 30, octree: 256, tex_faces: 40000, tex_views: 8, tex_resolution: 512, tex_steps: 15, tex_size: 4096, tex_full_res: false, sr_tile: 0}
+      quality: {steps: 50, octree: 384, tex_faces: 60000, tex_views: 9, tex_resolution: 768, tex_steps: 25, tex_size: 4096, tex_full_res: true, sr_tile: 512}

@@ -1,0 +1,916 @@
+# Open Asset Studio model registry. Schema: docs/CONTRACTS.md section 1.
+# Drop-in files in models.d/*.yaml are merged after this one (same id = override), so studios can add models
+# without editing this file. Numbers come from docs/research/{image,audio}_models.md and prompt_llm.md
+# (measured on this DGX Spark). memory_gb = free memory (MemAvailable) the job needs before it starts.
+
+tasks:
+  t2i:          {label: Text to image,        modality: image, studio: image}
+  edit:         {label: Edit image,           modality: image, studio: image}
+  multi_ref:    {label: Multi-reference,      modality: image, studio: image}
+  inpaint:      {label: Inpaint,              modality: image, studio: image}
+  rgba:         {label: Transparent (RGBA),   modality: image, studio: image}
+  extract:      {label: Extract subject,      modality: image, studio: image}
+  rmbg:         {label: Remove background,    modality: image, studio: image}
+  upscale:      {label: Upscale,              modality: image, studio: image}
+  shape:        {label: Image to 3D shape,    modality: mesh,  studio: 3d}
+  texture:      {label: Texture / retexture,  modality: mesh,  studio: 3d}
+  sfx:          {label: Sound effect,         modality: audio, studio: sound}
+  ambience:     {label: Ambience & loops,     modality: audio, studio: sound}
+  music:        {label: Music (instrumental), modality: audio, studio: sound}
+  song:         {label: Song with vocals,     modality: audio, studio: sound}
+  tts:          {label: Text to speech,       modality: audio, studio: sound}
+  voice_design: {label: Voice design,         modality: audio, studio: sound}
+  voice_clone:  {label: Voice clone,          modality: audio, studio: sound}
+  qa_clap:      {label: Prompt match (CLAP),  modality: audio, studio: sound}
+  qa_asr:       {label: Transcript (Whisper), modality: audio, studio: sound}
+  improve:      {label: Prompt improver,      modality: text,  studio: system}
+  test:         {label: Self-test,            modality: other, studio: system}
+
+# backend name -> venv + worker script (workers/<name>_worker.py by convention). device: gpu | cpu
+backends:
+  echo:
+    label: core (self-test)
+    python: envs/core/bin/python
+    script: workers/echo_worker.py
+    device: cpu
+    lock: core
+  qwen:
+    label: envs/qwen (diffusers 0.42, torch 2.9 cu130)
+    python: envs/qwen/bin/python
+    script: workers/qwen_worker.py
+    device: gpu
+    lock: qwen
+    fix: "Rebuild from env-lock/qwen.txt (see docs/SETUP.md)"
+  imgtools:
+    label: envs/hy3d (Real-ESRGAN, rembg)
+    python: envs/hy3d/bin/python
+    script: workers/imgtools_worker.py
+    device: gpu
+    lock: hy3d
+  hy3d:
+    label: envs/hy3d (Hunyuan3D-2.1)
+    python: envs/hy3d/bin/python
+    script: workers/hy3d_worker.py
+    device: gpu
+    lock: hy3d
+    model_idle_s: 900
+  comfyui:
+    label: ComfyUI container (remote, optional)
+    python: envs/core/bin/python
+    script: workers/comfyui_worker.py
+    device: gpu
+    env: {COMFYUI_URL: "http://127.0.0.1:8188"}
+  audio:
+    label: envs/audio (SA3, MiniMax, MOSS-SFX, OmniVoice, F5, Orpheus, CLAP, Whisper)
+    python: envs/audio/bin/python
+    script: workers/audio_worker.py
+    device: gpu
+    lock: audio
+    max_loaded: 2
+  qwentts:
+    label: envs/qwentts (qwen-tts 0.1.1, transformers 4.57.3)
+    python: envs/qwentts/bin/python
+    script: workers/qwentts_worker.py
+    device: gpu
+    lock: qwentts
+  moss:
+    label: envs/moss (MOSS-TTS, transformers 5.0.0)
+    python: envs/moss/bin/python
+    script: workers/moss_worker.py
+    device: gpu
+    lock: moss
+  vllm_omni:
+    label: envs/vllm_omni (vLLM-Omni) + envs/vllm_omni_overlay
+    python: envs/vllm_omni/bin/python
+    script: workers/vllm_omni_worker.py
+    device: gpu
+    lock: vllm_omni_overlay
+    env: {PYTHONPATH: "{studio}/envs/vllm_omni_overlay"}
+    model_idle_s: 1200
+  llm:
+    label: llama.cpp llama-server (prompt improver)
+    kind: service
+    binary: $LLAMA_SERVER
+    device: gpu
+
+models:
+  # =================================================================== IMAGE
+  - id: qwen-image-2.1
+    name: Qwen-Image 2.1
+    modality: image
+    tasks: [t2i, edit, multi_ref, rgba, extract]
+    default_for: [t2i, edit, rgba, extract]
+    order: 10
+    tags: [quality, text, rgba, bilingual]
+    summary: "Best prompt adherence and text rendering (EN + ZH); real RGBA output; instruction edits with up to 10 references."
+    features: {rgba: true, max_refs: 10, mask: annotate, text_render: true, negative: cfg, languages: [en, zh], tileable: false}
+    backend: qwen
+    weights: [{hf: Qwen/Qwen-Image-2.1, files: ["transformer/*.safetensors", "text_encoder/*.safetensors"]}]
+    license: {name: "Apache-2.0 (verify on the 2.1 model card)", commercial: true, verify: true}
+    memory_gb: 56
+    speed: "1.9 s/step @1024 (idle GPU), ~41 s per image at 20 steps; edit adds ~30 s"
+    est: {load_s: 30, run_s: 50}
+    prompt_style: {t2i: qwen_image, rgba: qwen_image, edit: qwen_edit, multi_ref: qwen_edit, extract: qwen_edit}
+    params:
+      - {name: aspect, type: choice, choices: ["1:1", "4:3", "3:4", "3:2", "2:3", "16:9", "9:16"], default: "1:1", group: basic, tasks: [t2i, rgba]}
+      - {name: size, label: Long side, type: choice, choices: [768, 1024, 1328, 1536, 2048], default: 1024, unit: px, group: basic}
+      - {name: steps, type: int, min: 4, max: 60, default: 25, group: basic, help: "25 is a good default; 12 is usable for previews (slightly over-sharpened)."}
+      - {name: batch, label: Images, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: transparent, label: Transparent (RGBA), type: bool, default: false, group: basic, help: "Prepends the RGBA trigger sentence: true alpha straight from the VAE."}
+      - {name: seed, type: seed, default: -1}
+      - {name: true_cfg, label: True CFG, type: float, min: 1, max: 10, step: 0.5, default: 1.0, group: advanced, help: "1 = no CFG (as trained). >1 enables the negative prompt and doubles the cost."}
+      - {name: output_resolution, label: Reference encoding, type: choice, choices: [512, 1024, 2048], default: 1024, group: advanced, tasks: [edit, multi_ref, extract]}
+      - {name: kv_cache, label: KV cache, type: bool, default: true, group: advanced}
+    presets:
+      fast: {steps: 12, size: 768}
+      balanced: {steps: 25, size: 1024}
+      quality: {steps: 40, size: 1536}
+
+  - id: z-image-turbo
+    name: Z-Image Turbo
+    modality: image
+    tasks: [t2i]
+    order: 20
+    tags: [fastest, text, commercial]
+    summary: "Fastest draft model (about 18 s per 1024 image); clean product-render look, very good text. No negative prompt."
+    features: {rgba: false, text_render: true, negative: false, languages: [en, zh], low_seed_diversity: true}
+    backend: qwen
+    weights:
+      - {hf: unsloth/Z-Image-Turbo, files: ["text_encoder/*.safetensors", "vae/*.safetensors"]}
+      - {hf: unsloth/Z-Image-Turbo-FP8, files: [Z-Image-Turbo-INT8.safetensors]}
+    license: {name: Apache-2.0, commercial: true}
+    memory_gb: 30
+    speed: "1.9 s/step, 9 steps: ~19 s per 1024 image"
+    est: {load_s: 12, run_s: 19}
+    prompt_style: zimage
+    params:
+      - {name: aspect, type: choice, choices: ["1:1", "4:3", "3:4", "3:2", "2:3", "16:9", "9:16"], default: "1:1", group: basic}
+      - {name: size, label: Long side, type: choice, choices: [512, 768, 1024, 1280, 1536, 2048], default: 1024, unit: px, group: basic}
+      - {name: steps, type: int, min: 6, max: 12, default: 9, group: basic, help: "9 steps = 8 function evaluations (distilled)."}
+      - {name: batch, label: Images, type: int, min: 1, max: 4, default: 4, group: basic}
+      - {name: seed, type: seed, default: -1}
+    presets:
+      fast: {steps: 7, size: 768}
+      balanced: {steps: 9, size: 1024}
+      quality: {steps: 12, size: 1536}
+
+  - id: flux1-kontext-dev
+    name: FLUX.1 Kontext [dev]
+    modality: image
+    tasks: [edit, t2i]
+    order: 30
+    tags: [edit, non-commercial]
+    summary: "Instruction edit of one image; keeps layout and text, tends to smooth materials. Non-commercial licence."
+    features: {rgba: false, max_refs: 1, text_render: true, negative: false, languages: [en]}
+    backend: qwen
+    weights: [{hf: unsloth/FLUX.1-Kontext-dev, files: ["transformer/*.safetensors"]}]
+    license: {name: "FLUX.1 [dev] Non-Commercial", commercial: false}
+    memory_gb: 55
+    speed: "edit 7.8 s/step (~156 s at 20 steps); t2i 2.3 s/step"
+    est: {load_s: 36, run_s: 156}
+    prompt_style: {edit: kontext, t2i: flux}
+    params:
+      - {name: aspect, type: choice, choices: ["1:1", "4:3", "3:4", "16:9", "9:16"], default: "1:1", group: basic, tasks: [t2i]}
+      - {name: size, label: Long side, type: choice, choices: [768, 1024], default: 1024, unit: px, group: basic}
+      - {name: steps, type: int, min: 12, max: 40, default: 28, group: basic}
+      - {name: guidance, type: float, min: 1.5, max: 4.0, step: 0.1, default: 2.5, group: basic, help: "Distilled guidance: 2.5 for edits, 3.5 for text-to-image."}
+      - {name: batch, label: Images, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+    presets:
+      fast: {steps: 16}
+      balanced: {steps: 24}
+      quality: {steps: 28}
+
+  - id: hunyuanimage-2.1
+    name: HunyuanImage 2.1
+    modality: image
+    tasks: [t2i]
+    order: 40
+    tags: [2k, detail, stylized]
+    summary: "Richest detail at native 2K (stylised game-art look); real CFG with negative prompt. Heaviest model (61 GB)."
+    features: {rgba: false, text_render: true, negative: true, native_size: 2048, languages: [en, zh]}
+    backend: qwen
+    weights:
+      - {hf: hunyuanvideo-community/HunyuanImage-2.1-Diffusers, files: ["text_encoder/*.safetensors", "vae/*"]}
+      - {hf: unsloth/HunyuanImage-2.1-FP8, files: [HunyuanImage-2.1-INT8.pt]}
+    license: {name: Tencent Hunyuan Community, commercial: true, note: "Not licensed in the EU, UK and South Korea; >100 M MAU needs a licence."}
+    memory_gb: 65
+    speed: "2K: 8.3 s/step (~170 s at 20 steps); cold load ~4 min"
+    est: {load_s: 235, run_s: 170}
+    prompt_style: hunyuan_image
+    params:
+      - {name: aspect, type: choice, choices: ["1:1", "16:9", "9:16", "4:3", "3:4"], default: "1:1", group: basic, help: "2K sizes: 2048², 2560x1536, 1536x2560, 2304x1792."}
+      - {name: size, label: Long side, type: choice, choices: [1024, 2048, 2560], default: 2048, unit: px, group: basic}
+      - {name: steps, type: int, min: 10, max: 50, default: 30, group: basic}
+      - {name: guidance, type: float, min: 1, max: 8, step: 0.5, default: 3.5, group: advanced}
+      - {name: batch, label: Images, type: int, min: 1, max: 2, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+    presets:
+      fast: {steps: 20, size: 1024}
+      balanced: {steps: 30, size: 2048}
+      quality: {steps: 50, size: 2048}
+
+  - id: lumina-image-2.0
+    name: Lumina-Image 2.0
+    modality: image
+    tasks: [t2i]
+    order: 50
+    tags: [stylized, light]
+    summary: "Light painterly / cel-shaded alternative for 2D art. Weak at text and prompt adherence."
+    features: {rgba: false, text_render: false, negative: true, languages: [en]}
+    backend: qwen
+    weights:
+      - {hf: unsloth/Lumina-Image-2.0, files: ["text_encoder/*.safetensors", "vae/*"]}
+      - {hf: unsloth/Lumina-Image-2.0-FP8, files: [Lumina-Image-2.0-INT8.pt]}
+    license: {name: Apache-2.0, commercial: true}
+    memory_gb: 25
+    speed: "1.6 s/step, ~50 s at 30 steps"
+    est: {load_s: 21, run_s: 50}
+    prompt_style: lumina
+    params:
+      - {name: aspect, type: choice, choices: ["1:1", "4:3", "3:4", "16:9", "9:16"], default: "1:1", group: basic}
+      - {name: size, label: Long side, type: choice, choices: [768, 1024], default: 1024, unit: px, group: basic}
+      - {name: steps, type: int, min: 20, max: 60, default: 30, group: basic}
+      - {name: guidance, type: float, min: 1, max: 8, step: 0.5, default: 4.0, group: advanced}
+      - {name: cfg_trunc_ratio, label: CFG truncation, type: float, min: 0.1, max: 1.0, step: 0.05, default: 0.25, group: advanced}
+      - {name: batch, label: Images, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+    presets: {fast: {steps: 20}, balanced: {steps: 30}, quality: {steps: 50}}
+
+  - id: flux1-krea-dev
+    name: FLUX.1 Krea [dev]
+    modality: image
+    tasks: [t2i]
+    order: 60
+    tags: [non-commercial]
+    summary: "Aesthetic FLUX fine-tune. Transformer weights are not downloaded."
+    features: {rgba: false, text_render: true, negative: false}
+    backend: qwen
+    weights: [{hf: unsloth/FLUX.1-Krea-dev, files: ["transformer/*.safetensors"]}]
+    license: {name: "FLUX.1 [dev] Non-Commercial", commercial: false}
+    memory_gb: 50
+    speed: "~ like Kontext t2i (2.3 s/step)"
+    prompt_style: flux
+    params:
+      - {name: aspect, type: choice, choices: ["1:1", "4:3", "3:4", "16:9", "9:16"], default: "1:1", group: basic}
+      - {name: size, label: Long side, type: choice, choices: [768, 1024, 1536], default: 1024, unit: px, group: basic}
+      - {name: steps, type: int, min: 12, max: 50, default: 28, group: basic}
+      - {name: guidance, type: float, min: 1.5, max: 6, step: 0.1, default: 4.0, group: basic}
+      - {name: seed, type: seed, default: -1}
+    presets: {fast: {steps: 16}, balanced: {steps: 28}, quality: {steps: 40}}
+
+  - id: flux2-klein-comfy
+    name: FLUX.2 klein-base 9B (ComfyUI)
+    modality: image
+    tasks: [t2i, edit, multi_ref]
+    order: 70
+    tags: [remote, non-commercial]
+    summary: "Runs inside the ComfyUI container (fp8). Multi-reference edits through ReferenceLatent. Optional backend."
+    features: {rgba: false, max_refs: 4, negative: true, remote: comfyui}
+    backend: comfyui
+    weights: []
+    license: {name: FLUX Non-Commercial, commercial: false}
+    memory_gb: 30
+    speed: "20-50 steps, CFG 4-5 (base model)"
+    prompt_style: {t2i: flux, edit: kontext, multi_ref: qwen_edit}
+    params:
+      - {name: aspect, type: choice, choices: ["1:1", "4:3", "3:4", "16:9", "9:16"], default: "1:1", group: basic}
+      - {name: size, label: Long side, type: choice, choices: [768, 1024, 1536], default: 1024, unit: px, group: basic}
+      - {name: steps, type: int, min: 10, max: 50, default: 28, group: basic}
+      - {name: guidance, label: CFG, type: float, min: 1, max: 8, step: 0.5, default: 4.5, group: basic}
+      - {name: seed, type: seed, default: -1}
+    presets: {fast: {steps: 16}, balanced: {steps: 28}, quality: {steps: 40}}
+
+  - id: realesrgan-x4
+    name: Real-ESRGAN x4plus
+    modality: image
+    tasks: [upscale]
+    default_for: [upscale]
+    order: 80
+    tags: [tool, alpha]
+    summary: "2x / 4x upscale, keeps alpha. 4 s for 512 -> 2048."
+    features: {rgba: true}
+    backend: imgtools
+    weights: [{path: engines/hy3d/vendor/Hunyuan3D-2.1/hy3dpaint/ckpt/RealESRGAN_x4plus.pth}]
+    license: {name: BSD-3-Clause, commercial: true}
+    memory_gb: 4
+    speed: "4.3 s for 512 -> 2048"
+    est: {load_s: 1, run_s: 5}
+    params:
+      - {name: scale, type: choice, choices: [2, 4], default: 4, group: basic}
+      - {name: tile, label: Tile size, type: choice, choices: [0, 256, 512], default: 0, group: advanced, help: "0 = no tiling. Use 256 if memory is tight."}
+    presets: {}
+
+  - id: rembg-u2net
+    name: rembg u2net
+    modality: image
+    tasks: [rmbg]
+    default_for: [rmbg]
+    order: 81
+    tags: [tool, cpu]
+    summary: "Background removal on the CPU (0.4 s per 1024 image)."
+    features: {rgba: true}
+    backend: imgtools
+    device: cpu
+    weights: [{path: ~/.u2net/u2net.onnx}]
+    license: {name: Apache-2.0, commercial: true}
+    memory_gb: 0
+    speed: "0.4 s per 1024 image (CPU)"
+    est: {load_s: 1, run_s: 1}
+    params:
+      - {name: alpha_matting, label: Alpha matting, type: bool, default: false, group: advanced}
+    presets: {}
+
+  - id: rembg-birefnet
+    name: BiRefNet general (rembg)
+    modality: image
+    tasks: [rmbg]
+    order: 82
+    tags: [tool, hair]
+    summary: "Better edges for hair and fur. The 973 MB onnx is not downloaded yet."
+    features: {rgba: true}
+    backend: imgtools
+    device: cpu
+    weights: [{path: ~/.u2net/birefnet-general.onnx, fix: "envs: envs/hy3d/bin/python -c \"from rembg import new_session; new_session('birefnet-general')\" (one-time download, 973 MB)"}]
+    license: {name: MIT, commercial: true}
+    memory_gb: 0
+    speed: "a few s per image (CPU)"
+    params: []
+    presets: {}
+
+  # =================================================================== 3D
+  - id: hunyuan3d-2.1
+    name: Hunyuan3D 2.1
+    modality: mesh
+    tasks: [shape, texture]
+    default_for: [shape, texture]
+    order: 10
+    tags: [pbr, glb]
+    summary: "Image -> 3D shape (DiT) and PBR texture painting; GLB export. Runs on the bundled Hunyuan3D engine (engines/hy3d)."
+    features: {input: image, pbr: true, export: [glb, obj, ply, stl], max_refs: 1}
+    backend: hy3d
+    weights:
+      - {hf: tencent/Hunyuan3D-2.1, files: ["hunyuan3d-dit-v2-1/*", "hunyuan3d-paintpbr-v2-1/*"]}
+      - {hf: facebook/dinov2-giant}
+    license: {name: Tencent Hunyuan Community, commercial: true, note: "Not licensed in the EU, UK and South Korea; >1 M MAU needs a licence."}
+    memory_gb: 45
+    speed: "shape ~1 min, texture ~3-5 min (balanced)"
+    est: {load_s: 60, run_s: 240}
+    params:
+      - {name: steps, label: Shape steps, type: int, min: 5, max: 100, default: 30, group: basic, tasks: [shape]}
+      - {name: guidance, label: Shape guidance, type: float, min: 1, max: 15, step: 0.5, default: 5.0, group: advanced, tasks: [shape]}
+      - {name: octree, label: Octree resolution, type: choice, choices: [196, 256, 384, 512], default: 256, group: basic, tasks: [shape]}
+      - {name: remove_bg, label: Remove background, type: bool, default: true, group: basic, tasks: [shape]}
+      - {name: border_ratio, label: Border, type: float, min: 0, max: 0.3, step: 0.01, default: 0.15, group: advanced, tasks: [shape]}
+      - {name: num_chunks, label: Chunks, type: int, min: 1000, max: 2000000, default: 200000, group: advanced, tasks: [shape]}
+      - {name: seed, type: seed, default: -1}
+      - {name: textured, label: Paint texture, type: bool, default: true, group: basic, tasks: [shape]}
+      - {name: tex_faces, label: Texture faces, type: int, min: 2000, max: 150000, default: 40000, group: basic}
+      - {name: tex_views, label: Views, type: int, min: 6, max: 9, default: 8, group: advanced}
+      - {name: tex_resolution, label: View resolution, type: choice, choices: [512, 768], default: 512, group: advanced}
+      - {name: tex_steps, label: Texture steps, type: int, min: 4, max: 50, default: 15, group: advanced}
+      - {name: tex_size, label: Texture size, type: choice, choices: [2048, 4096, 8192], default: 4096, group: basic}
+      - {name: super_res, label: Super-resolution, type: bool, default: true, group: advanced}
+    presets:
+      fast: {steps: 20, octree: 196, tex_faces: 20000, tex_views: 6, tex_size: 2048}
+      balanced: {steps: 30, octree: 256, tex_faces: 40000, tex_views: 8, tex_size: 4096}
+      quality: {steps: 50, octree: 384, tex_faces: 60000, tex_views: 9, tex_resolution: 768, tex_steps: 25}
+
+  # =================================================================== SOUND: SFX / ambience / music
+  - id: sa3-small-sfx
+    name: Stable Audio 3 Small SFX
+    modality: audio
+    tasks: [sfx]
+    default_for: [sfx]
+    order: 10
+    tags: [fast, sfx]
+    summary: "One-shot SFX and UI sounds; sub-second warm generation, 2 GB. English prompts."
+    features: {max_seconds: 120, sample_rate: 44100, channels: 2, negative: true, languages: [en]}
+    backend: audio
+    weights: [{hf: stabilityai/stable-audio-3-small-sfx, files: [model.safetensors]}]
+    license: {name: Stability AI Community, commercial: true, note: "Free under USD 1 M revenue; register and show 'Powered by Stability AI'."}
+    memory_gb: 4
+    speed: "warm ~1-2 s per clip (cold 4 s load)"
+    est: {load_s: 5, run_s: 3}
+    prompt_style: sfx
+    params:
+      - {name: seconds, label: Duration, type: float, min: 0.5, max: 120, step: 0.5, default: 3, unit: s, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 8, default: 4, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: steps, type: int, min: 4, max: 50, default: 8, group: advanced, help: "ARC-distilled: 8 steps is the trained setting."}
+      - {name: cfg_scale, label: CFG, type: float, min: 1, max: 7, step: 0.5, default: 1.0, group: advanced}
+    presets: {fast: {batch: 2}, balanced: {batch: 4}, quality: {batch: 8}}
+
+  - id: sa3-medium
+    name: Stable Audio 3 Medium
+    modality: audio
+    tasks: [sfx, ambience, music]
+    default_for: [ambience, music]
+    order: 20
+    tags: [music, ambience, stereo]
+    summary: "Instrumental music, ambience beds up to ~6 min and richer SFX; 44.1 kHz stereo. Add BPM and key for music."
+    features: {max_seconds: 380, sample_rate: 44100, channels: 2, negative: true, inpaint: true, languages: [en]}
+    backend: audio
+    weights: [{hf: stabilityai/stable-audio-3-medium}]
+    license: {name: Stability AI Community, commercial: true, note: "Free under USD 1 M revenue; register and show 'Powered by Stability AI'."}
+    memory_gb: 10
+    speed: "30 s of music in ~15 s cold, faster warm"
+    est: {load_s: 17, run_s: 15}
+    prompt_style: {sfx: sfx, ambience: ambience, music: sa3_music}
+    params:
+      - {name: seconds, label: Duration, type: float, min: 1, max: 380, step: 1, default: 30, unit: s, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 2, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: steps, type: int, min: 4, max: 50, default: 8, group: advanced}
+      - {name: cfg_scale, label: CFG, type: float, min: 1, max: 7, step: 0.5, default: 1.0, group: advanced}
+    presets: {fast: {batch: 1, seconds: 15}, balanced: {batch: 2}, quality: {batch: 4}}
+
+  - id: moss-sfx-v2
+    name: MOSS-SoundEffect v2
+    modality: audio
+    tasks: [sfx, ambience]
+    order: 30
+    tags: [sfx, zh, commercial]
+    summary: "Second-opinion SFX / ambience up to 30 s, English or Chinese captions. Slow (about 15x real time at 100 steps)."
+    features: {max_seconds: 30, sample_rate: 48000, channels: 1, negative: true, languages: [en, zh]}
+    backend: audio
+    weights: [{hf: OpenMOSS-Team/MOSS-SoundEffect-v2.0}]
+    license: {name: Apache-2.0, commercial: true}
+    memory_gb: 18
+    speed: "5 s clip: 74 s at 100 steps"
+    est: {load_s: 38, run_s: 74}
+    prompt_style: moss_sfx
+    params:
+      - {name: seconds, label: Duration, type: float, min: 1, max: 30, step: 0.5, default: 5, unit: s, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: steps, type: int, min: 20, max: 200, default: 100, group: advanced}
+      - {name: cfg_scale, label: CFG, type: float, min: 1, max: 10, step: 0.5, default: 4.0, group: advanced}
+    presets: {fast: {steps: 50}, balanced: {steps: 100}, quality: {steps: 150}}
+
+  - id: minimax-music3
+    name: MiniMax-Music 3
+    modality: audio
+    tasks: [song, music]
+    default_for: [song]
+    order: 40
+    tags: [vocals, lyrics, long]
+    summary: "The only local model that sings: full songs with lyrics and vocals, up to ~5 min. Slow (RTF ~9)."
+    features: {max_seconds: 300, sample_rate: 44100, channels: 2, lyrics: true, negative: false, languages: [en, zh]}
+    backend: audio
+    weights: [{hf: MiniMaxAI/MiniMax-Music3}]
+    license: {name: MiniMax-Music3 Community, commercial: true, note: "Show 'MiniMax-Music3' prominently in the product; >USD 20 M revenue needs authorisation."}
+    memory_gb: 28
+    speed: "20 s song: 160 s load + 188 s generation; 2-3 min song ~20-30 min"
+    est: {load_s: 160, run_s: 190}
+    kill_on_cancel: true
+    prompt_style: minimax_music
+    params:
+      - {name: lyrics, type: lyrics, default: "", group: basic, help: "Section tags on their own line: [verse] [chorus] [bridge] ... [instrumental]."}
+      - {name: seconds, label: Max duration, type: float, min: 10, max: 300, step: 5, default: 60, unit: s, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: cfg_scale, label: CFG, type: float, min: 1, max: 4, step: 0.1, default: 1.7, group: advanced}
+      - {name: steps, label: Flow steps, type: int, min: 30, max: 200, default: 120, group: advanced}
+    presets: {fast: {seconds: 30, steps: 60}, balanced: {seconds: 60}, quality: {seconds: 120, steps: 150}}
+
+  # =================================================================== SOUND: voice
+  - id: qwen3-tts-customvoice
+    name: Qwen3-TTS CustomVoice
+    modality: audio
+    tasks: [tts]
+    default_for: [tts]
+    order: 50
+    tags: [voice, presets, instruct]
+    summary: "9 preset speakers with a free-text delivery instruction (emotion, tone, pace). 10 languages, no Thai."
+    features: {speakers: [Vivian, Serena, Uncle_Fu, Dylan, Eric, Ryan, Aiden, Ono_Anna, Sohee], instruct: true, thai: false, languages: [zh, en, ja, ko, de, fr, ru, pt, es, it], sample_rate: 24000}
+    backend: qwentts
+    weights: [{hf: Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice}]
+    license: {name: Apache-2.0, commercial: true}
+    memory_gb: 6
+    speed: "RTF 0.85 (6.4 s of audio in 5.4 s)"
+    est: {load_s: 27, run_s: 6}
+    prompt_style: qwen_tts
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic}
+      - {name: speaker, type: choice, choices: [Vivian, Serena, Uncle_Fu, Dylan, Eric, Ryan, Aiden, Ono_Anna, Sohee], default: Ryan, group: basic}
+      - {name: instruct, label: Direction, type: text, default: "", group: basic, help: "e.g. 'Speak in an incredulous tone, with a hint of panic.'"}
+      - {name: language, type: choice, choices: [Auto, Chinese, English, Japanese, Korean, German, French, Russian, Portuguese, Spanish, Italian], default: Auto, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: temperature, type: float, min: 0.1, max: 1.5, step: 0.05, default: 0.9, group: advanced}
+    presets: {}
+
+  - id: qwen3-tts-base
+    name: Qwen3-TTS Base (clone)
+    modality: audio
+    tasks: [voice_clone]
+    order: 51
+    tags: [voice, clone]
+    summary: "Zero-shot clone from a reference clip + its transcript. 10 languages, no Thai."
+    features: {needs_ref: true, thai: false, languages: [zh, en, ja, ko, de, fr, ru, pt, es, it], sample_rate: 24000}
+    backend: qwentts
+    weights: [{hf: Qwen/Qwen3-TTS-12Hz-1.7B-Base}]
+    license: {name: Apache-2.0, commercial: true}
+    memory_gb: 6
+    speed: "RTF 1.0"
+    est: {load_s: 28, run_s: 4}
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic}
+      - {name: ref_text, label: Reference transcript, type: text, default: "", group: basic, help: "Exact words of the reference clip (empty = x-vector only, lower quality)."}
+      - {name: language, type: choice, choices: [Auto, Chinese, English, Japanese, Korean, German, French, Russian, Portuguese, Spanish, Italian], default: Auto, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+    presets: {}
+
+  - id: omnivoice
+    name: OmniVoice
+    modality: audio
+    tasks: [voice_clone, voice_design, tts]
+    default_for: [voice_clone]
+    order: 52
+    tags: [voice, clone, thai, fast]
+    summary: "Fast multilingual cloner (600+ languages incl. Thai) with attribute-based voice design. 2 GB."
+    features: {needs_ref: clone, thai: true, nonverbal_tags: true, sample_rate: 24000}
+    backend: audio
+    weights: [{hf: k2-fsa/OmniVoice}]
+    license: {name: Apache-2.0, commercial: true}
+    memory_gb: 4
+    speed: "RTF 0.3-0.6"
+    est: {load_s: 6, run_s: 2}
+    prompt_style: {voice_design: omnivoice_design, tts: tts_plain, voice_clone: tts_plain}
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic}
+      - {name: instruct, label: Voice attributes, type: text, default: "", group: basic, tasks: [voice_design], help: "Comma-separated, one per category: female, young adult, high pitch, british accent"}
+      - {name: ref_text, label: Reference transcript, type: text, default: "", group: basic, tasks: [voice_clone]}
+      - {name: language, type: choice, choices: [auto, en, th, zh, ja, ko, fr, de, es, vi, id], default: auto, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 6, default: 2, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: speed, type: float, min: 0.5, max: 2.0, step: 0.05, default: 1.0, group: advanced}
+      - {name: steps, label: Steps, type: int, min: 8, max: 64, default: 32, group: advanced}
+      - {name: guidance, type: float, min: 1, max: 4, step: 0.1, default: 2.0, group: advanced}
+    presets: {fast: {steps: 16}, balanced: {steps: 32}, quality: {steps: 48}}
+
+  - id: omnivoice-thai
+    name: OmniVoice Thai
+    modality: audio
+    tasks: [voice_clone, voice_design, tts]
+    order: 53
+    tags: [voice, thai]
+    summary: "Thai fine-tune of OmniVoice (2 speakers of training data); same controls."
+    features: {needs_ref: clone, thai: true, nonverbal_tags: true, sample_rate: 24000}
+    backend: audio
+    weights: [{hf: hotdogs/omnivoice-thai}, {hf: eustlb/higgs-audio-v2-tokenizer}]
+    license: {name: Apache-2.0, commercial: true, note: "Training data licence unclear (Thanarit/Thai-Voice-Test7)."}
+    memory_gb: 4
+    speed: "RTF 0.3"
+    est: {load_s: 6, run_s: 2}
+    prompt_style: {voice_design: omnivoice_design, tts: tts_plain, voice_clone: tts_plain}
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic}
+      - {name: instruct, label: Voice attributes, type: text, default: "", group: basic, tasks: [voice_design]}
+      - {name: ref_text, label: Reference transcript, type: text, default: "", group: basic, tasks: [voice_clone]}
+      - {name: language, type: choice, choices: [th, auto, en], default: th, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 6, default: 2, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: speed, type: float, min: 0.5, max: 2.0, step: 0.05, default: 1.0, group: advanced}
+      - {name: steps, label: Steps, type: int, min: 8, max: 64, default: 32, group: advanced}
+    presets: {fast: {steps: 16}, balanced: {steps: 32}, quality: {steps: 48}}
+
+  - id: moss-voicegen
+    name: MOSS-VoiceGenerator
+    modality: audio
+    tasks: [voice_design]
+    default_for: [voice_design]
+    order: 54
+    tags: [voice, design]
+    summary: "Designs a new voice from a free-prose description; use the result as the clone reference."
+    features: {sample_rate: 24000, thai: untested}
+    backend: moss
+    weights: [{hf: OpenMOSS-Team/MOSS-VoiceGenerator}, {hf: OpenMOSS-Team/MOSS-Audio-Tokenizer}]
+    license: {name: Apache-2.0, commercial: true}
+    memory_gb: 13
+    speed: "3.3 s of audio in 4.6 s (66 s load)"
+    est: {load_s: 66, run_s: 5}
+    prompt_style: moss_voicegen
+    params:
+      - {name: instruction, label: Voice description, type: textarea, default: "", group: basic}
+      - {name: text, label: Line, type: textarea, default: "", group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 2, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: temperature, type: float, min: 0.5, max: 2.0, step: 0.05, default: 1.5, group: advanced}
+      - {name: top_p, type: float, min: 0.1, max: 1.0, step: 0.05, default: 0.6, group: advanced}
+      - {name: top_k, type: int, min: 1, max: 200, default: 50, group: advanced}
+    presets: {}
+
+  - id: moss-tts-v1.5
+    name: MOSS-TTS v1.5
+    modality: audio
+    tasks: [voice_clone, tts]
+    order: 55
+    tags: [voice, clone, thai, long-form]
+    summary: "High-fidelity long-form cloning in 31 languages incl. Thai; set the language. 23 GB, slow load."
+    features: {needs_ref: clone, thai: true, sample_rate: 24000, duration_control: true}
+    backend: moss
+    weights: [{hf: OpenMOSS-Team/MOSS-TTS-v1.5}, {hf: OpenMOSS-Team/MOSS-Audio-Tokenizer}]
+    license: {name: Apache-2.0, commercial: true}
+    memory_gb: 26
+    speed: "EN 3.4 s in 23 s; TH 8.2 s in 16 s (load ~2 min)"
+    est: {load_s: 120, run_s: 20}
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic}
+      - {name: language, type: choice, choices: [English, Thai, Chinese, Japanese, Korean, French, German, Spanish, Vietnamese, Indonesian], default: English, group: basic}
+      - {name: max_seconds, label: Max length, type: float, min: 2, max: 120, step: 1, default: 20, unit: s, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: temperature, type: float, min: 0.5, max: 2.5, step: 0.05, default: 1.7, group: advanced}
+      - {name: top_p, type: float, min: 0.1, max: 1.0, step: 0.05, default: 0.8, group: advanced}
+      - {name: top_k, type: int, min: 1, max: 200, default: 25, group: advanced}
+    presets: {}
+
+  - id: moss-tts-nano
+    name: MOSS-TTS Nano
+    modality: audio
+    tasks: [voice_clone]
+    order: 56
+    tags: [voice, clone, tiny]
+    summary: "0.1 B cloner (20 languages, no Thai). Its 88 MB codec is not downloaded."
+    features: {needs_ref: true, thai: false, sample_rate: 48000}
+    backend: moss
+    weights: [{hf: OpenMOSS-Team/MOSS-TTS-Nano}, {hf: OpenMOSS-Team/MOSS-Audio-Tokenizer-Nano}]
+    license: {name: "Apache-2.0 (repo: not yet licensed for redistribution)", commercial: false, verify: true}
+    memory_gb: 2
+    speed: "-"
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic}
+      - {name: seed, type: seed, default: -1}
+    presets: {}
+
+  - id: f5-tts
+    name: F5-TTS v1
+    modality: audio
+    tasks: [voice_clone]
+    order: 57
+    tags: [voice, clone, non-commercial]
+    summary: "Fast zero-shot cloning (EN/ZH) from a <=12 s reference with exact transcript. Non-commercial weights."
+    features: {needs_ref: true, thai: false, languages: [en, zh], sample_rate: 24000}
+    backend: audio
+    weights: [{hf: SWivid/F5-TTS}, {hf: charactr/vocos-mel-24khz}]
+    license: {name: CC-BY-NC-4.0 (weights), commercial: false}
+    memory_gb: 4
+    speed: "RTF 0.67"
+    est: {load_s: 3, run_s: 3}
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic}
+      - {name: ref_text, label: Reference transcript, type: text, default: "", group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: speed, type: float, min: 0.5, max: 2.0, step: 0.05, default: 1.0, group: advanced}
+      - {name: steps, label: NFE steps, type: int, min: 8, max: 64, default: 32, group: advanced}
+      - {name: cfg_strength, label: CFG, type: float, min: 0.5, max: 5, step: 0.1, default: 2.0, group: advanced}
+    presets: {}
+
+  - id: orpheus-3b
+    name: Orpheus 3B
+    modality: audio
+    tasks: [tts]
+    order: 58
+    tags: [voice, emotive, english]
+    summary: "English TTS with 8 preset voices and inline emotive tags (<laugh>, <sigh>, ...). Slow without vLLM."
+    features: {voices: [tara, leah, jess, leo, dan, mia, zac, zoe], tags: true, languages: [en], sample_rate: 24000}
+    backend: audio
+    weights: [{hf: unsloth/orpheus-3b-0.1-ft}, {hf: hubertsiuzdak/snac_24khz}]
+    license: {name: Apache-2.0 + Llama 3.2 Community, commercial: true, note: "Llama 3.2 terms apply (attribution, AUP, 700 M MAU)."}
+    memory_gb: 9
+    speed: "RTF ~8 (HF generate)"
+    est: {load_s: 40, run_s: 40}
+    prompt_style: orpheus
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic}
+      - {name: voice, type: choice, choices: [tara, leah, jess, leo, dan, mia, zac, zoe], default: leo, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: temperature, type: float, min: 0.1, max: 1.5, step: 0.05, default: 0.6, group: advanced}
+      - {name: top_p, type: float, min: 0.1, max: 1.0, step: 0.05, default: 0.95, group: advanced}
+    presets: {}
+
+  - id: higgs-tts-3
+    name: Higgs TTS 3 (4B)
+    modality: audio
+    tasks: [tts, voice_clone]
+    order: 60
+    tags: [voice, expressive, tags, non-commercial]
+    summary: "Most expressive control (43 inline emotion/style/prosody/SFX tags), 100+ languages incl. Thai. vLLM engine."
+    features: {needs_ref: clone, thai: true, tags: true, sample_rate: 24000, engine_start_s: 150}
+    backend: vllm_omni
+    weights: [{hf: bosonai/higgs-tts-3-4b}, {hf: bosonai/higgs-audio-v2-tokenizer}]
+    license: {name: Boson research / non-commercial (creator grant), commercial: false}
+    memory_gb: 30
+    speed: "engine start 90-165 s, then RTF ~1.4"
+    est: {load_s: 150, run_s: 5}
+    prompt_style: higgs
+    params:
+      - {name: text, label: Line (with tags), type: textarea, default: "", group: basic}
+      - {name: ref_text, label: Reference transcript, type: text, default: "", group: basic, tasks: [voice_clone]}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: temperature, type: float, min: 0.1, max: 1.5, step: 0.05, default: 0.8, group: advanced}
+      - {name: top_k, type: int, min: 1, max: 200, default: 50, group: advanced}
+    presets: {}
+
+  - id: fish-s2-pro
+    name: Fish Audio S2 Pro
+    modality: audio
+    tasks: [tts, voice_clone]
+    order: 61
+    tags: [voice, tags, non-commercial]
+    summary: "Cloning in 80+ languages with free-form inline [bracket] directions. vLLM engine; non-commercial."
+    features: {needs_ref: clone, thai: weak, tags: true, sample_rate: 44100, engine_start_s: 155}
+    backend: vllm_omni
+    weights: [{hf: fishaudio/s2-pro}]
+    license: {name: Fish Audio Research License, commercial: false}
+    memory_gb: 32
+    speed: "engine start ~155 s; first request ~25 s (JIT)"
+    est: {load_s: 155, run_s: 10}
+    prompt_style: fish
+    params:
+      - {name: text, label: "Line (with [tags])", type: textarea, default: "", group: basic}
+      - {name: ref_text, label: Reference transcript, type: text, default: "", group: basic, tasks: [voice_clone]}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+    presets: {}
+
+  - id: voxtral-tts
+    name: Voxtral 4B TTS
+    modality: audio
+    tasks: [tts]
+    order: 62
+    tags: [voice, presets, non-commercial]
+    summary: "20 preset voices in 9 languages (no Thai, no cloning with open weights). vLLM engine; non-commercial."
+    features: {voices: [casual_male, casual_female, cheerful_male, cheerful_female, neutral_male, neutral_female], thai: false, sample_rate: 24000}
+    backend: vllm_omni
+    weights: [{hf: mistralai/Voxtral-4B-TTS-2603}]
+    license: {name: CC-BY-NC-4.0, commercial: false}
+    memory_gb: 26
+    speed: "engine start ~85 s, RTF 1.2"
+    est: {load_s: 85, run_s: 4}
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic}
+      - {name: voice, type: choice, choices: [casual_male, casual_female, cheerful_male, cheerful_female, neutral_male, neutral_female], default: neutral_male, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+    presets: {}
+
+  - id: cosyvoice3
+    name: CosyVoice 3 (0.5B)
+    modality: audio
+    tasks: [voice_clone, tts]
+    order: 63
+    tags: [voice, clone, instruct]
+    summary: "Cross-lingual cloning (9 languages + Chinese dialects, no Thai) with an instruct mode. vLLM engine."
+    features: {needs_ref: true, thai: false, instruct: true, sample_rate: 24000}
+    backend: vllm_omni
+    weights: [{hf: FunAudioLLM/Fun-CosyVoice3-0.5B-2512}]
+    license: {name: Apache-2.0, commercial: true}
+    memory_gb: 20
+    speed: "engine start ~60 s"
+    est: {load_s: 60, run_s: 8}
+    prompt_style: cosyvoice
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic}
+      - {name: ref_text, label: Reference transcript, type: text, default: "", group: basic}
+      - {name: instruct, label: Direction, type: text, default: "", group: advanced}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+    presets: {}
+
+  # =================================================================== SOUND: QA helpers
+  - id: clap-htsat
+    name: LAION CLAP (scorer)
+    modality: audio
+    tasks: [qa_clap]
+    default_for: [qa_clap]
+    order: 90
+    tags: [qa]
+    summary: "Prompt-match score of SFX / music takes (cosine vs prompt, 'silence' and 'speech' anchors)."
+    features: {}
+    backend: audio
+    weights: [{hf: laion/clap-htsat-unfused}]
+    license: {name: Apache-2.0, commercial: true}
+    memory_gb: 2
+    speed: "<1 s per clip"
+    est: {load_s: 5, run_s: 1}
+    params: []
+    presets: {}
+
+  - id: whisper-v3-turbo
+    name: Whisper large-v3 turbo
+    modality: audio
+    tasks: [qa_asr]
+    default_for: [qa_asr]
+    order: 91
+    tags: [qa, asr]
+    summary: "Transcribes voice takes and scores them against the script (word / character recall; Thai ok)."
+    features: {languages: 99}
+    backend: audio
+    weights: [{hf: openai/whisper-large-v3-turbo}]
+    license: {name: MIT, commercial: true}
+    memory_gb: 3
+    speed: "<1 s per clip"
+    est: {load_s: 5, run_s: 1}
+    params:
+      - {name: language, type: choice, choices: [auto, en, th, zh, ja], default: auto, group: basic}
+    presets: {}
+
+  # =================================================================== TEXT (prompt improver LLMs; run by the improver service)
+  - id: qwen3.6-35b-a3b
+    name: Qwen3.6-35B-A3B (Q4_K_M + vision)
+    modality: text
+    tasks: [improve]
+    default_for: [improve]
+    order: 10
+    tags: [llm, vision, thai]
+    summary: "Default prompt improver. MoE (~3B active), 63-75 tok/s, ~5 s per answer, good Thai, vision."
+    features: {vision: true, thai: true, json_schema: true}
+    backend: llm
+    weights:
+      - {lmstudio: lmstudio-community/Qwen3.6-35B-A3B-GGUF/Qwen3.6-35B-A3B-Q4_K_M.gguf}
+      - {lmstudio: lmstudio-community/Qwen3.6-35B-A3B-GGUF/mmproj-Qwen3.6-35B-A3B-BF16.gguf}
+    license: {name: Apache-2.0, commercial: true}
+    memory_gb: 22
+    speed: "~5-6 s per JSON answer; sleeps (0.2 GB) after 5 min idle"
+    params: []
+    presets: {}
+
+  - id: gemma-4-e2b
+    name: gemma-4-E2B (fallback)
+    modality: text
+    tasks: [improve]
+    order: 20
+    tags: [llm, small]
+    summary: "Low-memory fallback (2.3 GB, ~100 tok/s), used when less than 25 GB is free. No vision."
+    features: {vision: false, json_schema: true}
+    backend: llm
+    weights: [{hf: unsloth/gemma-4-E2B-it-GGUF, files: [gemma-4-E2B-it-UD-Q4_K_XL.gguf]}]
+    license: {name: Gemma Terms of Use, commercial: true}
+    memory_gb: 3
+    speed: "~3-5 s per answer"
+    params: []
+    presets: {}
+
+  # =================================================================== SELF-TEST (reference worker)
+  - id: test-tone
+    name: Test tone (self-test)
+    modality: audio
+    tasks: [sfx, test]
+    test: true
+    order: 99
+    tags: [test, cpu]
+    summary: "CPU reference backend; writes a tone. Exercises queue -> worker -> SSE -> library."
+    features: {load_delay_s: 0.3}
+    backend: echo
+    weights: []
+    license: {name: Studio test output, commercial: true}
+    memory_gb: 0
+    speed: "instant"
+    est: {load_s: 1, run_s: 2}
+    prompt_style: sfx
+    params:
+      - {name: frequency, type: float, min: 40, max: 4000, step: 10, default: 440, unit: Hz, group: basic}
+      - {name: waveform, type: choice, choices: [sine, square, saw, noise], default: sine, group: basic}
+      - {name: seconds, label: Duration, type: float, min: 0.1, max: 10, step: 0.1, default: 1.5, unit: s, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 8, default: 2, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: steps, type: int, min: 1, max: 200, default: 20, group: advanced}
+      - {name: step_ms, label: Step delay, type: int, min: 0, max: 2000, default: 60, unit: ms, group: advanced}
+    presets: {fast: {steps: 5}, balanced: {steps: 20}, quality: {steps: 60, step_ms: 100}}
+
+  - id: test-swatch
+    name: Test swatch (self-test)
+    modality: image
+    tasks: [t2i, test]
+    test: true
+    order: 99
+    tags: [test, cpu]
+    summary: "CPU reference backend; writes a gradient PNG (optionally with alpha)."
+    features: {rgba: true, load_delay_s: 0.3}
+    backend: echo
+    weights: []
+    license: {name: Studio test output, commercial: true}
+    memory_gb: 0
+    speed: "instant"
+    est: {load_s: 1, run_s: 2}
+    prompt_style: zimage
+    params:
+      - {name: aspect, type: choice, choices: ["1:1", "4:3", "3:4", "16:9", "9:16"], default: "1:1", group: basic}
+      - {name: size, label: Long side, type: choice, choices: [256, 384, 512], default: 384, unit: px, group: basic}
+      - {name: batch, label: Images, type: int, min: 1, max: 8, default: 4, group: basic}
+      - {name: transparent, label: Transparent (RGBA), type: bool, default: false, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: steps, type: int, min: 1, max: 200, default: 20, group: advanced}
+      - {name: step_ms, label: Step delay, type: int, min: 0, max: 2000, default: 40, unit: ms, group: advanced}
+    presets: {fast: {steps: 5, size: 256}, balanced: {steps: 20}, quality: {steps: 40, size: 512}}

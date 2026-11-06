@@ -1,0 +1,198 @@
+# tts_light group: small / CPU-friendly TTS (Kokoro, Piper, MeloTTS, StyleTTS 2, Parler-TTS). Report: docs/research/audio_more/tts_light.md
+# backends: ttslight (kokoro, piper, styletts2) and ttslight_parler (parler, melo: transformers 4.46.1 pin)
+backends:
+  ttslight:
+    label: envs/ttslight (Kokoro, Piper, StyleTTS 2; torch 2.9.1 cu130)
+    python: envs/ttslight/bin/python
+    script: workers/ttslight_worker.py
+    device: gpu
+    lock: ttslight
+    max_loaded: 3
+    model_idle_s: 300
+  ttslight_parler:
+    label: envs/ttslight_parler (Parler-TTS, MeloTTS; transformers 4.46.1)
+    python: envs/ttslight_parler/bin/python
+    script: workers/ttslight_parler_worker.py
+    device: gpu
+    lock: ttslight_parler
+    max_loaded: 2
+    model_idle_s: 300
+
+models:
+  # =================================================================== Kokoro
+  - id: kokoro-82m
+    name: Kokoro 82M
+    modality: audio
+    tasks: [tts]
+    order: 70
+    tags: [voice, fast, tiny, presets]
+    summary: "82 M parameters, 28 English preset voices (US + UK), RTF ~0.02. Deterministic: same text + voice = same take. No Thai, no cloning."
+    features: {voices: [af_heart, af_bella, af_nicole, af_sarah, af_sky, af_alloy, af_aoede, af_jessica, af_kore, af_nova, af_river, am_adam, am_michael, am_echo, am_eric, am_fenrir, am_liam, am_onyx, am_puck, am_santa, bf_emma, bf_alice, bf_isabella, bf_lily, bm_george, bm_daniel, bm_fable, bm_lewis], languages: [en], thai: false, sample_rate: 24000}
+    backend: ttslight
+    weights: [{hf: hexgrad/Kokoro-82M}]
+    license: {name: Apache-2.0, commercial: true}
+    memory_gb: 3
+    speed: "load 3 s; 5 s of speech in ~1 s on the GPU (RTF ~0.2 warm-up included), peak 0.7 GB VRAM"
+    est: {load_s: 3, run_s: 1}
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic}
+      - {name: voice, type: choice, choices: [af_heart, af_bella, af_nicole, af_sarah, af_sky, af_alloy, af_aoede, af_jessica, af_kore, af_nova, af_river, am_adam, am_michael, am_echo, am_eric, am_fenrir, am_liam, am_onyx, am_puck, am_santa, bf_emma, bf_alice, bf_isabella, bf_lily, bm_george, bm_daniel, bm_fable, bm_lewis], default: af_heart, group: basic, help: "af/am = American female/male, bf/bm = British."}
+      - {name: speed, type: float, min: 0.5, max: 2.0, step: 0.05, default: 1.0, group: basic}
+    presets: {}
+
+  # =================================================================== Piper (CPU)
+  - id: piper-en
+    name: Piper (English voices)
+    modality: audio
+    tasks: [tts]
+    device: cpu
+    order: 71
+    tags: [voice, fast, cpu, tiny, presets]
+    summary: "ONNX voices that run on the CPU in a fraction of real time (5 English voices, 60-110 MB each). Robotic next to Kokoro but costs no GPU."
+    features: {voices: [en_US-lessac-high, en_US-amy-medium, en_US-libritts_r-medium, en_GB-alba-medium, en_GB-northern_english_male-medium], default_voice: en_US-lessac-high, languages: [en], thai: false, sample_rate: 22050}
+    backend: ttslight
+    weights: [{hf: rhasspy/piper-voices, files: ["en/en_US/lessac/high/*", "en/en_US/amy/medium/*", "en/en_US/libritts_r/medium/*", "en/en_GB/alba/medium/*", "en/en_GB/northern_english_male/medium/*"]}]
+    license: {name: "Per voice: Lessac (Blizzard 2013 licence), Amy (see mimic3-voices), libritts_r CC-BY-4.0, alba CC-BY-4.0, northern_english_male CC-BY-SA-4.0", commercial: true, verify: true, note: "Check each voice's MODEL_CARD for attribution terms. The piper-tts runtime (piper1-gpl) is GPL-3.0 and runs only in its own worker process."}
+    memory_gb: 2
+    speed: "CPU: 5 s of speech in ~1-2 s, load <1 s, 0.7 GB RAM"
+    est: {load_s: 1, run_s: 2}
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic}
+      - {name: voice, type: choice, choices: [en_US-lessac-high, en_US-amy-medium, en_US-libritts_r-medium, en_GB-alba-medium, en_GB-northern_english_male-medium], default: en_US-lessac-high, group: basic}
+      - {name: speaker, label: Speaker number (libritts_r only), type: int, min: 0, max: 903, default: 0, group: advanced, show_if: {voice: en_US-libritts_r-medium}, help: "libritts_r is a 904-speaker model."}
+      - {name: speed, type: float, min: 0.5, max: 2.0, step: 0.05, default: 1.0, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: noise_scale, label: Variation, type: float, min: 0.0, max: 1.5, step: 0.05, default: 0.667, group: advanced, help: "0 makes takes repeatable (Piper has no seed)."}
+      - {name: noise_w, label: Rhythm variation, type: float, min: 0.0, max: 1.5, step: 0.05, default: 0.8, group: advanced}
+    presets: {}
+
+  - id: piper-thai
+    name: Piper Thai (tsync2)
+    modality: audio
+    tasks: [tts]
+    device: cpu
+    order: 72
+    tags: [voice, thai, cpu, tiny, non-commercial]
+    summary: "One Thai voice (NECTEC TSync2 corpus, 22 kHz) on the CPU. Needs the tltk Thai phonemizer. Non-commercial."
+    features: {voices: [th_TH-tsync2-medium], default_voice: th_TH-tsync2-medium, languages: [th], thai: true, sample_rate: 22050}
+    backend: ttslight
+    weights: [{hf: rhasspy/piper-voices, files: ["th/th_TH/tsync2/medium/*"]}]
+    license: {name: "CC-BY-NC-SA-3.0 (NECTEC TSync2 corpus via vaja-thai)", commercial: false}
+    memory_gb: 2
+    speed: "CPU: 6 s of speech in ~3 s, load <1 s, 1.1 GB RAM"
+    est: {load_s: 1, run_s: 2}
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: Line (Thai), type: textarea, default: "", group: basic}
+      - {name: voice, type: choice, choices: [th_TH-tsync2-medium], default: th_TH-tsync2-medium, group: advanced}
+      - {name: speed, type: float, min: 0.5, max: 2.0, step: 0.05, default: 1.0, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: noise_scale, label: Variation, type: float, min: 0.0, max: 1.5, step: 0.05, default: 0.667, group: advanced, help: "0 makes takes repeatable (Piper has no seed)."}
+      - {name: noise_w, label: Rhythm variation, type: float, min: 0.0, max: 1.5, step: 0.05, default: 0.8, group: advanced}
+    presets: {}
+
+  # =================================================================== MeloTTS
+  - id: melo-english
+    name: MeloTTS English
+    modality: audio
+    tasks: [tts]
+    order: 73
+    tags: [voice, fast, accents]
+    summary: "Fast VITS-style English voices in 5 accents (US, British, Indian, Australian, default). Runs in the transformers-4.46 env (shared with Parler)."
+    features: {voices: [EN-US, EN-BR, EN_INDIA, EN-AU, EN-Default], languages: [en], thai: false, sample_rate: 44100}
+    backend: ttslight_parler
+    weights: [{hf: myshell-ai/MeloTTS-English}, {hf: bert-base-uncased, files: ["config.json", "vocab.txt", "tokenizer_config.json", "model.safetensors"]}]
+    license: {name: MIT, commercial: true}
+    memory_gb: 3
+    speed: "load 4 s; 5.6 s of speech in ~1-3 s, peak 0.9 GB VRAM"
+    est: {load_s: 4, run_s: 2}
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic}
+      - {name: speaker, label: Accent, type: choice, choices: [EN-US, EN-BR, EN_INDIA, EN-AU, EN-Default], default: EN-US, group: basic}
+      - {name: speed, type: float, min: 0.5, max: 2.0, step: 0.05, default: 1.0, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: sdp_ratio, label: Prosody variation, type: float, min: 0.0, max: 1.0, step: 0.05, default: 0.2, group: advanced}
+      - {name: noise_scale, type: float, min: 0.1, max: 1.2, step: 0.05, default: 0.6, group: advanced}
+      - {name: noise_w, label: Duration noise, type: float, min: 0.1, max: 1.2, step: 0.05, default: 0.8, group: advanced}
+    presets: {}
+
+  # =================================================================== StyleTTS 2
+  - id: styletts2-libritts
+    name: StyleTTS 2 (LibriTTS)
+    modality: audio
+    tasks: [tts, voice_clone]
+    order: 74
+    tags: [voice, clone, natural]
+    summary: "Human-like English prosody; style is sampled by diffusion (tts, a new voice per seed) or taken from a short reference clip (voice_clone, no transcript needed)."
+    features: {needs_ref: clone, languages: [en], thai: false, sample_rate: 24000}
+    backend: ttslight
+    weights: [{hf: yl4579/StyleTTS2-LibriTTS, files: ["Models/LibriTTS/config.yml", "Models/LibriTTS/epochs_2nd_00020.pth", "reference_audio.zip"]}]
+    license: {name: "MIT (code and weights)", commercial: true, note: "The upstream README asks users of cloned voices to disclose synthetic speech."}
+    memory_gb: 4
+    speed: "load 4 s; ~2 s per take of 6 s speech (10 diffusion steps), peak 1.3 GB VRAM"
+    est: {load_s: 5, run_s: 2}
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic}
+      - {name: voice, label: Built-in voice, type: choice, choices: [libritts-1221, libritts-908, libritts-4077, libritts-5639, libritts-696, libritts-1789], default: libritts-1221, group: basic, tasks: [tts], help: "LibriTTS demo speakers. For voice_clone the reference clip replaces it."}
+      - {name: batch, label: Takes, type: int, min: 1, max: 6, default: 2, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: alpha, label: Timbre from reference, type: float, min: 0.0, max: 1.0, step: 0.05, default: 0.3, group: advanced, help: "0 = all reference timbre, 1 = all diffusion-sampled."}
+      - {name: beta, label: Prosody from reference, type: float, min: 0.0, max: 1.0, step: 0.05, default: 0.7, group: advanced, help: "Lower = closer to the reference prosody."}
+      - {name: steps, label: Diffusion steps, type: int, min: 3, max: 30, default: 10, group: advanced}
+      - {name: embedding_scale, label: Style strength, type: float, min: 0.5, max: 3.0, step: 0.1, default: 1.0, group: advanced, help: "Higher = more expressive, less stable."}
+    presets: {fast: {steps: 5, batch: 1}, balanced: {}, quality: {steps: 20, batch: 4}}
+
+  # =================================================================== Parler-TTS
+  - id: parler-mini
+    name: Parler-TTS Mini v1.1
+    modality: audio
+    tasks: [tts, voice_design]
+    order: 75
+    tags: [voice, design, prompted]
+    summary: "Describe the voice in plain English (gender, pitch, pace, mood, recording quality) and it speaks the line in it; 8 named speakers keep a voice stable. 880 M params, English."
+    features: {voices: [Jon, Lea, Gary, Jenna, Mike, Laura, Lauren, Eileen], languages: [en], thai: false, sample_rate: 44100, two_tokenizers: true}
+    backend: ttslight_parler
+    weights: [{hf: parler-tts/parler-tts-mini-v1.1}, {hf: google/flan-t5-large, files: ["tokenizer.json", "spiece.model", "tokenizer_config.json", "special_tokens_map.json", "config.json"]}]
+    license: {name: Apache-2.0, commercial: true}
+    memory_gb: 8
+    speed: "load ~29 s; 4.9 s of speech in ~5 s (RTF ~1), peak 4.4 GB VRAM"
+    est: {load_s: 30, run_s: 6}
+    prompt_style: {voice_design: moss_voicegen, tts: tts_plain}
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic}
+      - {name: instruction, label: Voice description, type: textarea, default: "", group: basic, help: "Free English prose: gender, pitch, pace, expressiveness, accent, recording quality. e.g. A warm female voice, slightly fast, very clear and close-up recording with no background noise."}
+      - {name: speaker, label: Named speaker, type: choice, choices: [none, Jon, Lea, Gary, Jenna, Mike, Laura, Lauren, Eileen], default: Jon, group: basic, tasks: [tts], help: "A named speaker keeps the voice the same across lines; the description then only steers delivery and recording quality."}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 2, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: temperature, type: float, min: 0.3, max: 1.5, step: 0.05, default: 1.0, group: advanced}
+    presets: {fast: {batch: 1}, balanced: {}, quality: {batch: 4}}
+
+  # =================================================================== Parler-TTS
+  - id: parler-large
+    name: Parler-TTS Large v1
+    modality: audio
+    tasks: [tts, voice_design]
+    order: 76
+    tags: [voice, design, prompted]
+    summary: "BLOCKED (output is babble with the current parler-tts code, see features.blocked). The bigger Parler (2.2 B): better adherence to the description and more natural delivery, slower. English."
+    features: {voices: [Jon, Lea, Gary, Jenna, Mike, Laura, Lauren, Eileen], languages: [en], thai: false, sample_rate: 44100, two_tokenizers: false, blocked: "Loads and runs (9.8 GB, ~7 s) but the audio is babble ('oh oh oh'): 4 variants incl. the model card's exact call fail with parler-tts 0.2.2 + transformers 4.46.1; use Parler Mini v1.1"}
+    backend: ttslight_parler
+    weights: [{hf: parler-tts/parler-tts-large-v1}, {hf: google/flan-t5-large, files: ["tokenizer.json", "spiece.model", "tokenizer_config.json", "special_tokens_map.json", "config.json"]}]
+    license: {name: Apache-2.0, commercial: true}
+    memory_gb: 14
+    speed: "load 70-87 s cold; 5 s of speech in ~7 s, peak 9.8 GB VRAM (fp32, 2.2 B)"
+    est: {load_s: 70, run_s: 8}
+    prompt_style: {voice_design: moss_voicegen, tts: tts_plain}
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic}
+      - {name: instruction, label: Voice description, type: textarea, default: "", group: basic, help: "Free English prose: gender, pitch, pace, expressiveness, accent, recording quality. e.g. A warm female voice, slightly fast, very clear and close-up recording with no background noise."}
+      - {name: speaker, label: Named speaker, type: choice, choices: [none, Jon, Lea, Gary, Jenna, Mike, Laura, Lauren, Eileen], default: Jon, group: basic, tasks: [tts], help: "A named speaker keeps the voice the same across lines; the description then only steers delivery and recording quality."}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 2, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: temperature, type: float, min: 0.3, max: 1.5, step: 0.05, default: 1.0, group: advanced}
+    presets: {fast: {batch: 1}, balanced: {}, quality: {batch: 4}}

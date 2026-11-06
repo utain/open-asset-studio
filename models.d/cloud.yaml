@@ -1,0 +1,997 @@
+# Cloud (API) models. Schema: docs/CONTRACTS.md section 8. Backend kind `cloud`: no venv / weights; status is
+# cloud_disabled (global switch off) | missing_key | ready, computed by app/plugins/providers.py.
+# `provider` = fal | replicate | openrouter | openai | gemini | elevenlabs | meshy | tripo | openai_compat:<name>
+# `remote_model` / `remote: {task: id}` = the provider's model / endpoint id. `request` = how params map to the
+# provider's input (app/cloud/common.py). `pricing` (USD) drives the estimate on the Generate button and the
+# budget / confirm checks; prices change: `pricing_checked` + `pricing_source` say where a number came from, the
+# Providers page can override any of them. `unverified: true` = endpoint id or shape not confirmed on an official page.
+# Checked 2026-11-05 (web research; no real keys were used).
+
+tasks:
+  text3d: {label: Text to 3D, modality: mesh, studio: 3d}
+  write:  {label: Writing assistant, modality: text, studio: assistant}
+
+backends:
+  cloud:
+    label: Cloud APIs (in-process HTTP, no GPU)
+    kind: cloud
+    device: cpu
+    handler: cloud
+
+x-params:
+  aspect: &aspect {name: aspect, type: choice, choices: ["1:1", "4:3", "3:4", "3:2", "2:3", "16:9", "9:16"], default: "1:1", group: basic, tasks: [t2i, rgba]}
+  batch4: &batch4 {name: batch, label: Images, type: int, min: 1, max: 4, default: 1, group: basic}
+  seed: &seed {name: seed, type: seed, default: -1}
+  takes: &takes {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+  line: &line {name: text, label: Line, type: textarea, default: "", group: basic}
+
+models:
+  # =================================================================== IMAGE: fal.ai
+  - id: fal-flux2-pro
+    name: FLUX.2 [pro]
+    modality: image
+    tasks: [t2i, edit, multi_ref]
+    backend: cloud
+    provider: fal
+    remote: {t2i: fal-ai/flux-2-pro, edit: fal-ai/flux-2-pro/edit, multi_ref: fal-ai/flux-2-pro/edit}
+    order: 60
+    tags: [quality]
+    summary: "Black Forest Labs' top model: photoreal or stylised, strong prompt following, multi-reference edits."
+    features: {max_refs: 8, text_render: true, negative: false}
+    license: {name: "FLUX.2 [pro] API output (BFL terms)", commercial: true, note: "Outputs may be used commercially under BFL's API terms."}
+    est: {run_s: 12}
+    prompt_style: {t2i: flux, edit: kontext, multi_ref: kontext}
+    request: {size: wh, size_field: image_size, images: image_urls, map: {seed: seed}, fixed: {output_format: png}}
+    pricing: {first_megapixel: 0.03, per_megapixel: 0.015, per_input_megapixel: 0.015}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://fal.ai/models/fal-ai/flux-2-pro
+    params:
+      - *aspect
+      - {name: size, label: Long side, type: choice, choices: [1024, 1440, 2048], default: 1024, unit: px, group: basic}
+      - *batch4
+      - *seed
+
+  - id: fal-seedream-4.5
+    name: Seedream 4.5
+    modality: image
+    tasks: [t2i, edit, multi_ref]
+    backend: cloud
+    provider: fal
+    remote: {t2i: fal-ai/bytedance/seedream/v4.5/text-to-image, edit: fal-ai/bytedance/seedream/v4.5/edit, multi_ref: fal-ai/bytedance/seedream/v4.5/edit}
+    order: 61
+    tags: [fast]
+    summary: "ByteDance Seedream 4.5: sharp 2K-4K images, good text, up to 10 references for edits."
+    features: {max_refs: 10, text_render: true, negative: false}
+    license: {name: "Seedream via fal (ByteDance terms)", commercial: true, verify: true}
+    est: {run_s: 15}
+    prompt_style: {t2i: flux, edit: qwen_edit, multi_ref: qwen_edit}
+    request: {size: wh, size_field: image_size, images: image_urls, n: num_images, map: {seed: seed}}
+    pricing: {per_image: 0.04}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://fal.ai/models/fal-ai/bytedance/seedream/v4.5/text-to-image
+    unverified: "edit endpoint id inferred from the text-to-image id"
+    params:
+      - *aspect
+      - {name: size, label: Long side, type: choice, choices: [1536, 2048, 3072, 4096], default: 2048, unit: px, group: basic}
+      - *batch4
+      - *seed
+
+  - id: fal-nano-banana-pro
+    name: Nano Banana Pro (fal)
+    modality: image
+    tasks: [t2i, edit, multi_ref]
+    backend: cloud
+    provider: fal
+    remote: {t2i: fal-ai/nano-banana-pro, edit: fal-ai/nano-banana-pro/edit, multi_ref: fal-ai/nano-banana-pro/edit}
+    order: 62
+    tags: [quality, text]
+    summary: "Google Gemini 3 Pro Image on fal: best instruction edits and in-image text, up to 14 references."
+    features: {max_refs: 14, text_render: true, negative: false}
+    license: {name: "Gemini image output via fal", commercial: true, note: "Google claims no ownership; SynthID watermark."}
+    est: {run_s: 20}
+    prompt_style: {t2i: qwen_image, edit: qwen_edit, multi_ref: qwen_edit}
+    request: {size: aspect, aspects: ["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "21:9"], images: image_urls, n: num_images,
+              map: {resolution: resolution, seed: seed}, fixed: {output_format: png}}
+    pricing: {per_image: 0.15, by: {resolution: {4K: {per_image: 0.30}}}}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://fal.ai/models/fal-ai/nano-banana-pro
+    params:
+      - *aspect
+      - {name: resolution, type: choice, choices: [1K, 2K, 4K], default: 1K, group: basic}
+      - *batch4
+      - *seed
+
+  - id: fal-nano-banana
+    name: Nano Banana (fal)
+    modality: image
+    tasks: [t2i, edit]
+    backend: cloud
+    provider: fal
+    remote: {t2i: fal-ai/nano-banana, edit: fal-ai/nano-banana/edit}
+    order: 63
+    tags: [fast]
+    summary: "Gemini 2.5 Flash Image on fal: cheap, fast edits and drafts at ~1 MP."
+    features: {max_refs: 3, negative: false}
+    license: {name: "Gemini image output via fal", commercial: true, note: "SynthID watermark."}
+    est: {run_s: 8}
+    prompt_style: {t2i: qwen_image, edit: qwen_edit}
+    request: {size: aspect, aspects: ["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "21:9"], images: image_urls, n: num_images,
+              map: {seed: seed}, fixed: {output_format: png}}
+    pricing: {per_image: 0.0398}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://fal.ai/models/fal-ai/nano-banana
+    unverified: "edit endpoint id inferred"
+    params: [*aspect, *batch4, *seed]
+
+  - id: fal-recraft-v4
+    name: Recraft V4
+    modality: image
+    tasks: [t2i]
+    backend: cloud
+    provider: fal
+    remote_model: fal-ai/recraft/v4/text-to-image
+    order: 64
+    tags: [text]
+    summary: "Design-grade illustrations, icons and UI art with clean text."
+    features: {text_render: true, negative: false}
+    license: {name: "Recraft API output", commercial: true}
+    est: {run_s: 10}
+    prompt_style: flux
+    request: {size: wh, size_field: image_size}
+    pricing: {per_image: 0.04}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://fal.ai/models/fal-ai/recraft/v4/text-to-image
+    params:
+      - *aspect
+      - {name: size, label: Long side, type: choice, choices: [1024, 1536, 2048], default: 1024, unit: px, group: basic}
+      - *batch4
+
+  - id: fal-ideogram-v3
+    name: Ideogram 3.0
+    modality: image
+    tasks: [t2i]
+    backend: cloud
+    provider: fal
+    remote_model: fal-ai/ideogram/v3
+    order: 65
+    tags: [text]
+    summary: "Excellent typography and logos; Turbo / Balanced / Quality speeds."
+    features: {text_render: true, negative: true}
+    license: {name: "Ideogram API output", commercial: true}
+    est: {run_s: 10}
+    prompt_style: flux
+    request: {size: wh, size_field: image_size, n: num_images, negative: negative_prompt, map: {rendering_speed: rendering_speed, seed: seed}}
+    pricing: {per_image: 0.06, by: {rendering_speed: {TURBO: {per_image: 0.03}, QUALITY: {per_image: 0.09}}}}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://fal.ai/models/fal-ai/ideogram/v3
+    params:
+      - *aspect
+      - {name: size, label: Long side, type: choice, choices: [1024, 1536], default: 1024, unit: px, group: basic}
+      - {name: rendering_speed, label: Speed, type: choice, choices: [TURBO, BALANCED, QUALITY], default: BALANCED, group: basic}
+      - *batch4
+      - *seed
+
+  # =================================================================== IMAGE: Replicate
+  - id: rep-flux2-pro
+    name: FLUX.2 [pro] (Replicate)
+    modality: image
+    tasks: [t2i, edit, multi_ref]
+    backend: cloud
+    provider: replicate
+    remote_model: black-forest-labs/flux-2-pro
+    order: 70
+    summary: "FLUX.2 [pro] through Replicate's official model (up to 8 reference images)."
+    features: {max_refs: 8, text_render: true, negative: false}
+    license: {name: "FLUX.2 [pro] API output (BFL terms)", commercial: true}
+    est: {run_s: 15}
+    prompt_style: {t2i: flux, edit: kontext, multi_ref: kontext}
+    request: {size: aspect, aspects: ["1:1", "16:9", "9:16", "3:2", "2:3", "4:3", "3:4"], images: input_images, map: {seed: seed, resolution: resolution},
+              fixed: {output_format: png}}
+    pricing: {per_request: 0.015, per_megapixel: 0.015, per_input_megapixel: 0.015}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://replicate.com/black-forest-labs/flux-2-pro
+    params:
+      - *aspect
+      - {name: resolution, type: choice, choices: ["1 MP", "2 MP", "4 MP"], default: "1 MP", group: basic}
+      - *batch4
+      - *seed
+
+  - id: rep-ideogram-v3-turbo
+    name: Ideogram 3.0 Turbo (Replicate)
+    modality: image
+    tasks: [t2i]
+    backend: cloud
+    provider: replicate
+    remote_model: ideogram-ai/ideogram-v3-turbo
+    order: 71
+    tags: [fast, text]
+    summary: "Fast Ideogram with strong lettering: titles, signs, logos."
+    features: {text_render: true}
+    license: {name: "Ideogram API output", commercial: true}
+    est: {run_s: 8}
+    prompt_style: flux
+    request: {size: aspect, aspects: ["1:1", "16:9", "9:16", "3:2", "2:3", "4:3", "3:4"], map: {seed: seed}}
+    pricing: {per_image: 0.03}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://replicate.com/ideogram-ai/ideogram-v3-turbo
+    params: [*aspect, *batch4, *seed]
+
+  - id: rep-recraft-v4
+    name: Recraft V4 (Replicate)
+    modality: image
+    tasks: [t2i]
+    backend: cloud
+    provider: replicate
+    remote_model: recraft-ai/recraft-v4
+    order: 72
+    summary: "Recraft V4 through Replicate (output converted to PNG)."
+    features: {text_render: true}
+    license: {name: "Recraft API output", commercial: true}
+    est: {run_s: 10}
+    prompt_style: flux
+    request: {size: aspect, aspects: ["1:1", "16:9", "9:16", "3:2", "2:3", "4:3", "3:4"]}
+    pricing: {per_image: 0.04}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://replicate.com/recraft-ai/recraft-v4
+    params: [*aspect, *batch4]
+
+  # =================================================================== IMAGE: OpenAI / Gemini / OpenRouter
+  - id: openai-gpt-image-2.5
+    name: GPT Image 2.5 Sunburst
+    modality: image
+    tasks: [t2i, edit, multi_ref, rgba]
+    backend: cloud
+    provider: openai
+    adapter: openai
+    remote_model: gpt-image-2.5-sunburst
+    order: 66
+    tags: [quality, rgba]
+    summary: "OpenAI's precise generator/editor; real transparent backgrounds (RGBA) for game items."
+    features: {rgba: true, max_refs: 10, text_render: true, negative: false}
+    license: {name: "OpenAI output (you own it)", commercial: true}
+    est: {run_s: 45}
+    prompt_style: {t2i: qwen_image, rgba: qwen_image, edit: qwen_edit, multi_ref: qwen_edit}
+    pricing: {per_image: 0.053, by: {quality: {low: {per_image: 0.006}, high: {per_image: 0.211}}}}
+    usage_pricing: {text_in: 5, image_in: 8, image_out: 30}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://developers.openai.com/api/docs/pricing
+    unverified: "per-image figures are gpt-image-2's table (same token price); the actual cost comes from usage tokens"
+    params:
+      - {name: aspect, type: choice, choices: ["1:1", "3:2", "2:3"], default: "1:1", group: basic, tasks: [t2i, rgba]}
+      - {name: quality, type: choice, choices: [low, medium, high], default: medium, group: basic}
+      - {name: transparent, label: Transparent (RGBA), type: bool, default: false, group: basic, tasks: [t2i, edit, multi_ref]}
+      - *batch4
+
+  - id: openai-gpt-image-2.5-flare
+    name: GPT Image 2.5 Flare
+    modality: image
+    tasks: [t2i, edit, rgba]
+    backend: cloud
+    provider: openai
+    adapter: openai
+    remote_model: gpt-image-2.5-flare
+    order: 67
+    tags: [fast, rgba]
+    summary: "Faster, cheaper GPT Image 2.5 variant for drafts; transparent backgrounds too."
+    features: {rgba: true, max_refs: 4, text_render: true, negative: false}
+    license: {name: "OpenAI output (you own it)", commercial: true}
+    est: {run_s: 20}
+    prompt_style: {t2i: qwen_image, rgba: qwen_image, edit: qwen_edit}
+    pricing: {per_image: 0.041, by: {quality: {low: {per_image: 0.005}, high: {per_image: 0.165}}}}
+    usage_pricing: {text_in: 5, image_in: 8, image_out: 30}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://developers.openai.com/api/docs/pricing
+    unverified: "per-image estimate; actual cost from usage tokens"
+    params:
+      - {name: aspect, type: choice, choices: ["1:1", "3:2", "2:3"], default: "1:1", group: basic, tasks: [t2i, rgba]}
+      - {name: quality, type: choice, choices: [low, medium, high], default: low, group: basic}
+      - {name: transparent, label: Transparent (RGBA), type: bool, default: false, group: basic, tasks: [t2i, edit]}
+      - *batch4
+
+  - id: gemini-nano-banana-2.1
+    name: Nano Banana 2.1 (Gemini API)
+    modality: image
+    tasks: [t2i, edit, multi_ref]
+    backend: cloud
+    provider: gemini
+    adapter: gemini
+    remote_model: gemini-nano-banana-2.1
+    order: 68
+    tags: [fast]
+    summary: "Google's newest Nano Banana direct from the Gemini API: quick edits, consistent characters."
+    features: {max_refs: 14, text_render: true, negative: false}
+    license: {name: "Gemini API output", commercial: true, note: "Google claims no ownership; SynthID watermark."}
+    est: {run_s: 10}
+    prompt_style: {t2i: qwen_image, edit: qwen_edit, multi_ref: qwen_edit}
+    pricing: {per_image: 0.0336, by: {resolution: {2K: {per_image: 0.0504}, 4K: {per_image: 0.113}}}}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://ai.google.dev/gemini-api/docs/pricing
+    params:
+      - *aspect
+      - {name: resolution, type: choice, choices: [1K, 2K, 4K], default: 1K, group: basic}
+      - *batch4
+
+  - id: gemini-3-pro-image
+    name: Nano Banana Pro (Gemini API)
+    modality: image
+    tasks: [t2i, edit, multi_ref]
+    backend: cloud
+    provider: gemini
+    adapter: gemini
+    remote_model: gemini-3-pro-image
+    order: 69
+    tags: [quality, text]
+    summary: "Gemini 3 Pro Image: the strongest instruction edits and text in images."
+    features: {max_refs: 14, text_render: true, negative: false}
+    license: {name: "Gemini API output", commercial: true, note: "Google claims no ownership; SynthID watermark."}
+    est: {run_s: 25}
+    prompt_style: {t2i: qwen_image, edit: qwen_edit, multi_ref: qwen_edit}
+    pricing: {per_image: 0.134, by: {resolution: {4K: {per_image: 0.24}}}}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://ai.google.dev/gemini-api/docs/pricing
+    params:
+      - *aspect
+      - {name: resolution, type: choice, choices: [1K, 2K, 4K], default: 1K, group: basic}
+      - *batch4
+
+  - id: or-flux2-pro
+    name: FLUX.2 [pro] (OpenRouter)
+    modality: image
+    tasks: [t2i, edit]
+    backend: cloud
+    provider: openrouter
+    api: or_images
+    remote_model: black-forest-labs/flux.2-pro
+    order: 73
+    summary: "FLUX.2 [pro] through OpenRouter's Images API (one bill for text + images; actual cost reported)."
+    features: {max_refs: 8, text_render: true, negative: false}
+    license: {name: "FLUX.2 [pro] API output (BFL terms)", commercial: true}
+    est: {run_s: 15}
+    prompt_style: {t2i: flux, edit: kontext}
+    pricing: {first_megapixel: 0.03, per_megapixel: 0.015}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://openrouter.ai/black-forest-labs/flux.2-pro
+    unverified: "OpenRouter Images API field names (aspect_ratio, input_references)"
+    params: [*aspect, *batch4]
+
+  - id: or-gemini-flash-image
+    name: Gemini 3.1 Flash Image (OpenRouter)
+    modality: image
+    tasks: [t2i, edit]
+    backend: cloud
+    provider: openrouter
+    api: or_chat
+    remote_model: google/gemini-3.1-flash-image
+    order: 74
+    tags: [fast]
+    summary: "Nano Banana 2 through OpenRouter chat completions (image output)."
+    features: {max_refs: 8, text_render: true, negative: false}
+    license: {name: "Gemini output via OpenRouter", commercial: true, note: "SynthID watermark."}
+    est: {run_s: 12}
+    prompt_style: {t2i: qwen_image, edit: qwen_edit}
+    pricing: {per_image: 0.067}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://openrouter.ai/google/gemini-3.1-flash-image
+    params: [*aspect, *batch4]
+
+  # =================================================================== 3D
+  - id: fal-trellis-2
+    name: TRELLIS 2 (fal)
+    modality: mesh
+    tasks: [shape]
+    backend: cloud
+    provider: fal
+    remote_model: fal-ai/trellis-2
+    order: 60
+    tags: [quality, pbr]
+    summary: "Microsoft TRELLIS 2: image to textured PBR GLB in ~1 min; clean topology, decimation target."
+    features: {pbr: true}
+    license: {name: "TRELLIS 2 (MIT) via fal", commercial: true}
+    est: {run_s: 60}
+    request: {prompt: null, images: image_url, map: {resolution: resolution, texture_size: texture_size, decimation_target: decimation_target, seed: seed}}
+    pricing: {per_request: 0.30, by: {resolution: {512: {per_request: 0.25}, 1536: {per_request: 0.35}}}}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://fal.ai/models/fal-ai/trellis-2
+    params:
+      - {name: resolution, label: Voxel resolution, type: choice, choices: [512, 1024, 1536], default: 1024, group: basic}
+      - {name: texture_size, label: Texture size, type: choice, choices: [1024, 2048, 4096], default: 2048, unit: px, group: basic}
+      - {name: decimation_target, label: Target faces, type: int, min: 5000, max: 500000, default: 100000, group: advanced}
+      - *seed
+
+  - id: fal-hunyuan3d-v3
+    name: Hunyuan3D 3.0 (fal)
+    modality: mesh
+    tasks: [shape]
+    backend: cloud
+    provider: fal
+    remote_model: fal-ai/hunyuan3d-v3/image-to-3d
+    order: 61
+    tags: [quality]
+    summary: "Tencent Hunyuan3D 3.0: high-detail textured meshes; Low-poly and geometry-only modes."
+    features: {pbr: true}
+    license: {name: "Tencent Hunyuan3D via fal", commercial: true, verify: true, note: "Hunyuan licence excludes the EU, UK and South Korea; check before shipping there."}
+    est: {run_s: 90}
+    request: {prompt: null, images: input_image_url, map: {generate_type: generate_type, enable_pbr: enable_pbr}}
+    pricing: {per_request: 0.375, by: {generate_type: {LowPoly: {per_request: 0.45}, Geometry: {per_request: 0.225}}}, add: {enable_pbr: {true: 0.15}}}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://fal.ai/models/fal-ai/hunyuan3d-v3/image-to-3d
+    params:
+      - {name: generate_type, label: Mode, type: choice, choices: [Normal, LowPoly, Geometry], default: Normal, group: basic, help: "Geometry = untextured shape."}
+      - {name: enable_pbr, label: PBR materials, type: bool, default: false, group: basic}
+
+  - id: fal-tripo-2.5
+    name: Tripo 2.5 (fal)
+    modality: mesh
+    tasks: [shape]
+    backend: cloud
+    provider: fal
+    remote_model: tripo3d/tripo/v2.5/image-to-3d
+    order: 62
+    tags: [fast]
+    summary: "Tripo v2.5 on fal: fast image to 3D with standard or HD textures and PBR."
+    features: {pbr: true}
+    license: {name: "Tripo output via fal", commercial: true}
+    est: {run_s: 60}
+    request: {prompt: null, images: image_url, map: {texture: texture, pbr: pbr, face_limit: face_limit, seed: seed}}
+    pricing: {per_request: 0.30, by: {texture: {"no": {per_request: 0.20}, HD: {per_request: 0.40}}}}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://fal.ai/models/tripo3d/tripo/v2.5/image-to-3d
+    params:
+      - {name: texture, type: choice, choices: ["no", standard, HD], default: standard, group: basic}
+      - {name: pbr, label: PBR, type: bool, default: true, group: basic}
+      - {name: face_limit, label: Face limit, type: int, min: 1000, max: 200000, default: 50000, group: advanced}
+      - *seed
+
+  - id: meshy-image3d
+    name: Meshy 7.1 image to 3D
+    modality: mesh
+    tasks: [shape]
+    backend: cloud
+    provider: meshy
+    remote_model: latest
+    order: 63
+    tags: [pbr]
+    summary: "Meshy image to 3D with textures (and optional PBR), quad or triangle topology."
+    features: {pbr: true}
+    license: {name: "Meshy output", commercial: true, note: "Paid plan: private, commercial use. Free plan: CC BY 4.0."}
+    est: {run_s: 120}
+    pricing: {credits: 20, per_credit: 0.02, by: {textured: {true: {credits: 30}}}}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://docs.meshy.ai/en/api/pricing
+    unverified: "USD per credit (~$0.02 on Pro, plan dependent)"
+    params:
+      - {name: textured, label: Texture, type: bool, default: true, group: basic}
+      - {name: pbr, label: PBR maps, type: bool, default: false, group: basic}
+      - {name: topology, type: choice, choices: [triangle, quad], default: triangle, group: advanced}
+      - {name: target_polycount, label: Target polygons, type: int, min: 0, max: 300000, default: 0, group: advanced, help: "0 = keep the model's own"}
+
+  - id: meshy-text3d
+    name: Meshy 7.1 text to 3D
+    modality: mesh
+    tasks: [text3d]
+    backend: cloud
+    provider: meshy
+    remote_model: latest
+    order: 60
+    tags: [pbr]
+    summary: "Meshy text to 3D: preview mesh, then textured refine (PBR) in one job."
+    features: {pbr: true}
+    license: {name: "Meshy output", commercial: true, note: "Paid plan: private, commercial use. Free plan: CC BY 4.0."}
+    est: {run_s: 180}
+    prompt_style: image3d
+    pricing: {credits: 20, per_credit: 0.02, by: {textured: {true: {credits: 30}}}}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://docs.meshy.ai/en/api/pricing
+    unverified: "USD per credit (~$0.02 on Pro, plan dependent)"
+    params:
+      - {name: textured, label: Texture (refine), type: bool, default: true, group: basic}
+      - {name: pbr, label: PBR maps, type: bool, default: true, group: basic}
+      - {name: topology, type: choice, choices: [triangle, quad], default: triangle, group: advanced}
+      - {name: target_polycount, label: Target polygons, type: int, min: 0, max: 300000, default: 0, group: advanced}
+
+  - id: tripo-image3d
+    name: Tripo 3.1 image to 3D
+    modality: mesh
+    tasks: [shape]
+    backend: cloud
+    provider: tripo
+    remote_model: v3.1-20260211
+    order: 64
+    summary: "Tripo v3.1 (direct API): image to 3D with PBR texture, face limit."
+    features: {pbr: true}
+    license: {name: "Tripo output", commercial: true, note: "Paid credits: commercial use. Free credits: CC BY 4.0."}
+    est: {run_s: 60}
+    pricing: {credits: 20, per_credit: 0.01, by: {textured: {true: {credits: 30}}}, add: {texture_quality: {detailed: 0.10}}}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://platform.tripo3d.ai/pricing
+    params:
+      - {name: textured, label: Texture, type: bool, default: true, group: basic}
+      - {name: pbr, label: PBR, type: bool, default: true, group: basic}
+      - {name: texture_quality, label: Texture quality, type: choice, choices: [standard, detailed], default: standard, group: basic}
+      - {name: face_limit, label: Face limit, type: int, min: 0, max: 300000, default: 0, group: advanced, help: "0 = automatic"}
+
+  - id: tripo-text3d
+    name: Tripo 3.1 text to 3D
+    modality: mesh
+    tasks: [text3d]
+    backend: cloud
+    provider: tripo
+    remote_model: v3.1-20260211
+    order: 61
+    tags: [fast]
+    summary: "Tripo v3.1 text to 3D: textured PBR GLB in about a minute."
+    features: {pbr: true, negative: true}
+    license: {name: "Tripo output", commercial: true, note: "Paid credits: commercial use. Free credits: CC BY 4.0."}
+    est: {run_s: 60}
+    prompt_style: image3d
+    pricing: {credits: 10, per_credit: 0.01, by: {textured: {true: {credits: 20}}}, add: {texture_quality: {detailed: 0.10}}}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://platform.tripo3d.ai/pricing
+    params:
+      - {name: textured, label: Texture, type: bool, default: true, group: basic}
+      - {name: pbr, label: PBR, type: bool, default: true, group: basic}
+      - {name: texture_quality, label: Texture quality, type: choice, choices: [standard, detailed], default: standard, group: basic}
+      - {name: face_limit, label: Face limit, type: int, min: 0, max: 300000, default: 0, group: advanced}
+
+  # =================================================================== AUDIO
+  - id: fal-stable-audio-2.5
+    name: Stable Audio 2.5 (fal)
+    modality: audio
+    tasks: [sfx, ambience, music]
+    backend: cloud
+    provider: fal
+    remote_model: fal-ai/stable-audio-25/text-to-audio
+    order: 60
+    tags: [fast]
+    summary: "Stability's commercial Stable Audio 2.5: music beds and SFX up to 190 s in seconds."
+    features: {max_seconds: 190, negative: false}
+    license: {name: "Stable Audio 2.5 API output", commercial: true}
+    est: {run_s: 8}
+    prompt_style: {sfx: sfx, ambience: ambience, music: music}
+    request: {map: {seconds: seconds_total, steps: num_inference_steps, cfg_scale: guidance_scale, seed: seed}}
+    pricing: {per_request: 0.20}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://fal.ai/models/fal-ai/stable-audio-25/text-to-audio
+    params:
+      - {name: seconds, label: Duration, type: float, min: 1, max: 190, step: 1, default: 10, unit: s, group: basic}
+      - *takes
+      - *seed
+      - {name: steps, type: int, min: 4, max: 8, default: 8, group: advanced}
+      - {name: cfg_scale, label: CFG, type: float, min: 1, max: 25, step: 0.5, default: 1, group: advanced}
+
+  - id: fal-elevenlabs-sfx
+    name: ElevenLabs SFX v2 (fal)
+    modality: audio
+    tasks: [sfx, ambience]
+    backend: cloud
+    provider: fal
+    remote_model: fal-ai/elevenlabs/sound-effects/v2
+    order: 61
+    tags: [fast]
+    summary: "ElevenLabs sound effects through fal, billed per second; loopable."
+    features: {max_seconds: 22, negative: false}
+    license: {name: "ElevenLabs output via fal", commercial: true}
+    est: {run_s: 6}
+    prompt_style: {sfx: sfx, ambience: ambience}
+    request: {prompt: text, map: {seconds: duration_seconds, prompt_influence: prompt_influence, loop: loop}}
+    pricing: {per_second: 0.002, default_seconds: 5}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://fal.ai/models/fal-ai/elevenlabs/sound-effects/v2
+    params:
+      - {name: seconds, label: Duration, type: float, min: 0.5, max: 22, step: 0.5, default: 3, unit: s, group: basic}
+      - {name: loop, label: Seamless loop, type: bool, default: false, group: basic}
+      - *takes
+      - {name: prompt_influence, label: Prompt influence, type: float, min: 0, max: 1, step: 0.05, default: 0.3, group: advanced}
+
+  - id: fal-minimax-music
+    name: MiniMax Music 2.6 (fal)
+    modality: audio
+    tasks: [song, music]
+    backend: cloud
+    provider: fal
+    remote_model: fal-ai/minimax-music/v2.6
+    order: 60
+    tags: [vocals, lyrics]
+    summary: "Full songs with vocals from a style prompt + tagged lyrics; instrumental mode for music."
+    features: {lyrics: true, negative: false}
+    license: {name: "MiniMax output via fal", commercial: true, verify: true}
+    est: {run_s: 60}
+    prompt_style: {song: minimax_music, music: music}
+    request: {map: {lyrics: lyrics}, task_fixed: {music: {is_instrumental: true}}}
+    pricing: {per_request: 0.15}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://fal.ai/models/fal-ai/minimax-music/v2.6
+    params:
+      - {name: lyrics, type: lyrics, default: "", group: basic, tasks: [song], help: "[verse] [chorus] [bridge] tags on their own lines."}
+      - *takes
+
+  - id: fal-minimax-speech
+    name: MiniMax Speech 2.8 HD (fal)
+    modality: audio
+    tasks: [tts]
+    backend: cloud
+    provider: fal
+    remote_model: fal-ai/minimax/speech-2.8-hd
+    order: 61
+    tags: [thai]
+    summary: "Expressive multilingual TTS (Thai, English, Chinese …) with preset voices."
+    features: {thai: untested, languages: [en, th, zh, ja, ko]}
+    license: {name: "MiniMax output via fal", commercial: true, verify: true}
+    est: {run_s: 6}
+    prompt_style: tts_plain
+    request: {map: {voice: voice_setting.voice_id, speed: voice_setting.speed, language: language_boost}, fixed: {output_format: url}}
+    pricing: {per_1k_chars: 0.10}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://fal.ai/models/fal-ai/minimax/speech-2.8-hd
+    unverified: "voice_setting sub-fields"
+    params:
+      - *line
+      - {name: voice, type: choice, default: Wise_Woman, group: basic, choices: [Wise_Woman, Friendly_Person, Inspirational_girl, Deep_Voice_Man, Calm_Woman, Casual_Guy, Lively_Girl, Patient_Man, Young_Knight, Determined_Man, Lovely_Girl, Decent_Boy, Imposing_Manner, Elegant_Man, Abbess, Sweet_Girl_2, Exuberant_Girl]}
+      - {name: language, type: choice, choices: [auto, English, Thai, Chinese, Japanese, Korean], default: auto, group: basic}
+      - {name: speed, type: float, min: 0.5, max: 2, step: 0.05, default: 1, group: advanced}
+      - *takes
+
+  - id: fal-elevenlabs-tts-v3
+    name: ElevenLabs v3 TTS (fal)
+    modality: audio
+    tasks: [tts]
+    backend: cloud
+    provider: fal
+    remote_model: fal-ai/elevenlabs/tts/eleven-v3
+    order: 62
+    tags: [quality]
+    summary: "ElevenLabs v3 (audio tags like [whispers], [laughs]) billed through fal."
+    features: {tags: true, languages: [en, th, ja, zh, ko, fr, de, es]}
+    license: {name: "ElevenLabs output via fal", commercial: true}
+    est: {run_s: 6}
+    prompt_style: tts_plain
+    request: {prompt: text, map: {voice: voice, stability: stability, language: language_code}}
+    pricing: {per_1k_chars: 0.10}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://fal.ai/models/fal-ai/elevenlabs/tts/eleven-v3
+    params:
+      - *line
+      - {name: voice, type: choice, default: Rachel, group: basic, choices: [Rachel, Aria, Roger, Sarah, Laura, Charlie, George, Callum, River, Liam, Charlotte, Alice, Matilda, Will, Jessica, Eric, Chris, Brian, Daniel, Lily, Bill]}
+      - {name: stability, type: float, min: 0, max: 1, step: 0.05, default: 0.5, group: advanced}
+      - *takes
+
+  - id: rep-stable-audio-2.5
+    name: Stable Audio 2.5 (Replicate)
+    modality: audio
+    tasks: [sfx, ambience, music]
+    backend: cloud
+    provider: replicate
+    remote_model: stability-ai/stable-audio-2.5
+    order: 65
+    summary: "Stable Audio 2.5 through Replicate's official model (mp3)."
+    features: {max_seconds: 190}
+    license: {name: "Stable Audio 2.5 API output", commercial: true}
+    est: {run_s: 10}
+    prompt_style: {sfx: sfx, ambience: ambience, music: music}
+    request: {map: {seconds: duration, steps: steps, cfg_scale: cfg_scale, seed: seed}}
+    pricing: {per_request: 0.20}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://replicate.com/stability-ai/stable-audio-2.5
+    params:
+      - {name: seconds, label: Duration, type: float, min: 1, max: 190, step: 1, default: 10, unit: s, group: basic}
+      - *takes
+      - *seed
+      - {name: steps, type: int, min: 4, max: 8, default: 8, group: advanced}
+      - {name: cfg_scale, label: CFG, type: float, min: 1, max: 25, step: 0.5, default: 1, group: advanced}
+
+  - id: rep-minimax-music
+    name: MiniMax Music 2.5 (Replicate)
+    modality: audio
+    tasks: [song]
+    backend: cloud
+    provider: replicate
+    remote_model: minimax/music-2.5
+    order: 65
+    summary: "Songs with vocals on Replicate (lyrics required)."
+    features: {lyrics: true}
+    license: {name: "MiniMax output via Replicate", commercial: true, verify: true}
+    est: {run_s: 60}
+    prompt_style: minimax_music
+    request: {map: {lyrics: lyrics}}
+    pricing: {per_request: 0.15}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://replicate.com/minimax/music-2.5
+    params:
+      - {name: lyrics, type: lyrics, default: "", group: basic}
+      - *takes
+
+  - id: rep-minimax-speech
+    name: MiniMax Speech 2.8 HD (Replicate)
+    modality: audio
+    tasks: [tts]
+    backend: cloud
+    provider: replicate
+    remote_model: minimax/speech-2.8-hd
+    order: 66
+    summary: "MiniMax TTS through Replicate."
+    features: {languages: [en, th, zh, ja, ko]}
+    license: {name: "MiniMax output via Replicate", commercial: true, verify: true}
+    est: {run_s: 6}
+    prompt_style: tts_plain
+    request: {prompt: text, map: {voice: voice_id, speed: speed}}
+    pricing: {per_1k_chars: 0.10}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://replicate.com/minimax/speech-2.8-hd
+    params:
+      - *line
+      - {name: voice, type: choice, default: Wise_Woman, group: basic, choices: [Wise_Woman, Friendly_Person, Deep_Voice_Man, Calm_Woman, Casual_Guy, Lively_Girl, Patient_Man, Young_Knight, Determined_Man, Imposing_Manner, Elegant_Man]}
+      - {name: speed, type: float, min: 0.5, max: 2, step: 0.05, default: 1, group: advanced}
+      - *takes
+
+  - id: el-sfx
+    name: ElevenLabs Sound Effects v3
+    modality: audio
+    tasks: [sfx, ambience]
+    backend: cloud
+    provider: elevenlabs
+    api: el_sfx
+    remote_model: eleven_text_to_sound_v3
+    order: 62
+    tags: [quality]
+    summary: "ElevenLabs' newest SFX model: foley, UI, creatures; up to 30 s, seamless loops."
+    features: {max_seconds: 30, negative: false}
+    license: {name: "ElevenLabs output", commercial: true, note: "Commercial use needs a paid ElevenLabs plan."}
+    est: {run_s: 6}
+    prompt_style: {sfx: sfx, ambience: ambience}
+    pricing: {per_minute: 0.12, default_seconds: 5}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://elevenlabs.io/pricing/api
+    params:
+      - {name: seconds, label: Duration, type: float, min: 0.5, max: 30, step: 0.5, default: 3, unit: s, group: basic}
+      - {name: loop, label: Seamless loop, type: bool, default: false, group: basic}
+      - *takes
+      - {name: prompt_influence, label: Prompt influence, type: float, min: 0, max: 1, step: 0.05, default: 0.3, group: advanced}
+
+  - id: el-tts
+    name: ElevenLabs TTS
+    modality: audio
+    tasks: [tts]
+    backend: cloud
+    provider: elevenlabs
+    api: el_tts
+    remote_model: eleven_v3
+    order: 63
+    tags: [quality, thai]
+    summary: "ElevenLabs v3 / v4 / Flash voices, 70+ languages incl. Thai; audio tags for delivery."
+    features: {tags: true, thai: untested, languages: [en, th, ja, zh, ko, fr, de, es, vi, id]}
+    license: {name: "ElevenLabs output", commercial: true, note: "Commercial use needs a paid ElevenLabs plan."}
+    est: {run_s: 5}
+    prompt_style: tts_plain
+    pricing: {per_1k_chars: 0.08, by: {tts_model: {eleven_flash_v2_5: {per_1k_chars: 0.04}}}}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://elevenlabs.io/pricing/api
+    params:
+      - *line
+      - {name: voice, type: choice, default: JBFqnCBsd6RMkjVDRZzb, group: basic, choices: [{value: JBFqnCBsd6RMkjVDRZzb, label: George}, {value: 21m00Tcm4TlvDq8ikWAM, label: Rachel}, {value: pNInz6obpgDQGcFmaJgB, label: Adam}, {value: EXAVITQu4vr4xnSDxMaL, label: Sarah}, {value: TxGEqnHWrfWFTfGW9XjX, label: Josh}, {value: XB0fDUnXU5powFXDhCwa, label: Charlotte}, {value: onwK4e9ZLuTAKqWW03F9, label: Daniel}, {value: N2lVS1w4EtoT3dr4eOWO, label: Callum}]}
+      - {name: tts_model, label: Model, type: choice, choices: [eleven_v3, eleven_v4, eleven_multilingual_v2, eleven_flash_v2_5], default: eleven_v3, group: basic}
+      - {name: language, type: choice, choices: [auto, en, th, ja, zh, ko, fr, de, es, vi, id], default: auto, group: basic}
+      - *takes
+      - *seed
+
+  - id: el-voice-design
+    name: ElevenLabs Voice Design
+    modality: audio
+    tasks: [voice_design]
+    backend: cloud
+    provider: elevenlabs
+    api: el_voice_design
+    remote_model: eleven_ttv_v3
+    order: 60
+    tags: [quality]
+    summary: "Describe a character's voice, get 3 previews saved as voices (use them to clone lines)."
+    features: {languages: [en, th, ja, zh, ko, fr, de, es]}
+    license: {name: "ElevenLabs output", commercial: true, note: "Commercial use needs a paid ElevenLabs plan."}
+    est: {run_s: 15}
+    prompt_style: voice
+    pricing: {per_request: 0.08}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://elevenlabs.io/pricing/api
+    unverified: "voice design price not listed; estimate"
+    params:
+      - {name: instruct, label: Voice description, type: textarea, default: "", group: basic}
+      - {name: text, label: Line (100+ characters, else auto), type: textarea, default: "", group: basic}
+      - {name: language, type: choice, choices: [auto, en, th, ja, zh, ko], default: auto, group: basic}
+      - *seed
+
+  - id: el-music
+    name: ElevenLabs Music
+    modality: audio
+    tasks: [music, song]
+    backend: cloud
+    provider: elevenlabs
+    api: el_music
+    remote_model: music_v2_5
+    order: 61
+    summary: "ElevenLabs Music v2.5: studio-quality tracks and songs, 3 s to 10 min."
+    features: {lyrics: true, max_seconds: 600}
+    license: {name: "ElevenLabs Music output", commercial: true, note: "Paid plan required for commercial use."}
+    est: {run_s: 40}
+    prompt_style: {music: music, song: minimax_music}
+    pricing: {per_minute: 0.15, default_seconds: 30}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://elevenlabs.io/pricing/api
+    params:
+      - {name: lyrics, type: lyrics, default: "", group: basic, tasks: [song]}
+      - {name: seconds, label: Duration, type: float, min: 3, max: 600, step: 1, default: 30, unit: s, group: basic}
+      - *takes
+
+  - id: openai-tts
+    name: GPT-4o mini TTS
+    modality: audio
+    tasks: [tts]
+    backend: cloud
+    provider: openai
+    remote_model: gpt-4o-mini-tts
+    order: 64
+    tags: [fast, instruct]
+    summary: "OpenAI TTS with a free-text delivery direction (emotion, accent, pace). Retires 2027-01-06."
+    features: {instruct: true, languages: [en, th, ja, zh, ko, fr, de, es]}
+    license: {name: "OpenAI output", commercial: true, note: "Disclose to players that the voice is AI-generated."}
+    est: {run_s: 4}
+    prompt_style: tts_plain
+    pricing: {per_1k_chars: 0.015}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://developers.openai.com/api/docs/pricing
+    params:
+      - *line
+      - {name: voice, type: choice, default: marin, group: basic, choices: [marin, cedar, alloy, ash, ballad, coral, echo, fable, nova, onyx, sage, shimmer, verse]}
+      - {name: instruct, label: Delivery direction, type: text, default: "", group: basic, help: "e.g. angry knight shouting over battle noise"}
+      - {name: speed, type: float, min: 0.25, max: 4, step: 0.05, default: 1, group: advanced}
+      - *takes
+
+  - id: gemini-tts
+    name: Gemini 3.8 Flash TTS
+    modality: audio
+    tasks: [tts]
+    backend: cloud
+    provider: gemini
+    api: gemini_tts
+    remote_model: gemini-3.8-flash-tts
+    order: 65
+    tags: [instruct]
+    summary: "Gemini speech with natural-language style control and 30 voices (24 kHz WAV)."
+    features: {instruct: true, languages: [en, th, ja, zh, ko, fr, de, es, vi, id]}
+    license: {name: "Gemini API output", commercial: true}
+    est: {run_s: 6}
+    prompt_style: tts_plain
+    pricing: {per_1k_chars: 0.014}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://ai.google.dev/gemini-api/docs/pricing
+    params:
+      - *line
+      - {name: voice, type: choice, default: Kore, group: basic, choices: [Kore, Puck, Charon, Zephyr, Fenrir, Leda, Orus, Aoede, Callirrhoe, Autonoe, Enceladus, Iapetus, Umbriel, Algieba, Despina, Erinome, Algenib, Rasalgethi, Laomedeia, Achernar, Alnilam, Schedar, Gacrux, Pulcherrima, Achird, Zubenelgenubi, Vindemiatrix, Sadachbia, Sadaltager, Sulafat]}
+      - {name: instruct, label: Style, type: text, default: "", group: basic, help: "e.g. Say cheerfully, like a shopkeeper"}
+      - *takes
+
+  - id: gemini-lyria-3.5
+    name: Lyria 3.5 (Gemini API)
+    modality: audio
+    tasks: [music, song]
+    backend: cloud
+    provider: gemini
+    api: gemini_music
+    remote_model: lyria-3.5
+    order: 63
+    summary: "Google Lyria 3.5: full tracks of a couple of minutes, 44.1 kHz stereo."
+    features: {lyrics: true}
+    license: {name: "Gemini API output", commercial: true, note: "SynthID audio watermark."}
+    est: {run_s: 60}
+    prompt_style: {music: music, song: minimax_music}
+    pricing: {per_request: 0.08}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://ai.google.dev/gemini-api/docs/pricing
+    unverified: "Interactions API answer shape (no real key)"
+    params:
+      - {name: lyrics, type: lyrics, default: "", group: basic, tasks: [song]}
+      - *takes
+
+  # =================================================================== TEXT (used by the prompt improver / assistant)
+  - id: or-claude-sonnet-5.5
+    name: Claude Sonnet 5.5 (OpenRouter)
+    modality: text
+    tasks: [improve, write]
+    backend: cloud
+    provider: openrouter
+    remote_model: anthropic/claude-sonnet-5.5
+    order: 80
+    tags: [quality]
+    summary: "Strong writer for prompts, item descriptions and dialogue."
+    features: {vision: true}
+    license: {name: "Anthropic output via OpenRouter", commercial: true}
+    pricing: {input_per_mtok: 2.0, output_per_mtok: 10.0}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://openrouter.ai/anthropic/claude-sonnet-5.5
+
+  - id: or-gemini-3.8-flash
+    name: Gemini 3.8 Flash (OpenRouter)
+    modality: text
+    tasks: [improve, write]
+    backend: cloud
+    provider: openrouter
+    remote_model: google/gemini-3.8-flash
+    order: 81
+    tags: [fast]
+    features: {vision: true}
+    license: {name: "Gemini output via OpenRouter", commercial: true}
+    pricing: {input_per_mtok: 0.825, output_per_mtok: 4.125}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://openrouter.ai/google/gemini-3.8-flash
+
+  - id: or-deepseek-v4.1-flash
+    name: DeepSeek V4.1 Flash (OpenRouter)
+    modality: text
+    tasks: [improve, write]
+    backend: cloud
+    provider: openrouter
+    remote_model: deepseek/deepseek-v4.1-flash
+    order: 82
+    tags: [fastest]
+    features: {vision: false}
+    license: {name: "DeepSeek output via OpenRouter", commercial: true}
+    pricing: {input_per_mtok: 0.045, output_per_mtok: 0.50}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://openrouter.ai/deepseek/deepseek-v4.1-flash
+
+  - id: openai-gpt-6.1-terra
+    name: GPT-6.1 Terra
+    modality: text
+    tasks: [improve, write]
+    backend: cloud
+    provider: openai
+    remote_model: gpt-6.1-terra
+    order: 83
+    features: {vision: true}
+    license: {name: "OpenAI output", commercial: true}
+    pricing: {input_per_mtok: 1.0, output_per_mtok: 5.0}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://developers.openai.com/api/docs/pricing
+
+  - id: openai-gpt-6-luna
+    name: GPT-6 Luna
+    modality: text
+    tasks: [improve, write]
+    backend: cloud
+    provider: openai
+    remote_model: gpt-6-luna
+    order: 84
+    tags: [fastest]
+    features: {vision: true}
+    license: {name: "OpenAI output", commercial: true}
+    pricing: {input_per_mtok: 0.10, output_per_mtok: 0.50}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://developers.openai.com/api/docs/pricing
+
+  - id: gemini-3.8-flash
+    name: Gemini 3.8 Flash
+    modality: text
+    tasks: [improve, write]
+    backend: cloud
+    provider: gemini
+    remote_model: gemini-3.8-flash
+    order: 85
+    tags: [fast]
+    features: {vision: true}
+    license: {name: "Gemini API output", commercial: true}
+    pricing: {input_per_mtok: 0.75, output_per_mtok: 3.75}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://ai.google.dev/gemini-api/docs/pricing
+
+  - id: gemini-3.5-flash-lite
+    name: Gemini 3.5 Flash-Lite
+    modality: text
+    tasks: [improve, write]
+    backend: cloud
+    provider: gemini
+    remote_model: gemini-3.5-flash-lite
+    order: 86
+    tags: [fastest]
+    features: {vision: true}
+    license: {name: "Gemini API output", commercial: true}
+    pricing: {input_per_mtok: 0.30, output_per_mtok: 2.50}
+    pricing_checked: "2026-11-05"
+    pricing_source: https://ai.google.dev/gemini-api/docs/pricing

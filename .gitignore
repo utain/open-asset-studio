@@ -1,0 +1,35 @@
+# local state: never commit
+/envs/
+/data/
+/logs/
+/vendor/*
+!/vendor/vendor.lock
+/engines/hy3d/vendor/
+/engines/hy3d/tmp/
+/models/
+settings.local.json
+
+# python / tools
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+
+# outputs and big binaries
+*.wav
+*.flac
+*.mp3
+*.safetensors
+*.ckpt
+*.pth
+*.onnx
+*.gguf
+
+# editors / OS
+.vscode/
+.idea/
+.DS_Store
+/.cache/
+/.gpu_test.lock

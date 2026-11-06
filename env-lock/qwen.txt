@@ -1,0 +1,57 @@
+# qwen env lock (Image Studio worker; py3.12 aarch64, GB10). Separate from envs/hy3d on purpose: Qwen-Image-2.1 needs
+# transformers>=5.17 and a diffusers that contains QwenImage21Pipeline (>=0.42), while Hunyuan3D-2.1 runs on transformers 4.57 /
+# diffusers 0.37 and must not be upgraded. Recreate:
+#   uv venv --python 3.12 envs/qwen
+#   VIRTUAL_ENV=envs/qwen uv pip install --index-url https://download.pytorch.org/whl/cu130 torch==2.9.0 torchvision==0.24.0
+#   VIRTUAL_ENV=envs/qwen uv pip install -r env-lock/qwen.txt     # (the torch / torchvision lines below are already satisfied by the first step)
+# Top-level requirements were: transformers>=5.17 diffusers==0.42.1 accelerate safetensors pillow sentencepiece protobuf numpy.
+# Caveats: PyTorch 2.9 warns that the GB10 (sm_121) is above its tested range (8.0 - 12.0); it works. The wheel index is only needed
+# for torch/torchvision. The worker (workers/qwen_worker.py) runs offline (HF_HUB_OFFLINE=1): the weights must already be in ~/.cache/huggingface
+# (Qwen/Qwen-Image-2.1, bf16, 31 GB). Newer diffusers/transformers releases should work but were not tested.
+accelerate==1.15.0
+annotated-doc==0.0.5
+anyio==4.16.0
+certifi==2026.10.23
+charset-normalizer==3.5.2
+click==8.5.0
+diffusers==0.42.1
+filelock==4.2.4
+fsspec==2026.9.0
+h11==0.16.0
+hf-xet==1.8.0
+httpcore2==2.16.0
+httpx2==2.16.0
+huggingface-hub==2.4.0
+idna==3.20
+importlib-metadata==10.1.0
+jinja2==3.1.6
+markdown-it-py==4.2.0
+markupsafe==3.0.3
+mdurl==0.1.2
+mpmath==1.3.0
+networkx==3.7
+numpy==2.5.4
+packaging==26.3
+pillow==13.0.0
+protobuf==7.36.2
+psutil==7.2.2
+pygments==2.21.0
+pyyaml==6.0.3
+regex==2026.9.29
+requests==2.34.2
+rich==15.0.0
+safetensors==0.8.0
+sentencepiece==0.2.2
+setuptools==78.1.0
+shellingham==1.5.4
+sympy==1.14.0
+tokenizers==0.23.3
+tqdm==4.70.1
+transformers==5.22.1
+truststore==0.10.5
+typer==0.27.3
+typing-extensions==4.16.0
+urllib3==2.8.0
+zipp==4.1.2
+torch==2.9.0
+torchvision==0.24.0

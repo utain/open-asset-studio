@@ -1,0 +1,111 @@
+# Foley / video-to-audio group (backend `foley` = envs/foley, workers/foley_worker.py).
+#
+# NEW task `v2a` (Video to sound): inputs = ONE video file (role `video`) + optional text prompt; outputs = audio
+# take(s) (24-bit wav) and, when `mux_video` is on, the same take muxed into the video (ffmpeg, h264/aac mp4), attached
+# to the audio asset as `take_N_video.mp4` (meta.attach). The core currently has no `video` asset type / upload route:
+# the lead must let a studio pick a local video file and pass it as inputs[{role: video, type: video, path}].
+# Text-only `sfx` is registered where the model supports it (MMAudio only; HunyuanVideo-Foley and ThinkSound need a video).
+
+tasks:
+  v2a: {label: Video to sound (Foley), modality: audio, studio: sound}
+
+backends:
+  foley:
+    label: envs/foley (MMAudio, HunyuanVideo-Foley, ThinkSound)
+    python: envs/foley/bin/python
+    script: workers/foley_worker.py
+    device: gpu
+    lock: foley
+    max_loaded: 1
+    kill_on_cancel: true
+
+models:
+  - id: mmaudio-large-44k-v2
+    name: MMAudio large 44k v2
+    modality: audio
+    tasks: [v2a, sfx]
+    default_for: [v2a]
+    order: 70
+    tags: [video, foley, fast, text]
+    summary: "Video-to-audio foley (and text-to-sfx) in sync with the picture; 44.1 kHz mono, 8 s trained, ~25 steps. Also takes a text prompt alone. Non-commercial (CC-BY-NC)."
+    features: {video_input: true, text_only: true, max_seconds: 30, sample_rate: 44100, channels: 1, negative: true, languages: [en], export: [wav, mp4]}
+    backend: foley
+    input_slots:
+      - {role: "video", label: "Video", types: ["video"], required: true, hint: "mp4, mov, webm or mkv. The sound is generated for its first seconds (see Settings → Length).", tasks: ["v2a"]}
+    weights:
+      - {hf: hkchengrex/MMAudio, files: [weights/mmaudio_large_44k_v2.pth, ext_weights/v1-44.pth, ext_weights/synchformer_state_dict.pth]}
+      - {hf: nvidia/bigvgan_v2_44khz_128band_512x, files: [bigvgan_generator.pt]}
+      - {hf: apple/DFN5B-CLIP-ViT-H-14-384}
+    license: {name: CC-BY-NC 4.0 (weights), commercial: false, note: "Code is MIT; the MMAudio weights are CC-BY-NC 4.0. BigVGAN v2 MIT, Synchformer MIT, DFN5B CLIP Apple ASCL."}
+    memory_gb: 10
+    speed: "5 s clip: load ~31 s, then ~4-5 s per take (peak 5.8 GB)"
+    est: {load_s: 31, run_s: 5}
+    prompt_style: sfx
+    params:
+      - {name: seconds, label: Duration, type: float, min: 1, max: 30, step: 0.5, default: 8, unit: s, group: basic, help: "Cut to the video length when the video is shorter. The model was trained on 8 s clips; longer ones work but drift."}
+      - {name: batch, label: Takes, type: int, min: 1, max: 6, default: 2, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: mux_video, label: Also export the video with the sound, type: bool, default: true, group: basic, tasks: [v2a]}
+      - {name: cfg_scale, label: CFG, type: float, min: 1, max: 10, step: 0.5, default: 4.5, group: advanced, help: "Higher follows the text more strongly."}
+      - {name: steps, label: Steps, type: int, min: 5, max: 50, default: 25, group: advanced}
+      - {name: mask_video, label: Ignore picture content (keep timing only), type: bool, default: false, group: advanced, tasks: [v2a], help: "Hides the CLIP picture features, so the text decides WHAT it sounds like and the video only drives WHEN."}
+    presets: {fast: {batch: 1, steps: 15}, balanced: {}, quality: {batch: 4, steps: 40}}
+
+  - id: hunyuan-foley
+    name: HunyuanVideo-Foley (XXL)
+    modality: audio
+    tasks: [v2a]
+    order: 71
+    tags: [video, foley, quality, 48k]
+    summary: "Tencent's video-to-audio model: 48 kHz, strong picture/text balance, up to 15 s. Needs a video AND a text prompt (no text-only mode). 50 steps, ~15 GB. Licence excludes EU, UK and South Korea."
+    features: {video_input: true, text_only: false, needs_prompt: true, max_seconds: 15, sample_rate: 48000, channels: 1, negative: true, languages: [en], export: [wav, mp4]}
+    backend: foley
+    input_slots:
+      - {role: "video", label: "Video", types: ["video"], required: true, hint: "mp4, mov, webm or mkv. The sound is generated for its first seconds (see Settings → Length).", tasks: ["v2a"]}
+    weights:
+      - {hf: tencent/HunyuanVideo-Foley, files: [hunyuanvideo_foley.pth, vae_128d_48k.pth, synchformer_state_dict.pth]}
+      - {hf: google/siglip2-base-patch16-512}
+      - {hf: laion/larger_clap_general}
+    license: {name: Tencent HunyuanVideo-Foley Community, commercial: true, verify: true, note: "Not valid in the EU, UK and South Korea (use and output). Needs a Tencent licence above 100 M monthly active users. Read LICENSE before shipping."}
+    memory_gb: 26
+    speed: "5 s clip, 50 steps: load ~33 s, ~20 s per take (peak 15.3 GB)"
+    est: {load_s: 31, run_s: 22}
+    prompt_style: sfx
+    params:
+      - {name: seconds, label: Duration, type: float, min: 1, max: 15, step: 0.5, default: 8, unit: s, group: basic, help: "Cut to the video length when the video is shorter. 15 s is the model's maximum."}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: mux_video, label: Also export the video with the sound, type: bool, default: true, group: basic}
+      - {name: cfg_scale, label: CFG, type: float, min: 1, max: 10, step: 0.5, default: 4.5, group: advanced}
+      - {name: steps, label: Steps, type: int, min: 10, max: 100, default: 50, group: advanced, help: "No mid-run cancel: a take takes ~0.4 s per step on a 5 s clip."}
+    presets: {fast: {steps: 25}, balanced: {}, quality: {steps: 75, batch: 2}}
+
+  - id: thinksound
+    name: ThinkSound (light)
+    modality: audio
+    tasks: [v2a]
+    order: 72
+    tags: [video, foley, cot, non-commercial]
+    summary: "Video-to-audio guided by a chain-of-thought description (who makes which sound, in what order). 44.1 kHz stereo. The CoT text is written by you (or any LLM); the original MLLM is not bundled. Research / non-commercial."
+    features: {video_input: true, text_only: false, needs_prompt: true, cot: true, max_seconds: 20, sample_rate: 44100, channels: 2, negative: false, languages: [en], export: [wav, mp4]}
+    backend: foley
+    input_slots:
+      - {role: "video", label: "Video", types: ["video"], required: true, hint: "mp4, mov, webm or mkv. The sound is generated for its first seconds (see Settings → Length).", tasks: ["v2a"]}
+    weights:
+      - {hf: FunAudioLLM/ThinkSound, files: [thinksound_light.ckpt, vae.ckpt, synchformer_state_dict.pth]}
+      - {hf: facebook/metaclip-h14-fullcc2.5b}
+      - {hf: google/t5-v1_1-xl, files: [pytorch_model.bin, config.json, spiece.model, tokenizer_config.json, special_tokens_map.json]}
+    license: {name: "Apache-2.0 code, research / non-commercial use only (README)", commercial: false, note: "README: code, models and dataset are for research and education; commercial use needs the authors' permission. The VAE is a Stable Audio Open fine-tune (Stability AI Community licence)."}
+    memory_gb: 24
+    speed: "5 s clip, 24 steps: load ~21 s, ~20 s per take incl. feature extraction (peak 10.5 GB)"
+    est: {load_s: 21, run_s: 20}
+    prompt_style: sfx
+    params:
+      - {name: cot, label: Chain-of-thought description, type: textarea, default: "", group: basic, help: "Step-by-step description of the sounds in the video. Empty = the caption is used."}
+      - {name: seconds, label: Duration, type: int, min: 3, max: 20, step: 1, default: 9, unit: s, group: basic, help: "Whole seconds. 9 s is the trained length."}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: mux_video, label: Also export the video with the sound, type: bool, default: true, group: basic}
+      - {name: cfg_scale, label: CFG, type: float, min: 1, max: 10, step: 0.5, default: 5.0, group: advanced}
+      - {name: steps, label: Steps, type: int, min: 8, max: 64, default: 24, group: advanced}
+    presets: {fast: {steps: 16}, balanced: {}, quality: {steps: 40, batch: 2}}

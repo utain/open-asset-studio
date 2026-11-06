@@ -1,0 +1,424 @@
+# TTS / voice-clone group B: IndexTTS 2 / 2.5, Amphion MaskGCT + Vevo + Vevo1.5, Dia, Dia2, Bark, VibeVoice, Sesame CSM.
+# Backends: cloneb_index (envs/cloneb_index), cloneb_amphion (envs/cloneb_amphion), cloneb_hf (envs/cloneb_hf).
+# New task: voice_convert (UI inputs: role `source` = the clip to convert, role `ref` = the reference voice; param `mode`).
+# Report: docs/research/audio_more/tts_clone_b.md
+
+tasks:
+  voice_convert: {label: Voice conversion, modality: audio, studio: sound}
+
+backends:
+  cloneb_index:
+    label: envs/cloneb_index (IndexTTS 2 / 2.5)
+    python: envs/cloneb_index/bin/python
+    script: workers/cloneb_index_worker.py
+    device: gpu
+    lock: cloneb_index
+    max_loaded: 1
+  cloneb_amphion:
+    label: envs/cloneb_amphion (MaskGCT, Vevo, Vevo1.5; vendor/Amphion)
+    python: envs/cloneb_amphion/bin/python
+    script: workers/cloneb_amphion_worker.py
+    device: gpu
+    lock: cloneb_amphion
+    max_loaded: 1
+    kill_on_cancel: true
+  cloneb_hf:
+    label: envs/cloneb_hf (Dia, Dia2, Bark, VibeVoice, CSM; transformers 5.22)
+    python: envs/cloneb_hf/bin/python
+    script: workers/cloneb_hf_worker.py
+    device: gpu
+    lock: cloneb_hf
+    max_loaded: 1
+    kill_on_cancel: true
+
+models:
+  - id: indextts-2
+    name: IndexTTS 2
+    modality: audio
+    tasks: [voice_clone]
+    order: 80
+    tags: [voice, clone, emotion]
+    summary: "Zero-shot cloner (zh/en) with separate emotion control: from an emotion clip, an 8-value emotion vector or a text description. No duration control in this release (use 2.5)."
+    features: {needs_ref: true, languages: [en, zh], thai: false, instruct: false, emotion: [audio, vector, text], duration_control: false, sample_rate: 22050, channels: 1, max_refs: 2}
+    backend: cloneb_index
+    input_slots:
+      - {role: "ref", label: "Reference voice", types: ["voice", "audio"], required: true, hint: "3-15 s of clean speech in the voice to clone."}
+      - {role: "emo", label: "Emotion clip", types: ["voice", "audio"], required: false, hint: "Used when Settings → Emotion from = Emotion clip: its emotion is copied, not its voice."}
+    weights:
+      - {hf: IndexTeam/IndexTTS-2}
+      - {hf: facebook/w2v-bert-2.0, files: [config.json, preprocessor_config.json, model.safetensors]}
+      - {hf: amphion/MaskGCT, files: [semantic_codec/model.safetensors]}
+      - {hf: funasr/campplus, files: [campplus_cn_common.bin]}
+      - {hf: nvidia/bigvgan_v2_22khz_80band_256x, files: [config.json, bigvgan_generator.pt]}
+    license: {name: bilibili Model Use License, commercial: true, note: "Free for commercial use unless you or an affiliate has >100 M monthly users or >RMB 1 bn annual revenue (then ask bilibili). Outputs count as derivative works under the same licence."}
+    memory_gb: 10
+    speed: "load 33 s; a 4 s line in ~4 s (RTF ~1); 6.4 GB resident"
+    est: {load_s: 33, run_s: 4}
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic}
+      - {name: emotion_mode, label: Emotion from, type: choice, choices: [{value: voice, label: "The reference voice (default)"}, {value: audio, label: "Emotion clip"}, {value: vector, label: "Emotion mix"}, {value: text, label: "Text description"}], default: voice, group: basic, help: "audio needs a second clip (role emo); text reads emo_text, or the line itself when empty."}
+      - {name: emo_text, label: Emotion description, type: text, default: "", group: basic, show_if: {emotion_mode: text}, help: "E.g. 'furious, shouting'. Empty = infer from the line itself."}
+      - {name: emo_alpha, label: Emotion strength, type: float, min: 0, max: 1, step: 0.05, default: 0.8, group: basic, show_if: {emotion_mode: [audio, text, vector]}, help: "0.6 or lower sounds most natural for text emotion."}
+      - {name: emo_happy, label: Happy, type: float, min: 0, max: 1.2, step: 0.05, default: 0, group: basic, show_if: {emotion_mode: vector}}
+      - {name: emo_angry, label: Angry, type: float, min: 0, max: 1.2, step: 0.05, default: 0, group: basic, show_if: {emotion_mode: vector}}
+      - {name: emo_sad, label: Sad, type: float, min: 0, max: 1.2, step: 0.05, default: 0, group: basic, show_if: {emotion_mode: vector}}
+      - {name: emo_afraid, label: Afraid, type: float, min: 0, max: 1.2, step: 0.05, default: 0, group: basic, show_if: {emotion_mode: vector}}
+      - {name: emo_disgusted, label: Disgusted, type: float, min: 0, max: 1.2, step: 0.05, default: 0, group: basic, show_if: {emotion_mode: vector}}
+      - {name: emo_melancholic, label: Melancholic, type: float, min: 0, max: 1.2, step: 0.05, default: 0, group: basic, show_if: {emotion_mode: vector}}
+      - {name: emo_surprised, label: Surprised, type: float, min: 0, max: 1.2, step: 0.05, default: 0, group: basic, show_if: {emotion_mode: vector}}
+      - {name: emo_calm, label: Calm, type: float, min: 0, max: 1.2, step: 0.05, default: 0, group: basic, show_if: {emotion_mode: vector}}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: temperature, type: float, min: 0.1, max: 1.5, step: 0.05, default: 0.8, group: advanced}
+      - {name: top_p, type: float, min: 0.1, max: 1.0, step: 0.05, default: 0.8, group: advanced}
+      - {name: top_k, type: int, min: 1, max: 100, default: 30, group: advanced}
+      - {name: use_random, label: Random emotion pick, type: bool, default: false, group: advanced, help: "Adds variety to emotion-mix mode; lowers voice similarity."}
+      - {name: max_segment_tokens, label: Max tokens per segment, type: int, min: 40, max: 200, default: 120, group: advanced, help: "Long lines are split into segments of this size."}
+      - {name: pause_ms, label: Pause between segments, type: int, min: 0, max: 1000, step: 50, default: 200, unit: ms, group: advanced}
+    presets: {fast: {batch: 1}, balanced: {batch: 2}, quality: {batch: 4, temperature: 0.7}}
+
+  - id: indextts-2.5
+    name: IndexTTS 2.5
+    modality: audio
+    tasks: [voice_clone]
+    order: 81
+    tags: [voice, clone, emotion, duration]
+    summary: "IndexTTS 2 successor (Aug 2026): zh/en/ja/es/ar, same emotion controls (clip, mix, text) plus speed control via duration_factor (0.5x-2x). bf16."
+    features: {needs_ref: true, languages: [zh, en, ja, es, ar], thai: false, emotion: [audio, vector, text], duration_control: true, sample_rate: 22050, channels: 1, max_refs: 2}
+    backend: cloneb_index
+    input_slots:
+      - {role: "ref", label: "Reference voice", types: ["voice", "audio"], required: true, hint: "3-15 s of clean speech in the voice to clone."}
+      - {role: "emo", label: "Emotion clip", types: ["voice", "audio"], required: false, hint: "Used when Settings → Emotion from = Emotion clip: its emotion is copied, not its voice."}
+    weights:
+      - {hf: IndexTeam/IndexTTS-2.5}
+      - {hf: facebook/w2v-bert-2.0, files: [config.json, preprocessor_config.json, model.safetensors]}
+      - {hf: amphion/MaskGCT, files: [semantic_codec/model.safetensors]}
+      - {hf: funasr/campplus, files: [campplus_cn_common.bin]}
+      - {hf: nvidia/bigvgan_v2_22khz_80band_256x, files: [config.json, bigvgan_generator.pt]}
+    license: {name: bilibili Model Use License, commercial: true, note: "Free for commercial use unless you or an affiliate has >100 M monthly users or >RMB 1 bn annual revenue (then ask bilibili). Repo licence tag is 'other': verify.", verify: true}
+    memory_gb: 10
+    speed: "load 33 s; 2-3 s per short line; 5.2 GB resident"
+    est: {load_s: 33, run_s: 3}
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic}
+      - {name: language, type: choice, choices: [{value: EN, label: English}, {value: ZH, label: Chinese}, {value: JA, label: Japanese}, {value: ES, label: Spanish}, {value: AR, label: Arabic}], default: EN, group: basic}
+      - {name: duration_factor, label: Duration, type: float, min: 0.5, max: 2.0, step: 0.05, default: 1.0, group: basic, help: "Length multiplier: >1 slower, <1 faster."}
+      - {name: emotion_mode, label: Emotion from, type: choice, choices: [{value: voice, label: "The reference voice (default)"}, {value: audio, label: "Emotion clip"}, {value: vector, label: "Emotion mix"}, {value: text, label: "Text description"}], default: voice, group: basic, help: "audio needs a second clip (role emo); text reads emo_text, or the line itself when empty."}
+      - {name: emo_text, label: Emotion description, type: text, default: "", group: basic, show_if: {emotion_mode: text}}
+      - {name: emo_alpha, label: Emotion strength, type: float, min: 0, max: 1, step: 0.05, default: 0.8, group: basic, show_if: {emotion_mode: [audio, text, vector]}}
+      - {name: emo_happy, label: Happy, type: float, min: 0, max: 1.2, step: 0.05, default: 0, group: basic, show_if: {emotion_mode: vector}}
+      - {name: emo_angry, label: Angry, type: float, min: 0, max: 1.2, step: 0.05, default: 0, group: basic, show_if: {emotion_mode: vector}}
+      - {name: emo_sad, label: Sad, type: float, min: 0, max: 1.2, step: 0.05, default: 0, group: basic, show_if: {emotion_mode: vector}}
+      - {name: emo_afraid, label: Afraid, type: float, min: 0, max: 1.2, step: 0.05, default: 0, group: basic, show_if: {emotion_mode: vector}}
+      - {name: emo_disgusted, label: Disgusted, type: float, min: 0, max: 1.2, step: 0.05, default: 0, group: basic, show_if: {emotion_mode: vector}}
+      - {name: emo_melancholic, label: Melancholic, type: float, min: 0, max: 1.2, step: 0.05, default: 0, group: basic, show_if: {emotion_mode: vector}}
+      - {name: emo_surprised, label: Surprised, type: float, min: 0, max: 1.2, step: 0.05, default: 0, group: basic, show_if: {emotion_mode: vector}}
+      - {name: emo_calm, label: Calm, type: float, min: 0, max: 1.2, step: 0.05, default: 0, group: basic, show_if: {emotion_mode: vector}}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: temperature, type: float, min: 0.1, max: 1.5, step: 0.05, default: 0.8, group: advanced}
+      - {name: top_p, type: float, min: 0.1, max: 1.0, step: 0.05, default: 0.8, group: advanced}
+      - {name: top_k, type: int, min: 1, max: 100, default: 30, group: advanced}
+      - {name: use_random, label: Random emotion pick, type: bool, default: false, group: advanced}
+      - {name: max_segment_tokens, label: Max tokens per segment, type: int, min: 40, max: 200, default: 120, group: advanced}
+      - {name: pause_ms, label: Pause between segments, type: int, min: 0, max: 1000, step: 50, default: 200, unit: ms, group: advanced}
+    presets: {fast: {batch: 1}, balanced: {batch: 2}, quality: {batch: 4, temperature: 0.7}}
+
+  - id: maskgct
+    name: MaskGCT (Amphion)
+    modality: audio
+    tasks: [tts, voice_clone]
+    order: 82
+    tags: [voice, clone, multilingual, non-commercial]
+    summary: "Non-autoregressive zero-shot cloning TTS (en, zh, ja, ko, fr, de) from a 3-15 s reference. Duration can be set. Without a reference it uses a bundled voice. CC-BY-NC."
+    features: {needs_ref: clone, languages: [en, zh, ja, ko, fr, de], thai: false, sample_rate: 24000, max_seconds: 40, duration_control: true}
+    backend: cloneb_amphion
+    weights:
+      - {hf: amphion/MaskGCT, files: ["semantic_codec/model.safetensors", "acoustic_codec/*.safetensors", "t2s_model/model.safetensors", "s2a_model/s2a_model_1layer/model.safetensors", "s2a_model/s2a_model_full/model.safetensors"]}
+      - {hf: facebook/w2v-bert-2.0, files: ["config.json", "preprocessor_config.json", "model.safetensors"]}
+    license: {name: CC-BY-NC-4.0, commercial: false, note: "Amphion MaskGCT checkpoints; code is MIT."}
+    memory_gb: 12
+    speed: "load 62 s (cold, 2.3 GB of codecs + w2v-bert); ~9 s for a 5 s line; 8.3 GB resident"
+    est: {load_s: 62, run_s: 10}
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic, tasks: [tts, voice_clone]}
+      - {name: ref_text, label: Reference transcript (empty = auto, Whisper), type: text, default: "", group: basic}
+      - {name: language, type: choice, choices: [en, zh, ja, ko, fr, de], default: en, group: basic, help: "Language of the line."}
+      - {name: ref_language, label: Reference language, type: choice, choices: [en, zh, ja, ko, fr, de], default: en, group: advanced}
+      - {name: voice, label: Bundled voice (no reference clip), type: choice, choices: [maskgct_prompt, arabic_male], default: maskgct_prompt, group: basic, tasks: [tts]}
+      - {name: target_seconds, label: Target duration (0 = auto), type: float, min: 0, max: 40, step: 0.5, default: 0, unit: s, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: steps, label: Text-to-semantic steps, type: int, min: 10, max: 50, default: 25, group: advanced}
+      - {name: s2a_steps, label: Acoustic steps, type: int, min: 10, max: 50, default: 25, group: advanced}
+      - {name: cfg_scale, label: CFG, type: float, min: 1, max: 5, step: 0.1, default: 2.5, group: advanced}
+    presets: {fast: {steps: 15, s2a_steps: 15}, balanced: {}, quality: {steps: 40, s2a_steps: 40, batch: 2}}
+
+  - id: vevo
+    name: Vevo (Amphion)
+    modality: audio
+    tasks: [tts, voice_clone, voice_convert]
+    order: 83
+    tags: [voice, clone, convert, non-commercial]
+    summary: "Zero-shot voice imitation with separate timbre and style control: TTS/clone (style and timbre refs can differ) and voice conversion (timbre only, style/accent only, or both). Trained on Emilia (en zh de fr ja ko). CC-BY-NC."
+    features: {needs_ref: clone, languages: [en, zh, ja, ko, fr, de], thai: false, sample_rate: 24000, max_seconds: 40, voice_convert: true, modes: [timbre, style, voice]}
+    backend: cloneb_amphion
+    input_slots:
+      - {role: "source", label: "Source clip", types: ["voice", "audio"], required: true, hint: "The recording whose voice changes (up to 40 s).", tasks: ["voice_convert"]}
+      - {role: "ref", label: "Reference voice", types: ["voice", "audio"], required: true, hint: "The voice to convert to; in style / voice modes also the accent and emotion to copy. 3-15 s of clean speech.", tasks: ["voice_convert"]}
+      - {role: "ref", label: "Reference voice", types: ["voice", "audio"], required: true, hint: "Style reference (accent, emotion, pace), 3-15 s of clean speech. The transcript is made with Whisper when empty.", tasks: ["voice_clone"]}
+      - {role: "ref", label: "Reference voice", types: ["voice", "audio"], required: false, hint: "Empty = the bundled voice (Settings → Bundled voice).", tasks: ["tts"]}
+      - {role: "timbre", label: "Timbre reference", types: ["voice", "audio"], required: false, hint: "Take the timbre from this clip while the style comes from the reference voice.", tasks: ["tts", "voice_clone"]}
+    weights:
+      - {hf: amphion/Vevo, files: ["tokenizer/vq8192/model.safetensors", "tokenizer/vq32/*.pkl", "contentstyle_modeling/*/model.safetensors", "acoustic_modeling/Vq8192ToMels/model.safetensors", "acoustic_modeling/Vocoder/*.safetensors"]}
+      - {path: ~/.cache/torch/hub/checkpoints/hubert_fairseq_large_ll60k.pth, fix: "envs/cloneb_amphion/bin/python -c \"import torchaudio; torchaudio.pipelines.HUBERT_LARGE.get_model()\"  (downloads 1.26 GB from download.pytorch.org)"}
+    license: {name: CC-BY-NC-4.0, commercial: false, note: "Amphion Vevo checkpoints; code is MIT."}
+    memory_gb: 10
+    speed: "load 39 s; voice conversion 4-10 s per 8 s clip; TTS ~50 s per line (AR phone-to-token model); 5.6 GB resident"
+    est: {load_s: 39, run_s: 10}
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic, tasks: [tts, voice_clone]}
+      - {name: mode, label: Conversion mode, type: choice, choices: [{value: timbre, label: "Timbre only (keep the source's prosody)"}, {value: style, label: "Style only (keep the source's voice, imitate the reference's accent/emotion)"}, {value: voice, label: "Voice (imitate timbre and style)"}], default: timbre, group: basic, tasks: [voice_convert]}
+      - {name: ref_text, label: Reference transcript (empty = auto, Whisper), type: text, default: "", group: basic, tasks: [tts, voice_clone]}
+      - {name: language, type: choice, choices: [en, zh, ja, ko, fr, de], default: en, group: basic, tasks: [tts, voice_clone]}
+      - {name: ref_language, label: Reference language, type: choice, choices: [en, zh, ja, ko, fr, de], default: en, group: advanced, tasks: [tts, voice_clone]}
+      - {name: voice, label: Bundled voice (no reference clip), type: choice, choices: [arabic_male, maskgct_prompt], default: arabic_male, group: basic, tasks: [tts]}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: steps, label: Flow-matching steps, type: int, min: 8, max: 64, default: 32, group: advanced}
+    presets: {fast: {steps: 16}, balanced: {}, quality: {steps: 48, batch: 2}}
+
+  - id: vevo15
+    name: Vevo1.5 (Amphion, speech + singing)
+    modality: audio
+    tasks: [tts, voice_clone, voice_convert]
+    order: 84
+    tags: [voice, clone, convert, singing, non-commercial]
+    summary: "Vevo successor that models speech and singing: clone a voice or singing style, sing text to a melody clip (optional 'melody' input), convert timbre or singing style. CC-BY-NC-ND."
+    features: {needs_ref: clone, languages: [en, zh, ja, ko, fr, de], thai: false, sample_rate: 24000, max_seconds: 40, voice_convert: true, modes: [timbre, style], singing: true, melody_input: true}
+    backend: cloneb_amphion
+    input_slots:
+      - {role: "source", label: "Source clip", types: ["voice", "audio"], required: true, hint: "The recording whose voice changes (up to 40 s).", tasks: ["voice_convert"]}
+      - {role: "ref", label: "Reference voice", types: ["voice", "audio"], required: true, hint: "The voice to convert to; in style / voice modes also the accent and emotion to copy. 3-15 s of clean speech.", tasks: ["voice_convert"]}
+      - {role: "ref", label: "Reference voice", types: ["voice", "audio"], required: true, hint: "Style reference (accent, emotion, pace), 3-15 s of clean speech. The transcript is made with Whisper when empty.", tasks: ["voice_clone"]}
+      - {role: "ref", label: "Reference voice", types: ["voice", "audio"], required: false, hint: "Empty = the bundled voice (Settings → Bundled voice).", tasks: ["tts"]}
+      - {role: "timbre", label: "Timbre reference", types: ["voice", "audio"], required: false, hint: "Take the timbre from this clip while the style comes from the reference voice.", tasks: ["tts", "voice_clone"]}
+      - {role: "melody", label: "Melody to sing", types: ["audio", "voice"], required: false, hint: "Vevo1.5 sings the line to the pitch contour of this clip. With a melody the line may be empty.", tasks: ["tts", "voice_clone"], replaces_prompt: true}
+    weights:
+      - {hf: amphion/Vevo1.5, files: ["config.json", "tokenizer/**", "contentstyle_modeling/ar_emilia101k_singnet7k/*", "acoustic_modeling/fm_emilia101k_singnet7k/*", "acoustic_modeling/Vocoder/*"]}
+      - {path: ~/.cache/whisper/medium.pt, fix: "envs/cloneb_amphion/bin/python -c \"import whisper; whisper.load_model('medium')\"  (1.5 GB, used as feature extractor and for auto transcripts)"}
+    license: {name: CC-BY-NC-ND-4.0, commercial: false, note: "Amphion Vevo1.5 checkpoints (no derivatives); code is MIT."}
+    memory_gb: 12
+    speed: "load 55 s; ~6 s for a 5 s line; conversion 3.5-7 s per 8 s clip; singing 9 s; 8.3 GB resident"
+    est: {load_s: 55, run_s: 7}
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: "Line (or lyrics, with a melody clip)", type: textarea, default: "", group: basic, tasks: [tts, voice_clone]}
+      - {name: mode, label: Conversion mode, type: choice, choices: [{value: timbre, label: "Timbre only (keep the source's prosody/melody)"}, {value: style, label: "Style (keep the source's voice, imitate the reference's speaking/singing style)"}], default: timbre, group: basic, tasks: [voice_convert]}
+      - {name: ref_text, label: Reference transcript (empty = auto, Whisper), type: text, default: "", group: basic}
+      - {name: source_text, label: Source transcript (style mode, empty = auto), type: text, default: "", group: advanced, tasks: [voice_convert]}
+      - {name: language, type: choice, choices: [en, zh, ja, ko, fr, de], default: en, group: basic}
+      - {name: ref_language, label: Reference language, type: choice, choices: [en, zh, ja, ko, fr, de], default: en, group: advanced}
+      - {name: voice, label: Bundled voice (no reference clip), type: choice, choices: [arabic_male, maskgct_prompt], default: arabic_male, group: basic, tasks: [tts]}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: steps, label: Flow-matching steps, type: int, min: 8, max: 64, default: 32, group: advanced}
+    presets: {fast: {steps: 16}, balanced: {}, quality: {steps: 48, batch: 2}}
+
+  # =================================================================== Dia (two-speaker dialogue)
+  - id: dia-1.6b
+    name: Dia 1.6B (0626)
+    modality: audio
+    tasks: [tts, voice_clone]
+    order: 85
+    tags: [dialogue, expressive, nonverbal]
+    summary: "Two-speaker dialogue in one pass: write [S1] / [S2] turns, add (laughs) (coughs) (sighs) ... Voices vary per take; fix a voice with a reference clip + its transcript (voice clone). English only, ~30 s per take."
+    features: {speakers: 2, languages: [en], thai: false, tags: true, needs_ref: false, sample_rate: 44100, max_seconds: 40}
+    backend: cloneb_hf
+    weights: [{hf: nari-labs/Dia-1.6B-0626, files: ["*.json", "model-0000*.safetensors"]}]
+    license: {name: Apache-2.0, commercial: true, note: "Nari Labs' terms forbid impersonation of real people and deceptive content."}
+    memory_gb: 8
+    speed: "load 6 s; ~19 s for 8 s of dialogue (RTF ~2.4, CFG); 3.0 GB resident"
+    est: {load_s: 6, run_s: 20}
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: "Script ([S1] / [S2] turns)", type: textarea, default: "[S1] Did you hear that? (coughs) [S2] Hear what? [S1] The door. Somebody is in the vault.", group: basic, help: "Start each turn with [S1] or [S2]. Non-verbal: (laughs) (clears throat) (sighs) (gasps) (coughs) (sniffs) (groans) (whistles). Keep each take at 5-20 s of speech."}
+      - {name: ref_text, label: "Reference transcript (with [S1]/[S2])", type: textarea, default: "", group: basic, tasks: [voice_clone], help: "Exact transcript of the reference clip (5-20 s). The new script continues after it."}
+      - {name: seconds, label: Max length, type: float, min: 5, max: 40, step: 1, default: 30, unit: s, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: guidance_scale, label: CFG, type: float, min: 1, max: 6, step: 0.1, default: 3.0, group: advanced}
+      - {name: temperature, type: float, min: 0.5, max: 2.5, step: 0.05, default: 1.8, group: advanced}
+      - {name: top_p, type: float, min: 0.5, max: 1.0, step: 0.01, default: 0.9, group: advanced}
+      - {name: top_k, type: int, min: 1, max: 200, default: 45, group: advanced}
+    presets: {fast: {batch: 1}, balanced: {}, quality: {batch: 4}}
+
+  - id: dia2-2b
+    name: Dia2 2B
+    modality: audio
+    tasks: [tts, voice_clone]
+    order: 86
+    tags: [dialogue, streaming, expressive]
+    summary: "Nari's streaming dialogue model: [S1] / [S2] turns, up to 2 min, English. Stable voices need a spoken prefix (voice clone: reference clip for speaker 1, optional second for speaker 2)."
+    features: {speakers: 2, languages: [en], thai: false, tags: true, needs_ref: false, sample_rate: 24000, max_seconds: 120}
+    backend: cloneb_hf
+    input_slots:
+      - {role: "ref", label: "Speaker 1 voice", types: ["voice", "audio"], required: true, hint: "A spoken prefix for [S1] (5-20 s). The new script continues after it.", tasks: ["voice_clone"]}
+      - {role: "ref2", label: "Speaker 2 voice", types: ["voice", "audio"], required: false, hint: "Optional spoken prefix for [S2].", tasks: ["voice_clone"]}
+    weights:
+      - {hf: nari-labs/Dia2-2B}
+      - {hf: kyutai/mimi}
+    license: {name: Apache-2.0, commercial: true, note: "Nari Labs' terms forbid impersonation of real people and deceptive content. Mimi codec: CC-BY-4.0."}
+    memory_gb: 12
+    speed: "load 5 s; ~13 s for 6.5 s of dialogue; 7.6 GB resident (+1.6 GB Whisper while cloning)"
+    est: {load_s: 5, run_s: 15}
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: "Script ([S1] / [S2] turns)", type: textarea, default: "[S1] Did you hear that? [S2] Hear what? [S1] The door. Somebody is in the vault.", group: basic, help: "Start each turn with [S1] or [S2]. Non-verbal sounds in (parentheses), e.g. (laughs)."}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: cfg_scale, label: CFG, type: float, min: 1, max: 6, step: 0.1, default: 2.0, group: advanced}
+      - {name: temperature, type: float, min: 0.3, max: 1.5, step: 0.05, default: 0.8, group: advanced}
+      - {name: top_k, type: int, min: 1, max: 200, default: 50, group: advanced}
+    presets: {fast: {batch: 1}, balanced: {}, quality: {batch: 4, cfg_scale: 3.0}}
+
+  # =================================================================== Bark
+  - id: bark
+    name: Bark (Suno)
+    modality: audio
+    tasks: [tts]
+    order: 87
+    tags: [expressive, nonverbal, music-notes, multilingual]
+    summary: "Generative speech with laughs, sighs, hesitations and sung lines (wrap lyrics in ♪ ... ♪). 13 languages, ~130 voice presets; the voice also varies from take to take. Not controllable beyond that."
+    features: {tags: true, languages: [en, de, es, fr, hi, it, ja, ko, pl, pt, ru, tr, zh], thai: false, sample_rate: 24000, max_seconds: 60}
+    backend: cloneb_hf
+    weights: [{hf: suno/bark}]
+    license: {name: MIT, commercial: true}
+    memory_gb: 5
+    speed: "load 4 s; ~10-20 s per 8-10 s of audio; 2.1 GB resident"
+    est: {load_s: 4, run_s: 15}
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: Line, type: textarea, default: "Hello, my name is Suno. [laughs] And I like to ... eat pizza. ♪ La la la la ♪", group: basic, help: "Tags: [laughter] [laughs] [sighs] [music] [gasps] [clears throat]. '...' = hesitation, CAPS = emphasis, ♪ ... ♪ = singing. Long lines are split at sentence ends."}
+      - {name: voice, label: Voice preset, type: choice, choices: [random, v2/en_speaker_0, v2/en_speaker_1, v2/en_speaker_2, v2/en_speaker_3, v2/en_speaker_4, v2/en_speaker_5, v2/en_speaker_6, v2/en_speaker_7, v2/en_speaker_8, v2/en_speaker_9, v2/de_speaker_0, v2/de_speaker_1, v2/de_speaker_2, v2/de_speaker_3, v2/de_speaker_4, v2/de_speaker_5, v2/de_speaker_6, v2/de_speaker_7, v2/de_speaker_8, v2/de_speaker_9, v2/es_speaker_0, v2/es_speaker_1, v2/es_speaker_2, v2/es_speaker_3, v2/es_speaker_4, v2/es_speaker_5, v2/es_speaker_6, v2/es_speaker_7, v2/es_speaker_8, v2/es_speaker_9, v2/fr_speaker_0, v2/fr_speaker_1, v2/fr_speaker_2, v2/fr_speaker_3, v2/fr_speaker_4, v2/fr_speaker_5, v2/fr_speaker_6, v2/fr_speaker_7, v2/fr_speaker_8, v2/fr_speaker_9, v2/hi_speaker_0, v2/hi_speaker_1, v2/hi_speaker_2, v2/hi_speaker_3, v2/hi_speaker_4, v2/hi_speaker_5, v2/hi_speaker_6, v2/hi_speaker_7, v2/hi_speaker_8, v2/hi_speaker_9, v2/it_speaker_0, v2/it_speaker_1, v2/it_speaker_2, v2/it_speaker_3, v2/it_speaker_4, v2/it_speaker_5, v2/it_speaker_6, v2/it_speaker_7, v2/it_speaker_8, v2/it_speaker_9, v2/ja_speaker_0, v2/ja_speaker_1, v2/ja_speaker_2, v2/ja_speaker_3, v2/ja_speaker_4, v2/ja_speaker_5, v2/ja_speaker_6, v2/ja_speaker_7, v2/ja_speaker_8, v2/ja_speaker_9, v2/ko_speaker_0, v2/ko_speaker_1, v2/ko_speaker_2, v2/ko_speaker_3, v2/ko_speaker_4, v2/ko_speaker_5, v2/ko_speaker_6, v2/ko_speaker_7, v2/ko_speaker_8, v2/ko_speaker_9, v2/pl_speaker_0, v2/pl_speaker_1, v2/pl_speaker_2, v2/pl_speaker_3, v2/pl_speaker_4, v2/pl_speaker_5, v2/pl_speaker_6, v2/pl_speaker_7, v2/pl_speaker_8, v2/pl_speaker_9, v2/pt_speaker_0, v2/pt_speaker_1, v2/pt_speaker_2, v2/pt_speaker_3, v2/pt_speaker_4, v2/pt_speaker_5, v2/pt_speaker_6, v2/pt_speaker_7, v2/pt_speaker_8, v2/pt_speaker_9, v2/ru_speaker_0, v2/ru_speaker_1, v2/ru_speaker_2, v2/ru_speaker_3, v2/ru_speaker_4, v2/ru_speaker_5, v2/ru_speaker_6, v2/ru_speaker_7, v2/ru_speaker_8, v2/ru_speaker_9, v2/tr_speaker_0, v2/tr_speaker_1, v2/tr_speaker_2, v2/tr_speaker_3, v2/tr_speaker_4, v2/tr_speaker_5, v2/tr_speaker_6, v2/tr_speaker_7, v2/tr_speaker_8, v2/tr_speaker_9, v2/zh_speaker_0, v2/zh_speaker_1, v2/zh_speaker_2, v2/zh_speaker_3, v2/zh_speaker_4, v2/zh_speaker_5, v2/zh_speaker_6, v2/zh_speaker_7, v2/zh_speaker_8, v2/zh_speaker_9], default: v2/en_speaker_6, group: basic, help: "'random' lets Bark invent the voice."}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 2, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: text_temp, label: Text temperature, type: float, min: 0.1, max: 1.2, step: 0.05, default: 0.7, group: advanced}
+      - {name: waveform_temp, label: Waveform temperature, type: float, min: 0.1, max: 1.2, step: 0.05, default: 0.7, group: advanced}
+      - {name: pause_s, label: Pause between parts, type: float, min: 0, max: 1.5, step: 0.05, default: 0.25, unit: s, group: advanced}
+    presets: {fast: {batch: 1}, balanced: {}, quality: {batch: 4}}
+
+  - id: bark-small
+    name: Bark Small (Suno)
+    modality: audio
+    tasks: [tts]
+    order: 88
+    tags: [expressive, nonverbal, music-notes, multilingual]
+    summary: "Smaller Bark variant (1.7 GB checkpoint, lower quality). Generative speech with laughs, sighs, hesitations and sung lines (wrap lyrics in ♪ ... ♪). 13 languages, ~130 voice presets; the voice also varies from take to take. Not controllable beyond that."
+    features: {tags: true, languages: [en, de, es, fr, hi, it, ja, ko, pl, pt, ru, tr, zh], thai: false, sample_rate: 24000, max_seconds: 60}
+    backend: cloneb_hf
+    weights: [{hf: suno/bark-small}]
+    license: {name: MIT, commercial: true}
+    memory_gb: 3
+    speed: "load 7 s; ~15 s per 8 s of audio; 0.8 GB resident"
+    est: {load_s: 7, run_s: 15}
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: Line, type: textarea, default: "Hello, my name is Suno. [laughs] And I like to ... eat pizza. ♪ La la la la ♪", group: basic, help: "Tags: [laughter] [laughs] [sighs] [music] [gasps] [clears throat]. '...' = hesitation, CAPS = emphasis, ♪ ... ♪ = singing. Long lines are split at sentence ends."}
+      - {name: voice, label: Voice preset, type: choice, choices: [random, v2/en_speaker_0, v2/en_speaker_1, v2/en_speaker_2, v2/en_speaker_3, v2/en_speaker_4, v2/en_speaker_5, v2/en_speaker_6, v2/en_speaker_7, v2/en_speaker_8, v2/en_speaker_9, v2/de_speaker_0, v2/de_speaker_1, v2/de_speaker_2, v2/de_speaker_3, v2/de_speaker_4, v2/de_speaker_5, v2/de_speaker_6, v2/de_speaker_7, v2/de_speaker_8, v2/de_speaker_9, v2/es_speaker_0, v2/es_speaker_1, v2/es_speaker_2, v2/es_speaker_3, v2/es_speaker_4, v2/es_speaker_5, v2/es_speaker_6, v2/es_speaker_7, v2/es_speaker_8, v2/es_speaker_9, v2/fr_speaker_0, v2/fr_speaker_1, v2/fr_speaker_2, v2/fr_speaker_3, v2/fr_speaker_4, v2/fr_speaker_5, v2/fr_speaker_6, v2/fr_speaker_7, v2/fr_speaker_8, v2/fr_speaker_9, v2/hi_speaker_0, v2/hi_speaker_1, v2/hi_speaker_2, v2/hi_speaker_3, v2/hi_speaker_4, v2/hi_speaker_5, v2/hi_speaker_6, v2/hi_speaker_7, v2/hi_speaker_8, v2/hi_speaker_9, v2/it_speaker_0, v2/it_speaker_1, v2/it_speaker_2, v2/it_speaker_3, v2/it_speaker_4, v2/it_speaker_5, v2/it_speaker_6, v2/it_speaker_7, v2/it_speaker_8, v2/it_speaker_9, v2/ja_speaker_0, v2/ja_speaker_1, v2/ja_speaker_2, v2/ja_speaker_3, v2/ja_speaker_4, v2/ja_speaker_5, v2/ja_speaker_6, v2/ja_speaker_7, v2/ja_speaker_8, v2/ja_speaker_9, v2/ko_speaker_0, v2/ko_speaker_1, v2/ko_speaker_2, v2/ko_speaker_3, v2/ko_speaker_4, v2/ko_speaker_5, v2/ko_speaker_6, v2/ko_speaker_7, v2/ko_speaker_8, v2/ko_speaker_9, v2/pl_speaker_0, v2/pl_speaker_1, v2/pl_speaker_2, v2/pl_speaker_3, v2/pl_speaker_4, v2/pl_speaker_5, v2/pl_speaker_6, v2/pl_speaker_7, v2/pl_speaker_8, v2/pl_speaker_9, v2/pt_speaker_0, v2/pt_speaker_1, v2/pt_speaker_2, v2/pt_speaker_3, v2/pt_speaker_4, v2/pt_speaker_5, v2/pt_speaker_6, v2/pt_speaker_7, v2/pt_speaker_8, v2/pt_speaker_9, v2/ru_speaker_0, v2/ru_speaker_1, v2/ru_speaker_2, v2/ru_speaker_3, v2/ru_speaker_4, v2/ru_speaker_5, v2/ru_speaker_6, v2/ru_speaker_7, v2/ru_speaker_8, v2/ru_speaker_9, v2/tr_speaker_0, v2/tr_speaker_1, v2/tr_speaker_2, v2/tr_speaker_3, v2/tr_speaker_4, v2/tr_speaker_5, v2/tr_speaker_6, v2/tr_speaker_7, v2/tr_speaker_8, v2/tr_speaker_9, v2/zh_speaker_0, v2/zh_speaker_1, v2/zh_speaker_2, v2/zh_speaker_3, v2/zh_speaker_4, v2/zh_speaker_5, v2/zh_speaker_6, v2/zh_speaker_7, v2/zh_speaker_8, v2/zh_speaker_9], default: v2/en_speaker_6, group: basic, help: "'random' lets Bark invent the voice."}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 2, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: text_temp, label: Text temperature, type: float, min: 0.1, max: 1.2, step: 0.05, default: 0.7, group: advanced}
+      - {name: waveform_temp, label: Waveform temperature, type: float, min: 0.1, max: 1.2, step: 0.05, default: 0.7, group: advanced}
+      - {name: pause_s, label: Pause between parts, type: float, min: 0, max: 1.5, step: 0.05, default: 0.25, unit: s, group: advanced}
+    presets: {fast: {batch: 1}, balanced: {}, quality: {batch: 4}}
+
+  # =================================================================== VibeVoice
+  - id: vibevoice-1.5b
+    name: VibeVoice 1.5B
+    modality: audio
+    tasks: [tts, voice_clone]
+    order: 89
+    tags: [long-form, multi-speaker, podcast]
+    summary: "Microsoft's long-form dialogue TTS: up to 4 speakers and ~90 min per script (English / Chinese). Write 'Speaker 1: ...' lines; add a reference clip per speaker (roles ref, ref2, ref3, ref4) to fix the voices. Research-licence caveats."
+    features: {speakers: 4, languages: [en, zh], thai: false, needs_ref: false, sample_rate: 24000, max_seconds: 5400}
+    backend: cloneb_hf
+    input_slots:
+      - {role: "ref", label: "Speaker 1 voice", types: ["voice", "audio"], required: false, hint: "Optional voice for Speaker 1 (5-30 s of clean speech). Only fill speakers that have lines in the script.", tasks: ["tts"]}
+      - {role: "ref", label: "Speaker 1 voice", types: ["voice", "audio"], required: true, hint: "The voice to clone for Speaker 1 (5-30 s of clean speech).", tasks: ["voice_clone"]}
+      - {role: "ref2", label: "Speaker 2 voice", types: ["voice", "audio"], required: false, hint: "Optional voice for Speaker 2. Only fill speakers that have lines in the script.", tasks: ["tts", "voice_clone"]}
+      - {role: "ref3", label: "Speaker 3 voice", types: ["voice", "audio"], required: false, hint: "Optional voice for Speaker 3.", tasks: ["tts", "voice_clone"]}
+      - {role: "ref4", label: "Speaker 4 voice", types: ["voice", "audio"], required: false, hint: "Optional voice for Speaker 4.", tasks: ["tts", "voice_clone"]}
+    weights: [{hf: vibevoice/VibeVoice-1.5B-hf}]
+    license: {name: MIT, commercial: true, note: "Microsoft says: research and development use; not recommended for commercial use without further testing. Every output carries an audible AI disclaimer and an imperceptible watermark per the model card. No impersonation."}
+    memory_gb: 10
+    speed: "load 32 s (first); ~7 s for 9 s of two-speaker audio; 5.0 GB resident, grows with script length"
+    est: {load_s: 32, run_s: 8}
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: "Script (Speaker 1..4)", type: textarea, default: "Speaker 1: Welcome back to the show. Today we are talking about game audio.\nSpeaker 2: Thanks for having me. I think sound is half of the experience.", group: basic, help: "One line per turn, prefixed 'Speaker N:' (N = 1-4). Lines without a prefix continue the previous speaker. English / Chinese only."}
+      - {name: batch, label: Takes, type: int, min: 1, max: 3, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: cfg_scale, label: CFG, type: float, min: 1, max: 3, step: 0.1, default: 1.3, group: advanced}
+      - {name: steps, label: Diffusion steps, type: int, min: 5, max: 30, default: 10, group: advanced}
+      - {name: max_tokens, label: Max tokens (0 = until done), type: int, min: 0, max: 20000, default: 0, group: advanced, help: "Caps the length: 7.5 tokens per second of audio."}
+    presets: {fast: {steps: 5}, balanced: {}, quality: {steps: 20, cfg_scale: 1.5}}
+
+  - id: vibevoice-7b
+    name: VibeVoice 7B
+    modality: audio
+    tasks: [tts, voice_clone]
+    order: 90
+    tags: [long-form, multi-speaker, podcast, quality]
+    summary: "The larger VibeVoice (originally pulled by Microsoft, still available as the transformers conversion vibevoice/VibeVoice-7B-hf): better prosody and speaker consistency than 1.5B, ~45 min per script. Same script format."
+    features: {speakers: 4, languages: [en, zh], thai: false, needs_ref: false, sample_rate: 24000, max_seconds: 2700}
+    backend: cloneb_hf
+    input_slots:
+      - {role: "ref", label: "Speaker 1 voice", types: ["voice", "audio"], required: false, hint: "Optional voice for Speaker 1 (5-30 s of clean speech). Only fill speakers that have lines in the script.", tasks: ["tts"]}
+      - {role: "ref", label: "Speaker 1 voice", types: ["voice", "audio"], required: true, hint: "The voice to clone for Speaker 1 (5-30 s of clean speech).", tasks: ["voice_clone"]}
+      - {role: "ref2", label: "Speaker 2 voice", types: ["voice", "audio"], required: false, hint: "Optional voice for Speaker 2. Only fill speakers that have lines in the script.", tasks: ["tts", "voice_clone"]}
+      - {role: "ref3", label: "Speaker 3 voice", types: ["voice", "audio"], required: false, hint: "Optional voice for Speaker 3.", tasks: ["tts", "voice_clone"]}
+      - {role: "ref4", label: "Speaker 4 voice", types: ["voice", "audio"], required: false, hint: "Optional voice for Speaker 4.", tasks: ["tts", "voice_clone"]}
+    weights: [{hf: vibevoice/VibeVoice-7B-hf}]
+    license: {name: MIT, commercial: true, note: "Community-hosted conversion of the withdrawn Microsoft VibeVoice-Large weights. Microsoft's guidance: research and development use only.", verify: true}
+    memory_gb: 30
+    speed: "load 111 s (18.7 GB of weights); ~20 s for 9 s of two-speaker audio; 17.4 GB resident"
+    est: {load_s: 111, run_s: 20}
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: "Script (Speaker 1..4)", type: textarea, default: "Speaker 1: Welcome back to the show. Today we are talking about game audio.\nSpeaker 2: Thanks for having me. I think sound is half of the experience.", group: basic, help: "One line per turn, prefixed 'Speaker N:' (N = 1-4). Lines without a prefix continue the previous speaker. English / Chinese only."}
+      - {name: batch, label: Takes, type: int, min: 1, max: 3, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: cfg_scale, label: CFG, type: float, min: 1, max: 3, step: 0.1, default: 1.3, group: advanced}
+      - {name: steps, label: Diffusion steps, type: int, min: 5, max: 30, default: 10, group: advanced}
+      - {name: max_tokens, label: Max tokens (0 = until done), type: int, min: 0, max: 20000, default: 0, group: advanced}
+    presets: {fast: {steps: 5}, balanced: {}, quality: {steps: 20, cfg_scale: 1.5}}
+
+  # =================================================================== Sesame CSM (gated)
+  - id: csm-1b
+    name: Sesame CSM 1B
+    modality: audio
+    tasks: [tts, voice_clone]
+    order: 91
+    tags: [conversational, blocked]
+    summary: "Conversational speech model (context-aware prosody). BLOCKED: the sesame/csm-1b repo is gated (licence acceptance + HF login) and this machine has no login. Worker path written but never run."
+    features: {blocked: "gated HF repo (sesame/csm-1b needs a logged-in account that accepted the terms); not downloaded", languages: [en], thai: false, needs_ref: false, sample_rate: 24000}
+    backend: cloneb_hf
+    weights: [{hf: sesame/csm-1b, fix: "hf auth login, accept the terms on huggingface.co/sesame/csm-1b, then: hf download sesame/csm-1b"}]
+    license: {name: Apache-2.0, commercial: true, note: "Gated repo: terms must be accepted on Hugging Face. Contains the Llama-3.2 tokenizer (Llama 3.2 licence)."}
+    memory_gb: 8
+    speed: "-"
+    est: {load_s: 15, run_s: 10}
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic}
+      - {name: ref_text, label: Reference transcript, type: text, default: "", group: basic, tasks: [voice_clone]}
+      - {name: speaker, label: Speaker id, type: int, min: 0, max: 9, default: 0, group: basic}
+      - {name: seconds, label: Max length, type: float, min: 2, max: 60, step: 1, default: 20, unit: s, group: advanced}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+    presets: {}
