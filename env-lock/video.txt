@@ -1,15 +1,16 @@
 # video env lock (Video Studio worker; py3.12 aarch64, GB10). Runs workers/video_worker.py: Wan 2.1/2.2, LTX-2.3, Kandinsky 6,
 # HunyuanVideo 1.5 (diffusers 0.42 pipelines) and the pure-PyTorch RIFE interpolator. mp4 muxing uses the system `ffmpeg` binary
-# (no python video library). Recreate:
+# (PyAV is only used by LTX-2 for condition-frame re-compression). Recreate:
 #   uv venv --python 3.12 envs/video
 #   VIRTUAL_ENV=envs/video uv pip install --index-url https://download.pytorch.org/whl/cu130 torch==2.9.0 torchvision==0.24.0
 #   VIRTUAL_ENV=envs/video uv pip install -r env-lock/video.txt     # (torch / torchvision lines are already satisfied by step 2)
-# Top-level requirements were: diffusers>=0.42.1 transformers==5.22.1 accelerate safetensors pillow sentencepiece protobuf numpy ftfy.
+# Top-level requirements were: diffusers>=0.42.1 transformers==5.22.1 accelerate safetensors pillow sentencepiece protobuf numpy ftfy av (PyAV: LTX-2 applies an H.264 CRF re-compression to first / last frame conditions).
 # Caveats: PyTorch 2.9 warns that the GB10 (sm_121) is above its tested range; it works. No nvcc / flash-attn: attention is SDPA.
 # The worker runs offline (HF_HUB_OFFLINE=1): weights must already be in ~/.cache/huggingface (see docs/research/video.md).
 accelerate==1.15.0
 annotated-doc==0.0.5
 anyio==4.16.0
+av==19.0.2
 certifi==2026.10.23
 charset-normalizer==3.5.2
 click==8.5.0

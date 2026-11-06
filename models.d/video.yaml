@@ -55,9 +55,9 @@ models:
       - {hf: Wan-AI/Wan2.1-T2V-1.3B-Diffusers, files: ["transformer/*", "vae/*", "scheduler/*", "model_index.json"]}
       - {hf: Wan-AI/Wan2.2-TI2V-5B-Diffusers, files: ["text_encoder/*", "tokenizer/*"]}
     license: {name: Apache-2.0, commercial: true, note: "Wan-AI weights; the shared UMT5 text encoder is Apache-2.0 too."}
-    memory_gb: 14
-    speed: "5 s 480p clip in about 1 min"
-    est: {load_s: 20, run_s: 60}
+    memory_gb: 24
+    speed: "GB10 measured: 3 s 480p 16 fps clip, 30 steps, ~200 s (peak 22 GB; the GPU was shared); load 20 s"
+    est: {load_s: 20, run_s: 240}
     params:
       - {name: seconds, label: Duration, type: float, min: 1, max: 5, step: 0.5, default: 5, unit: s, group: basic}
       - *aspect
@@ -87,14 +87,14 @@ models:
     weights:
       - {hf: Wan-AI/Wan2.2-TI2V-5B-Diffusers, files: ["transformer/*", "text_encoder/*", "tokenizer/*", "vae/*", "scheduler/*", "model_index.json"]}
     license: {name: Apache-2.0, commercial: true, note: "Wan-AI weights, no use restrictions beyond Apache-2.0."}
-    memory_gb: 40
-    speed: "5 s 720p clip: see docs/research/video.md"
-    est: {load_s: 40, run_s: 300}
+    memory_gb: 42
+    speed: "GB10 measured: 2 s 480p ~60 s for 10 steps; 2 s 704p ~140 s for 10 steps (peak 32 / 42 GB)"
+    est: {load_s: 42, run_s: 300}
     params:
       - {name: seconds, label: Duration, type: float, min: 1, max: 5, step: 0.5, default: 5, unit: s, group: basic, help: "The model was trained for 121 frames (5 s at 24 fps)."}
       - *aspect
       - *match
-      - {name: resolution, label: Resolution, type: choice, choices: [{value: 480, label: "480p"}, {value: 576, label: "576p"}, {value: 704, label: "720p (704)"}], default: 704, group: basic}
+      - {name: resolution, label: Resolution, type: choice, choices: [{value: 480, label: "480p"}, {value: 576, label: "576p"}, {value: 704, label: "720p (704)"}], default: 480, group: basic}
       - *batch
       - *seed
       - {name: fps, label: Frame rate, type: int, min: 8, max: 30, default: 24, unit: fps, group: advanced}
@@ -121,21 +121,21 @@ models:
       - {hf: diffusers/LTX-2.3-Distilled-Diffusers, files: ["transformer/*", "text_encoder/*", "tokenizer/*", "processor/*", "connectors/*", "vae/*", "audio_vae/*", "vocoder/*", "scheduler/*", "model_index.json"]}
     license: {name: LTX Video 2 Open Source License, commercial: true, verify: true,
               note: "Lightricks licence: free for individuals and companies below USD 10M annual revenue, commercial use allowed under those terms; larger companies need a paid licence. Read LICENSE in Lightricks/LTX-2.3 before shipping."}
-    memory_gb: 80
-    speed: "5 s 704p clip with sound: see docs/research/video.md"
-    est: {load_s: 90, run_s: 120}
+    memory_gb: 76
+    speed: "GB10 measured: 2 s 1248x704 clip with sound, 8 steps, ~210 s (peak 73 GB with tiled decode); first load ~4.5 min"
+    est: {load_s: 270, run_s: 360}
     params:
       - {name: seconds, label: Duration, type: float, min: 1, max: 10, step: 0.5, default: 5, unit: s, group: basic}
       - *aspect
       - *match
-      - {name: resolution, label: Resolution, type: choice, choices: [{value: 480, label: "480p"}, {value: 576, label: "576p"}, {value: 704, label: "720p (704)"}], default: 704, group: basic}
+      - {name: resolution, label: Resolution, type: choice, choices: [{value: 576, label: "576p (draft)"}, {value: 704, label: "720p (704)"}], default: 704, group: basic, help: "Below 704 LTX can add dark patterned bars at the sides (seen at 480p), so 480p is not offered."}
       - {name: audio, label: Generate sound, type: bool, default: true, group: basic, help: "The model always computes sound; off drops it from the mp4."}
       - *batch
       - *seed
       - {name: fps, label: Frame rate, type: choice, choices: [24, 25, 30], default: 24, unit: fps, group: advanced}
       - *offload
-      - *tiling
-    presets: {fast: {resolution: 480}, balanced: {}, quality: {resolution: 704, batch: 2}}
+      - {name: vae_tiling, label: Tiled VAE decode, type: bool, default: true, group: advanced, help: "On by default: all LTX runs were measured with tiled decode (peak 73 GB); a full-frame decode risks running out of memory."}
+    presets: {fast: {resolution: 576}, balanced: {}, quality: {resolution: 704, batch: 2}}
 
   # ------------------------------------------------------------------------------------------------------ Kandinsky 6.0 Lite distill
   - id: kandinsky6-lite-distill
@@ -152,9 +152,9 @@ models:
     weights:
       - {hf: kandinskylab/Kandinsky-6.0-Lite-distill-5s-Diffusers, files: ["transformer/*", "vae/*", "text_encoder/*", "text_encoder_2/*", "tokenizer/*", "tokenizer_2/*", "audio_vae/*", "vocoder/*", "scheduler/*", "model_index.json"]}
     license: {name: MIT, commercial: true, note: "Kandinsky Lab weights are MIT-licensed per the Hugging Face model card; the Qwen2.5-VL text encoder carries its own licence (Apache-2.0 for 7B)."}
-    memory_gb: 36
-    speed: "5 s 480p clip with sound: see docs/research/video.md"
-    est: {load_s: 40, run_s: 90}
+    memory_gb: 40
+    speed: "GB10 measured: 2 s 480p clip with sound ~135 s (16 steps, tiled decode, peak 40 GB), first load ~2 min"
+    est: {load_s: 120, run_s: 300}
     params:
       - {name: seconds, label: Duration, type: float, min: 1, max: 5, step: 0.5, default: 5, unit: s, group: basic, help: "Trained for 5 s clips."}
       - *aspect
@@ -166,7 +166,7 @@ models:
       - {name: fps, label: Frame rate, type: int, min: 12, max: 30, default: 24, unit: fps, group: advanced}
       - {name: steps, label: Steps, type: int, min: 8, max: 32, default: 16, group: advanced, help: "The distilled model is meant for 16."}
       - *offload
-      - *tiling
+      - {name: vae_tiling, label: Tiled VAE decode, type: bool, default: true, group: advanced, help: "Keep this on: the full-frame VAE decode of this model needs so much host memory that the worker gets killed (measured on a 128 GB GB10)."}
     presets: {fast: {steps: 12}, balanced: {}, quality: {steps: 24, resolution: 720}}
 
   # ------------------------------------------------------------------------------------------------------ HunyuanVideo 1.5 480p i2v (step-distilled)
@@ -185,9 +185,9 @@ models:
       - {hf: hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_i2v_step_distilled}
     license: {name: Tencent HunyuanVideo 1.5 Community, commercial: true, verify: true,
               note: "Not valid in the European Union, the United Kingdom and South Korea (use and output); a Tencent licence is needed above 100 M monthly active users. Read LICENSE in tencent/HunyuanVideo-1.5 before shipping."}
-    memory_gb: 44
-    speed: "5 s 480p clip: see docs/research/video.md"
-    est: {load_s: 40, run_s: 120}
+    memory_gb: 60
+    speed: "GB10 measured: 2 s 480p image-to-video, 12 steps, ~270 s after a ~3 min first load (peak 57 GB with tiled decode)"
+    est: {load_s: 190, run_s: 600}
     params:
       - {name: seconds, label: Duration, type: float, min: 1, max: 5, step: 0.5, default: 5, unit: s, group: basic}
       - *aspect
@@ -197,7 +197,7 @@ models:
       - {name: fps, label: Frame rate, type: int, min: 12, max: 30, default: 24, unit: fps, group: advanced}
       - {name: steps, label: Steps, type: int, min: 4, max: 30, default: 12, group: advanced}
       - *offload
-      - *tiling
+      - {name: vae_tiling, label: Tiled VAE decode, type: bool, default: true, group: advanced, help: "Keep this on: the full-frame VAE decode of this model needs so much memory that the worker gets killed on a 128 GB GB10."}
     presets: {fast: {steps: 8}, balanced: {}, quality: {steps: 20}}
 
   # ------------------------------------------------------------------------------------------------------ RIFE interpolation

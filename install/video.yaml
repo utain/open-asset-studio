@@ -1,0 +1,17 @@
+backend: video                  # Video studio: Wan 2.1/2.2, LTX-2.3, Kandinsky 6, HunyuanVideo 1.5 (diffusers) + RIFE (pure PyTorch)
+env: video
+python: "3.12"
+torch:
+  - torch==2.9.0
+  - torchvision==0.24.0
+lock: video                     # diffusers 0.42.1, transformers 5.22.1; the torch / torchvision lines are already satisfied
+lock_flags: []
+vendor: []                      # no upstream clones: RIFE IFNet is re-implemented in workers/video_rife.py
+steps: []
+check: "import torch, diffusers, transformers, PIL, numpy, ftfy, sentencepiece, av; from diffusers import WanPipeline, WanImageToVideoPipeline, LTX2ConditionPipeline, Kandinsky6TI2VAPipeline, HunyuanVideo15ImageToVideoPipeline"
+manual:
+  - "Needs the system `ffmpeg` binary on PATH (mp4 muxing, plugin tools); it is not a python dependency (PyAV, in the lock, is only used by LTX-2 condition frames)."
+  - "No model repo is gated. Weights: ./install.sh model <id> for wan21-t2v-1.3b, wan22-ti2v-5b, kandinsky6-lite-distill, hunyuan15-480p-i2v-distilled, ltx23-distilled, rife-v4 (sizes and times: docs/research/video.md). wan21-t2v-1.3b also reads the text encoder / tokenizer of the Wan 2.2 5B repo."
+tested: [linux-aarch64]
+size_gb: 5
+shares_env_with: null
