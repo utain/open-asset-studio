@@ -14,6 +14,12 @@ const TASKS = [
   { id: 'texture', label: 'Texture', result: 'mesh', prompt: false, receives: ['retexture'],
     inputs: [{ key: 'mesh', label: 'Mesh to texture', types: ['mesh'], role: 'mesh', required: true },
       { key: 'image', label: 'Reference image (optional)', types: ['image'], role: 'image', hint: 'Empty = the image the shape was made from. Set Reference image to “current” to paint from this one.' }] },
+  { id: 'multiview', label: 'Multi-view', result: 'image', prompt: false, receives: ['multiview'],
+    inputs: [{ key: 'image', label: 'Object image', types: ['image'], role: 'image', required: true,
+      hint: 'One object, fully visible, plain or transparent background. Result: the same object from other sides (sheet + one image per view; SV3D also attaches an orbit video).' }] },
+  { id: 'rig', label: 'Rig', result: 'mesh', prompt: false, receives: ['rig'],
+    inputs: [{ key: 'mesh', label: 'Mesh to rig', types: ['mesh'], role: 'mesh', required: true,
+      hint: 'A character or creature in a neutral pose (A- or T-pose) works best. Result: a GLB with a skeleton and skin weights.' }] },
   { id: 'mesh_export', label: 'Export', result: 'mesh', prompt: false, receives: ['export'],
     inputs: [{ key: 'mesh', label: 'Meshes', types: ['mesh'], role: 'mesh', multiple: true, max: 12, required: true }] },
 ];
@@ -24,12 +30,15 @@ export default S.defineStudio({
     { action: 'shape', label: 'Make 3D', icon: 'cuboid', types: ['image'] },
     { action: 'retexture', label: 'Retexture', icon: 'palette', types: ['mesh'] },
     { action: 'export', label: 'Export mesh', icon: 'package', types: ['mesh'] },
+    { action: 'rig', label: 'Auto-rig', icon: 'bot', types: ['mesh'] },
+    { action: 'multiview', label: 'Other views', icon: 'grid-2x2', types: ['image'] },
   ],
   mount(el) {
     css();
     el.style.height = '100%';
     const viewer = meshViewer({ height: 440, actions: a => [
       btn('Retexture', { size: 'sm', icon: 'palette', onClick: () => receive({ action: 'retexture', assets: [a] }) }),
+      btn('Rig', { size: 'sm', icon: 'bot', onClick: () => receive({ action: 'rig', assets: [a] }) }),
       btn('Export', { size: 'sm', icon: 'package', onClick: () => receive({ action: 'export', assets: [a] }) }),
     ] });
     const kit = new S.TaskStudio({
@@ -38,8 +47,16 @@ export default S.defineStudio({
       extraPanel: (k, t) => extraPanel(k, t),
       beforeSubmit: (spec, k) => beforeSubmit(spec, k),
     });
-    kit.center.querySelector('.sc-body')?.prepend(h('div.m3d-top', viewer));
+    const top = h('div.m3d-top', viewer);
+    kit.center.querySelector('.sc-body')?.prepend(top);
     el.append(kit.el);
+    // the 3D viewer only belongs to mesh-result tasks: Multi-view results are images (sheet, views, orbit video in the drawer)
+    const syncViewer = () => { top.hidden = kit.cur().result !== 'mesh'; };
+    const onModel = kit._onModel.bind(kit);
+    kit._onModel = (m, fromBuild) => { onModel(m, fromBuild); kit._m3dNote?.(); };
+    const setTask = kit.setTask.bind(kit);
+    kit.setTask = id => { setTask(id); syncViewer(); };
+    syncViewer();
 
     const showLatest = () => {
       const meshes = kit.grid.assets().filter(a => a.type === 'mesh');
@@ -60,16 +77,37 @@ export default S.defineStudio({
       const meshes = assets.filter(a => a.type === 'mesh');
       if (p.action === 'shape' && img) { kit.setTask('shape'); await kit.slots.image.set([img.id]); S.toast('Image loaded: check the settings and press Generate.', { kind: 'info' }); return; }
       if (p.action === 'retexture' && meshes[0]) { kit.setTask('texture'); await kit.slots.mesh.set([meshes[0].id]); if (img) await kit.slots.image.set([img.id]); viewer.set(meshes[0]); return; }
+      if (p.action === 'multiview' && img) { kit.setTask('multiview'); await kit.slots.image.set([img.id]); S.toast('Image loaded: pick a model and press Generate.', { kind: 'info' }); return; }
+      if (p.action === 'rig' && meshes[0]) { kit.setTask('rig'); await kit.slots.mesh.set([meshes[0].id]); viewer.set(meshes[0]); return; }
       if (p.action === 'export' && meshes.length) { kit.setTask('mesh_export'); await kit.slots.mesh.set(meshes.map(a => a.id)); viewer.set(meshes[0]); return; }
       return kit.receive(p);
     }
-    return { route: r => kit.route(r), receive, show: () => showLatest() };
+    return { route: r => { kit.route(r); syncViewer(); }, receive: async p => { const r = await receive(p); syncViewer(); return r; }, show: () => { showLatest(); syncViewer(); } };
   },
 });
 
 function extraPanel(kit, t) {
   if (t.id === 'shape') {
-    return h('div.field-help', ic('info', 13), ' “Paint texture too” runs the texture stage right after the shape with the settings of the Texture tab. Shape ~1 min, texture 3-5 min (Balanced).');
+    // the hint follows the model: Hunyuan3D 2.1 can paint in the same job, the others differ (see features.texture)
+    const note = h('div.field-help');
+    const upd = () => {
+      const m = kit.picker?.model;
+      const tex = m?.features?.texture;
+      const txt = tex === 'vertex_colors' ? ' This model paints vertex colours (no UV texture). For a PBR texture, send the mesh to the Texture tab (Hunyuan3D 2.1).'
+        : tex === 'pbr' ? ' This model bakes a UV-unwrapped PBR texture in the same job (CPU baker).'
+        : tex === 'none' ? ' Geometry only (white mesh). To paint it, send the mesh to the Texture tab (Hunyuan3D 2.1 uses the stored input image as the reference).'
+        : ' “Paint texture too” runs the texture stage right after the shape with the settings of the Texture tab. Shape ~1 min, texture 3-5 min (Balanced).';
+      note.replaceChildren(ic('info', 13), txt);
+    };
+    kit._m3dNote = upd;
+    upd();
+    return note;
+  }
+  if (t.id === 'multiview') {
+    return h('div.field-help', ic('info', 13), ' Open an image result and use “Make 3D” on a view, or feed several views to a multi-view shape model. Orbit models (SV3D) attach an orbit.mp4 to the sheet.');
+  }
+  if (t.id === 'rig') {
+    return h('div.field-help', ic('info', 13), ' The rigged GLB keeps the mesh and adds a skeleton with skin weights (bone names follow the chosen skeleton template). Open it in Blender, Godot, Unity or Mixamo-compatible tools.');
   }
   if (t.id === 'mesh_export') {
     return h('div.field-help', ic('info', 13), ' Presets: “mobile” 5k faces, “pc” 30k faces (untextured shape, then retexture), “textured_glb” keeps the PBR texture. OBJ exports a zip with .mtl and texture maps.');

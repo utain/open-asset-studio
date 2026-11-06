@@ -1,0 +1,311 @@
+# 3D models added on top of Hunyuan3D 2.1 (models.yaml): Stability AI (TripoSR, SF3D, SPAR3D, SV3D), Zero123++, TripoSG,
+# Hunyuan3D-2mini, TRELLIS. Research, install recipes and measurements: docs/research/3d_more.md.
+# All shape models write GLB (+Y up, front +Z). Texture: TripoSR / TRELLIS = vertex colours, SF3D / SPAR3D = baked PBR
+# texture (CPU baker), TripoSG / Hunyuan3D-2mini = geometry only (send the mesh to the Texture tab: Hunyuan3D 2.1).
+# Gated Stability repos: accept the licence on the model page, `hf auth login`, then Download on the Models page.
+
+tasks:
+  multiview: {label: Multi-view / orbit, modality: image, studio: 3d}
+
+backends:
+  stab3d:
+    label: envs/stab3d (TripoSR, SF3D, SPAR3D, Zero123++, SV3D)
+    python: envs/stab3d/bin/python
+    script: workers/stab3d_worker.py
+    device: gpu
+    lock: stab3d
+    fix: "Rebuild from env-lock/stab3d.txt (header lists the CPU builds and stubs; see docs/research/3d_more.md)"
+    model_idle_s: 600
+  shape3d:
+    label: envs/shape3d (TripoSG, Hunyuan3D-2mini)
+    python: envs/shape3d/bin/python
+    script: workers/shape3d_worker.py
+    device: gpu
+    lock: shape3d
+    fix: "Rebuild from env-lock/shape3d.txt (header lists the CPU builds and stubs; see docs/research/3d_more.md)"
+    model_idle_s: 600
+  trellis:
+    label: envs/trellis (TRELLIS, pure-torch spconv / flash-attn stand-ins)
+    python: envs/trellis/bin/python
+    script: workers/trellis_worker.py
+    device: gpu
+    lock: trellis
+    fix: "Rebuild from env-lock/trellis.txt (header lists the CPU builds and stubs; see docs/research/3d_more.md)"
+    model_idle_s: 600
+
+models:
+  # =================================================================== Stability AI: image -> 3D
+  - id: triposr
+    name: TripoSR
+    modality: mesh
+    tasks: [shape]
+    order: 30
+    tags: [fast, mit, vertex-colors, stability]
+    summary: "Stability AI x Tripo: single image -> mesh in about 4 s. Vertex colours (no UV texture), ~2 GB. Soft detail, good for quick props and blockouts."
+    features: {input: image, texture: vertex_colors, pbr: false, export: [glb], max_refs: 1}
+    input_slots:
+      - {role: image, label: Object image, types: [image], required: true, hint: "One object, plain or transparent background (removed automatically)."}
+    backend: stab3d
+    weights:
+      - {hf: stabilityai/TripoSR, files: [config.yaml, model.ckpt]}
+      - {hf: facebook/dino-vitb16, files: [config.json]}
+    license: {name: MIT, commercial: true}
+    memory_gb: 6
+    speed: "load 25 s, then ~4 s per mesh (256^3), peak 2.3 GB"
+    est: {load_s: 25, run_s: 6}
+    params:
+      - {name: mc_resolution, label: Mesh resolution, type: choice, choices: [128, 192, 256, 320, 384, 512], default: 256, group: basic, help: "Marching-cubes grid. 256 = ~80k faces, 384 = ~200k."}
+      - {name: remove_bg, label: Remove background, type: bool, default: true, group: basic}
+      - {name: foreground_ratio, label: Object size in frame, type: float, min: 0.5, max: 1.0, step: 0.05, default: 0.85, group: advanced}
+      - {name: threshold, label: Surface threshold, type: float, min: 5, max: 60, step: 1, default: 25, group: advanced, help: "Density iso-level: lower = fatter / blobbier, higher = thinner."}
+      - {name: max_faces, label: Max faces (0 = keep all), type: int, min: 0, max: 500000, default: 0, group: advanced}
+      - {name: seed, type: seed, default: -1}
+    presets: {fast: {mc_resolution: 192}, balanced: {}, quality: {mc_resolution: 384}}
+
+  - id: sf3d
+    name: Stable Fast 3D (SF3D)
+    modality: mesh
+    tasks: [shape]
+    order: 31
+    tags: [fast, pbr, game-ready, stability, gated]
+    summary: "Stability AI: UV-unwrapped, low-poly textured mesh with baked albedo, roughness, metallic and normal (PBR GLB) in about a second. GATED on Hugging Face: accept the licence at https://huggingface.co/stabilityai/stable-fast-3d and run `hf auth login`. Remeshing options are off (no aarch64 wheels)."
+    features: {input: image, texture: pbr, pbr: true, export: [glb], max_refs: 1}
+    input_slots:
+      - {role: image, label: Object image, types: [image], required: true, hint: "One object, plain or transparent background (removed automatically)."}
+    backend: stab3d
+    weights:
+      - {hf: stabilityai/stable-fast-3d, files: [config.yaml, model.safetensors]}
+      - {hf: facebook/dinov2-large, files: [config.json, model.safetensors]}
+      - {hf: laion/CLIP-ViT-B-32-laion2B-s34B-b79K, files: [open_clip_pytorch_model.bin]}
+    license: {name: Stability AI Community, commercial: true, note: "Free for research, personal and commercial use below USD 1 M annual revenue; above that an Enterprise licence from Stability AI is required (also for outputs). Gated: accept the terms on the model page.", verify: true}
+    memory_gb: 12
+    speed: "~1-3 s per mesh warm (CPU texture bake)"
+    est: {load_s: 20, run_s: 6}
+    params:
+      - {name: texture_resolution, label: Texture size, type: choice, choices: [512, 1024, 2048], default: 1024, group: basic}
+      - {name: remove_bg, label: Remove background, type: bool, default: true, group: basic}
+      - {name: foreground_ratio, label: Object size in frame, type: float, min: 0.5, max: 1.0, step: 0.05, default: 0.85, group: advanced}
+      - {name: seed, type: seed, default: -1}
+    presets: {fast: {texture_resolution: 512}, balanced: {}, quality: {texture_resolution: 2048}}
+
+  - id: spar3d
+    name: Stable Point Aware 3D (SPAR3D)
+    modality: mesh
+    tasks: [shape]
+    order: 32
+    tags: [pbr, game-ready, stability, gated]
+    summary: "Stability AI: point-cloud diffusion then mesh regression, better back sides than SF3D; baked PBR GLB. GATED on Hugging Face: accept the licence at https://huggingface.co/stabilityai/stable-point-aware-3d and run `hf auth login`. Also needs the OpenAI CLIP ViT-L/14@336px file for AlphaCLIP (~/.cache/clip)."
+    features: {input: image, texture: pbr, pbr: true, export: [glb], max_refs: 1}
+    input_slots:
+      - {role: image, label: Object image, types: [image], required: true, hint: "One object, plain or transparent background (removed automatically)."}
+    backend: stab3d
+    weights:
+      - {hf: stabilityai/stable-point-aware-3d, files: [config.yaml, model.safetensors]}
+      - {path: "~/.cache/clip/ViT-L-14-336px.pt", fix: "mkdir -p ~/.cache/clip && curl -L -o ~/.cache/clip/ViT-L-14-336px.pt https://openaipublic.azureedge.net/clip/models/3035c92b350959924f9f00213499208652fc7ea050643e8b385c2dac08641f02/ViT-L-14-336px.pt", download_cmd: ["bash", "-c", "mkdir -p ~/.cache/clip && curl -L -o ~/.cache/clip/ViT-L-14-336px.pt https://openaipublic.azureedge.net/clip/models/3035c92b350959924f9f00213499208652fc7ea050643e8b385c2dac08641f02/ViT-L-14-336px.pt"]}
+    license: {name: Stability AI Community, commercial: true, note: "Free for research, personal and commercial use below USD 1 M annual revenue; above that an Enterprise licence from Stability AI is required (also for outputs). Gated: accept the terms on the model page.", verify: true}
+    memory_gb: 14
+    speed: "~2-4 s per mesh warm"
+    est: {load_s: 30, run_s: 8}
+    params:
+      - {name: texture_resolution, label: Texture size, type: choice, choices: [512, 1024, 2048], default: 1024, group: basic}
+      - {name: remove_bg, label: Remove background, type: bool, default: true, group: basic}
+      - {name: foreground_ratio, label: Object size in frame, type: float, min: 0.5, max: 1.0, step: 0.05, default: 0.77, group: advanced}
+      - {name: seed, type: seed, default: -1}
+    presets: {fast: {texture_resolution: 512}, balanced: {}, quality: {texture_resolution: 2048}}
+
+  # =================================================================== open: geometry (+ vertex colours)
+  - id: trellis-image-large
+    name: TRELLIS (image large)
+    modality: mesh
+    tasks: [shape]
+    order: 20
+    tags: [quality, mit, vertex-colors]
+    summary: "Microsoft TRELLIS: structured 3D latents, best open detail and topology of this set. Vertex colours (the upstream texture bake needs nvdiffrast, skipped here). Runs on pure-torch stand-ins for spconv / flash-attn."
+    features: {input: image, texture: vertex_colors, pbr: false, export: [glb], max_refs: 1}
+    input_slots:
+      - {role: image, label: Object image, types: [image], required: true, hint: "One object, plain or transparent background (removed automatically)."}
+    backend: trellis
+    weights:
+      - {hf: microsoft/TRELLIS-image-large, files: ["pipeline.json", "ckpts/*"]}
+      - {path: "~/.cache/torch/hub/checkpoints/dinov2_vitl14_reg4_pretrain.pth", fix: "curl -L -o ~/.cache/torch/hub/checkpoints/dinov2_vitl14_reg4_pretrain.pth https://dl.fbaipublicfiles.com/dinov2/dinov2_vitl14/dinov2_vitl14_reg4_pretrain.pth", download_cmd: ["bash", "-c", "mkdir -p ~/.cache/torch/hub/checkpoints && curl -L -o ~/.cache/torch/hub/checkpoints/dinov2_vitl14_reg4_pretrain.pth https://dl.fbaipublicfiles.com/dinov2/dinov2_vitl14/dinov2_vitl14_reg4_pretrain.pth"]}
+    license: {name: MIT, commercial: true}
+    memory_gb: 20
+    speed: "see docs/research/3d_more.md"
+    est: {load_s: 40, run_s: 60}
+    params:
+      - {name: ss_steps, label: Structure steps, type: int, min: 4, max: 50, default: 12, group: basic}
+      - {name: slat_steps, label: Detail steps, type: int, min: 4, max: 50, default: 12, group: basic}
+      - {name: ss_cfg, label: Structure guidance, type: float, min: 1, max: 15, step: 0.5, default: 7.5, group: advanced}
+      - {name: slat_cfg, label: Detail guidance, type: float, min: 0, max: 10, step: 0.5, default: 3.0, group: advanced}
+      - {name: remove_bg, label: Remove background, type: bool, default: true, group: basic}
+      - {name: foreground_ratio, label: Object size in frame, type: float, min: 0.5, max: 1.0, step: 0.05, default: 0.83, group: advanced}
+      - {name: max_faces, label: Max faces (0 = keep all), type: int, min: 0, max: 500000, default: 0, group: advanced}
+      - {name: seed, type: seed, default: -1}
+    presets: {fast: {ss_steps: 8, slat_steps: 8}, balanced: {}, quality: {ss_steps: 25, slat_steps: 25}}
+
+  - id: triposg
+    name: TripoSG
+    modality: mesh
+    tasks: [shape]
+    order: 21
+    tags: [quality, mit, geometry-only]
+    summary: "VAST-AI TripoSG: 1.5B rectified-flow shape model, sharp clean geometry. Geometry only (white mesh): paint it with Texture (Hunyuan3D 2.1). Uses the hierarchical marching-cubes decoder (the CUDA `diso` kernel is not available)."
+    features: {input: image, texture: none, pbr: false, export: [glb], max_refs: 1}
+    input_slots:
+      - {role: image, label: Object image, types: [image], required: true, hint: "One object, plain or transparent background (removed automatically)."}
+    backend: shape3d
+    weights:
+      - {hf: VAST-AI/TripoSG, files: ["model_index.json", "transformer/config.json", "transformer/*.safetensors", "vae/*.safetensors", "image_encoder_dinov2/*.safetensors"]}
+    license: {name: MIT, commercial: true}
+    memory_gb: 16
+    speed: "see docs/research/3d_more.md"
+    est: {load_s: 30, run_s: 60}
+    params:
+      - {name: steps, label: Steps, type: int, min: 10, max: 100, default: 50, group: basic}
+      - {name: guidance, label: Guidance, type: float, min: 1, max: 15, step: 0.5, default: 7.0, group: basic}
+      - {name: octree, label: Mesh resolution, type: choice, choices: [256, 512, 1024], default: 512, group: basic}
+      - {name: remove_bg, label: Remove background, type: bool, default: true, group: basic}
+      - {name: foreground_ratio, label: Object size in frame, type: float, min: 0.5, max: 1.0, step: 0.05, default: 0.85, group: advanced}
+      - {name: max_faces, label: Max faces (0 = keep all), type: int, min: 0, max: 1000000, default: 0, group: advanced}
+      - {name: seed, type: seed, default: -1}
+    presets: {fast: {steps: 25, octree: 256}, balanced: {}, quality: {steps: 75, octree: 1024}}
+
+  - id: hunyuan3d-2mini-turbo
+    name: Hunyuan3D 2 mini (turbo)
+    modality: mesh
+    tasks: [shape]
+    order: 22
+    tags: [fast, geometry-only]
+    summary: "Tencent Hunyuan3D-2mini DiT with the turbo (guidance-distilled, FlashVDM) VAE: 5 steps, a mesh in seconds. 0.6B, geometry only (white mesh): paint it with Texture (Hunyuan3D 2.1)."
+    features: {input: image, texture: none, pbr: false, export: [glb], max_refs: 1}
+    input_slots:
+      - {role: image, label: Object image, types: [image], required: true, hint: "One object, plain or transparent background (removed automatically)."}
+    backend: shape3d
+    weights:
+      - {hf: tencent/Hunyuan3D-2mini, files: ["hunyuan3d-dit-v2-mini-turbo/model.fp16.safetensors", "hunyuan3d-dit-v2-mini-turbo/config.yaml", "hunyuan3d-vae-v2-mini-turbo/model.fp16.safetensors", "hunyuan3d-vae-v2-mini-turbo/config.yaml"]}
+    license: {name: Tencent Hunyuan Community, commercial: true, note: "Not licensed in the EU, UK and South Korea; >1 M MAU needs a licence from Tencent.", verify: true}
+    memory_gb: 10
+    speed: "see docs/research/3d_more.md"
+    est: {load_s: 20, run_s: 15}
+    params:
+      - {name: steps, label: Steps, type: int, min: 3, max: 20, default: 5, group: basic}
+      - {name: guidance, label: Guidance (distilled embedding), type: float, min: 1, max: 10, step: 0.5, default: 5.0, group: advanced}
+      - {name: octree, label: Mesh resolution, type: choice, choices: [256, 384, 512], default: 384, group: basic}
+      - {name: remove_bg, label: Remove background, type: bool, default: true, group: basic}
+      - {name: foreground_ratio, label: Object size in frame, type: float, min: 0.5, max: 1.0, step: 0.05, default: 0.85, group: advanced}
+      - {name: max_faces, label: Max faces (0 = keep all), type: int, min: 0, max: 1000000, default: 0, group: advanced}
+      - {name: seed, type: seed, default: -1}
+    presets: {fast: {steps: 3, octree: 256}, balanced: {}, quality: {steps: 8, octree: 512}}
+
+  - id: hunyuan3d-2mini
+    name: Hunyuan3D 2 mini
+    modality: mesh
+    tasks: [shape]
+    order: 23
+    tags: [geometry-only]
+    summary: "Tencent Hunyuan3D-2mini DiT, full 50-step sampling with classifier-free guidance. 0.6B, geometry only (white mesh): paint it with Texture (Hunyuan3D 2.1)."
+    features: {input: image, texture: none, pbr: false, export: [glb], max_refs: 1}
+    input_slots:
+      - {role: image, label: Object image, types: [image], required: true, hint: "One object, plain or transparent background (removed automatically)."}
+    backend: shape3d
+    weights:
+      - {hf: tencent/Hunyuan3D-2mini, files: ["hunyuan3d-dit-v2-mini/model.fp16.safetensors", "hunyuan3d-dit-v2-mini/config.yaml", "hunyuan3d-vae-v2-mini/model.fp16.safetensors", "hunyuan3d-vae-v2-mini/config.yaml"]}
+    license: {name: Tencent Hunyuan Community, commercial: true, note: "Not licensed in the EU, UK and South Korea; >1 M MAU needs a licence from Tencent.", verify: true}
+    memory_gb: 10
+    speed: "see docs/research/3d_more.md"
+    est: {load_s: 20, run_s: 45}
+    params:
+      - {name: steps, label: Steps, type: int, min: 10, max: 100, default: 30, group: basic}
+      - {name: guidance, label: Guidance, type: float, min: 1, max: 15, step: 0.5, default: 5.0, group: basic}
+      - {name: octree, label: Mesh resolution, type: choice, choices: [256, 384, 512], default: 384, group: basic}
+      - {name: remove_bg, label: Remove background, type: bool, default: true, group: basic}
+      - {name: foreground_ratio, label: Object size in frame, type: float, min: 0.5, max: 1.0, step: 0.05, default: 0.85, group: advanced}
+      - {name: max_faces, label: Max faces (0 = keep all), type: int, min: 0, max: 1000000, default: 0, group: advanced}
+      - {name: seed, type: seed, default: -1}
+    presets: {fast: {steps: 20, octree: 256}, balanced: {}, quality: {steps: 50, octree: 512}}
+
+  # =================================================================== multi-view / orbit
+  - id: zero123plus
+    name: Zero123++ v1.2
+    modality: image
+    tasks: [multiview]
+    default_for: [multiview]
+    order: 10
+    tags: [fast, six-views]
+    summary: "One image -> six consistent views around the object (azimuth 30-330 deg, elevation +20 / -10) in one diffusion pass, 320 px each. Feed the views to a 3D model or use them as turnaround references."
+    features: {input: image, views: 6, orbit_video: false}
+    input_slots:
+      - {role: image, label: Object image, types: [image], required: true, hint: "One object, plain or transparent background (removed automatically)."}
+    backend: stab3d
+    weights:
+      - {hf: sudo-ai/zero123plus-v1.2, files: ["model_index.json", "unet/*.safetensors", "vae/*.safetensors", "vision_encoder/*.safetensors", "text_encoder/*.safetensors"]}
+      - {hf: sudo-ai/zero123plus-pipeline, files: [pipeline.py]}
+    license: {name: Apache-2.0, commercial: true, note: "Weights: CC-BY-NC-4.0 on some mirrors; the sudo-ai release card says Apache-2.0.", verify: true}
+    memory_gb: 10
+    speed: "see docs/research/3d_more.md"
+    est: {load_s: 25, run_s: 25}
+    params:
+      - {name: steps, label: Steps, type: int, min: 20, max: 100, default: 75, group: basic}
+      - {name: guidance, label: Guidance, type: float, min: 1, max: 10, step: 0.5, default: 4.0, group: advanced}
+      - {name: save_views, label: Also save each view as an image, type: bool, default: true, group: basic}
+      - {name: remove_bg, label: Remove background, type: bool, default: true, group: basic}
+      - {name: foreground_ratio, label: Object size in frame, type: float, min: 0.5, max: 1.0, step: 0.05, default: 0.85, group: advanced}
+      - {name: seed, type: seed, default: -1}
+    presets: {fast: {steps: 40}, balanced: {}, quality: {steps: 100}}
+
+  - id: sv3d-u
+    name: Stable Video 3D (SV3D_u)
+    modality: image
+    tasks: [multiview]
+    order: 20
+    tags: [orbit, video, stability, gated]
+    summary: "Stability AI SV3D_u: 21-frame orbit video around the object at a fixed 10 deg elevation, 576 px. Output: a contact sheet with an attached orbit.mp4 plus view images. GATED on Hugging Face: accept the licence at https://huggingface.co/stabilityai/sv3d and run `hf auth login`."
+    features: {input: image, views: 21, orbit_video: true}
+    input_slots:
+      - {role: image, label: Object image, types: [image], required: true, hint: "One object, plain or transparent background (removed automatically)."}
+    backend: stab3d
+    weights:
+      - {hf: stabilityai/sv3d, files: [sv3d_u.safetensors]}
+    license: {name: Stability AI Community, commercial: true, note: "Free below USD 1 M annual revenue, otherwise a Stability AI licence is needed. The model card tags it sv3d-nc-community but links the Community licence: read the LICENSE on the model page.", verify: true}
+    memory_gb: 24
+    speed: "untested here (gated); ~1-2 min per orbit expected"
+    est: {load_s: 60, run_s: 120}
+    params:
+      - {name: steps, label: Steps, type: int, min: 20, max: 100, default: 50, group: basic}
+      - {name: save_views, label: Also save views as images, type: bool, default: true, group: basic}
+      - {name: view_stride, label: Save every Nth frame, type: int, min: 1, max: 7, default: 3, group: advanced}
+      - {name: fps, label: Video fps, type: int, min: 4, max: 24, default: 8, group: advanced}
+      - {name: decode_t, label: Frames decoded at once, type: int, min: 1, max: 21, default: 7, group: advanced, help: "Lower = less memory."}
+      - {name: remove_bg, label: Remove background, type: bool, default: true, group: basic}
+      - {name: foreground_ratio, label: Object size in frame, type: float, min: 0.5, max: 1.0, step: 0.05, default: 0.85, group: advanced}
+      - {name: seed, type: seed, default: -1}
+    presets: {fast: {steps: 25}, balanced: {}, quality: {steps: 75}}
+
+  - id: sv3d-p
+    name: Stable Video 3D (SV3D_p)
+    modality: image
+    tasks: [multiview]
+    order: 21
+    tags: [orbit, video, stability, gated]
+    summary: "Stability AI SV3D_p: like SV3D_u, with a chosen camera elevation. GATED on Hugging Face: accept the licence at https://huggingface.co/stabilityai/sv3d and run `hf auth login`."
+    features: {input: image, views: 21, orbit_video: true}
+    input_slots:
+      - {role: image, label: Object image, types: [image], required: true, hint: "One object, plain or transparent background (removed automatically)."}
+    backend: stab3d
+    weights:
+      - {hf: stabilityai/sv3d, files: [sv3d_p.safetensors]}
+    license: {name: Stability AI Community, commercial: true, note: "Free below USD 1 M annual revenue, otherwise a Stability AI licence is needed. The model card tags it sv3d-nc-community but links the Community licence: read the LICENSE on the model page.", verify: true}
+    memory_gb: 24
+    speed: "untested here (gated); ~1-2 min per orbit expected"
+    est: {load_s: 60, run_s: 120}
+    params:
+      - {name: elevation, label: Camera elevation, type: float, min: -10, max: 60, step: 1, default: 10, unit: deg, group: basic}
+      - {name: steps, label: Steps, type: int, min: 20, max: 100, default: 50, group: basic}
+      - {name: save_views, label: Also save views as images, type: bool, default: true, group: basic}
+      - {name: view_stride, label: Save every Nth frame, type: int, min: 1, max: 7, default: 3, group: advanced}
+      - {name: fps, label: Video fps, type: int, min: 4, max: 24, default: 8, group: advanced}
+      - {name: decode_t, label: Frames decoded at once, type: int, min: 1, max: 21, default: 7, group: advanced}
+      - {name: remove_bg, label: Remove background, type: bool, default: true, group: basic}
+      - {name: foreground_ratio, label: Object size in frame, type: float, min: 0.5, max: 1.0, step: 0.05, default: 0.85, group: advanced}
+      - {name: seed, type: seed, default: -1}
+    presets: {fast: {steps: 25}, balanced: {}, quality: {steps: 75}}
