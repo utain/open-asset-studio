@@ -1,6 +1,6 @@
 # sfx_more: AudioLDM 1/2, Tango 2, TangoFlux, Make-An-Audio 2, Stable Audio Open
 
-Registry: `models.d/sfx_more.yaml` (backend `sfxmore`). Worker: `workers/sfxmore_worker.py`. Env: `envs/sfxmore`, lock `env-lock/sfxmore.txt`.
+Registry: `models.d/sfx_more.yaml` (backends `sfxmore`, and `sao` for Stable Audio Open). Workers: `workers/sfxmore_worker.py`, `workers/sao_worker.py`. Envs: `envs/sfxmore` (lock `env-lock/sfxmore.txt`), `envs/sao` (lock `env-lock/sao.txt`, recipe `install/sao.yaml`). Gated-audio tests: `tests/test_gated_audio.py`.
 Registry test: `tests/test_sfx_more.py`. Vendored upstream code: `vendor/TangoFlux`, `vendor/tango`, `vendor/Make-An-Audio-2`, `vendor/BigVGAN-awei6`.
 
 ## Status
@@ -14,8 +14,8 @@ Registry test: `tests/test_sfx_more.py`. Vendored upstream code: `vendor/TangoFl
 | `tango2` | declare-lab/tango2 | working | CC-BY-NC-SA-4.0 | 6.2 GB (fp32) | 15 s / 16.6 s per take | 16 kHz mono, fixed 10 s window |
 | `tangoflux` | declare-lab/TangoFlux | working | Stability Community + WavCaps (academic only): treat as non-commercial | 7.0 GB (fp32) | 5-6 s / 3.4-4.0 s (25 steps) | 44.1 kHz stereo, <= 30 s |
 | `make-an-audio-2` | ByteDance/Make-An-Audio-2 | working | MIT code and ckpt (`verify: true`: data terms, third-party vocoder copy) | 4.2 GB | 22 s / 1.7-3.0 s | 16 kHz mono, <= 10 s |
-| `stable-audio-open-1.0` | stabilityai/stable-audio-open-1.0 | **blocked**: gated (HTTP 401, no HF login) | Stability Community | - | - | registry entry only |
-| `stable-audio-open-small` | stabilityai/stable-audio-open-small | **blocked**: gated | Stability Community | - | - | registry entry only |
+| `stable-audio-open-1.0` | stabilityai/stable-audio-open-1.0 | working (gated repo; backend `sao`) | Stability AI Community (commercial under USD 1 M revenue, `verify: true`) | 5.4 GB (fp16) | 10 s / 13.8 s (10 s stereo, 100 steps); 20 s music take at 50 steps: 8 s | 44.1 kHz stereo, <= 47 s |
+| `stable-audio-open-small` | stabilityai/stable-audio-open-small | working (gated repo; backend `sao`) | Stability AI Community (commercial under USD 1 M revenue, `verify: true`) | 2.6 GB | 6.5 s / 1.6 s (5 s stereo take, 8 steps) | 44.1 kHz stereo, <= 11.9 s |
 
 Checks on every working model: no NaN, expected duration, not silent. Whisper does not apply (no speech).
 
@@ -54,7 +54,12 @@ Read these with care:
    - `maa2.ckpt` is a Lightning checkpoint with pickled callbacks and optimizer state, so it needs `torch.load(weights_only=False)`: trusted ByteDance repo only.
    - Old APIs are shimmed in the worker: `torch._six.string_classes`, `pytorch_lightning.utilities.distributed.rank_zero_only`. The BigVGAN package is `vendor/BigVGAN-awei6` (github awei-6/BigVGAN, put on `sys.path`, not pip installed).
    - The upstream flow asks ChatGPT to turn the prompt into a structured caption (`<event& start>@<event& end>`). The worker has an optional `struct_prompt` param; empty = `<prompt& all>`. Multi-event captions were not tested.
-8. **Stable Audio Open 1.0 and Small.** Both repos answer 401 without a login (`gated: auto`). Not downloaded, no mirror sought. Registry entries exist with `features.blocked` and a `fix` text; the worker raises a clear error if one is run. Small needs stable-audio-tools format loading, 1.0 could use diffusers `StableAudioPipeline`: both left unwired because they are lower priority than SA3, which the studio has.
+8. **Stable Audio Open 1.0 and Small (gated, now wired).** Both repos are `gated: auto`: the user accepts the terms on huggingface.co and runs `hf auth login`, then the weights download with the normal token. Backend `sao` (`workers/sao_worker.py`, `envs/sao`, recipe `install/sao.yaml`, lock `env-lock/sao.txt`) loads the stable-audio-tools format (`model.safetensors` + `model_config.json`) from the HF cache for both models; the diffusers `StableAudioPipeline` route was not needed. Only those two files are downloaded (4.85 GB and 1.68 GB; the repos also hold `.ckpt` duplicates, a VAE-only checkpoint, attribution CSVs and tflite files).
+   - `stable-audio-tools` 0.0.20 pins `torch==2.7.1`, `sentencepiece==0.1.99` and `wandb==0.15.4` (no py312/aarch64 builds), so it is installed `--no-deps` on top of torch 2.9.1+cu130 and its real imports are added by hand (`pytorch_lightning`, `k-diffusion`, `einops-exts`, `alias-free-torch`, `vector-quantize-pytorch`, `torchsde`, `nnAudio`, `v-diffusion-pytorch --no-deps`, ...). `env-lock/sao.txt` is the working set; install it with `--no-deps`. `flash_attn` is absent and optional (a warning, no effect on these two models).
+   - The config names the T5 encoder `t5-base`, a legacy alias that does not resolve with `HF_HUB_OFFLINE=1`. The worker sets the conditioner's `model_path` to the cached `google-t5/t5-base` snapshot (already in the cache for other models; it must be downloaded once if missing).
+   - 1.0: fp32 checkpoint cast to fp16, sampler `dpmpp-3m-sde` (sigma 0.3 to 500), CFG 7, 100 steps, `seconds_start`/`seconds_total` conditioning, negative prompt supported. Small: `pingpong` sampler, 8 steps, CFG 1.0 (ARC post-trained, no negative prompt), `seconds_total` only. The worker trims to the asked duration and removes DC offset; overs are brought to -1 dBFS (the Small model often peaks 2 to 5 dB over full scale).
+   - Listen checks (seed fixed): Small, "a heavy wooden door slamming shut in a stone hall", 5 s: transient at 0.2 to 0.5 s then decay, RMS -29 / -27 dBFS, not silent. 1.0, "rain falling on a tin roof with distant thunder, ambience", 10 s: steady bed, RMS -33 dBFS. 1.0 music task, "128 BPM tech house drum loop", 20 s with a negative prompt: steady -16 dBFS. No NaN, durations exact.
+   - Licence: Stability AI Community Licence, free for commercial use under USD 1 M annual revenue (registered as `commercial: true, verify: true`). 1.0 was trained on Freesound and FMA (CC); the repo ships attribution lists. Every user must accept the gate themselves.
 9. **Downloads on this box.** The shared link was crowded (many agents). Plain `hf download` gave 0.3 MB/s per file; `HF_HUB_ENABLE_HF_TRANSFER=1` (pip `hf_transfer`, in `envs/sfxmore`) gave several MB/s but sometimes stalls at the tail of a file: wrap in a retry loop. Repeating `--exclude` or `--include` flags overrides the earlier ones in huggingface_hub 0.36, give several patterns after one flag (`--include "a" "b"`). `huggingface_hub` is 0.36.2 in this env (transformers 4.57 needs < 1.0).
 10. `audioldm2` also pulled `pytorch_model.bin` duplicates into the cache by mistake (about 1.7 GB); harmless, delete them if space matters.
 
@@ -103,3 +108,15 @@ $H download google-bert/bert-base-uncased --include "*.json" vocab.txt model.saf
 Exact versions are in `env-lock/sfxmore.txt` (torch 2.9.1+cu130, diffusers 0.39.0, transformers 4.57.3, librosa 1.0.0, numpy 2.5.4, pytorch-lightning 2.6.6).
 
 Test method: `workers/sfxmore_worker.py` driven over its JSON-lines stdin/stdout by a small script (one `run` per prompt, GPU lock held), outputs scored with `docs/research/audio_snippets/qa_score.py` (CLAP branch). Fixed settings: seed 7, 100 steps, batch 1.
+
+### `sao` environment (Stable Audio Open)
+
+```bash
+./install.sh sao        # or by hand:
+uv venv --python 3.12 envs/sao && export VIRTUAL_ENV=$PWD/envs/sao
+uv pip install --index-url https://download.pytorch.org/whl/cu130 torch==2.9.1+cu130 torchaudio==2.9.1
+uv pip install --no-deps -r env-lock/sao.txt
+# weights, after accepting the terms on both model pages and `hf auth login`:
+hf download stabilityai/stable-audio-open-1.0 model.safetensors model_config.json
+hf download stabilityai/stable-audio-open-small model.safetensors model_config.json
+```

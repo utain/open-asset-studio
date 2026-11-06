@@ -4,7 +4,7 @@
   audioldm2 / -large / -music           AudioLDM 2 (diffusers)                         16 kHz mono
   tango2                                declare-lab/tango code (vendor/tango)          16 kHz mono, fixed 10 s window
   tangoflux                             declare-lab/TangoFlux (vendor/TangoFlux)       44.1 kHz stereo, up to 30 s
-  stable-audio-open-1.0 / -small        gated on Hugging Face (401 without login): registered as blocked, no inference code
+  (stable-audio-open-1.0 / -small live in workers/sao_worker.py, envs/sao)
   make-an-audio-2                       ByteDance/Make-An-Audio-2 (vendor/Make-An-Audio-2 + BigVGAN vocoder), 16 kHz, <= 10 s
 
 Every take is a 24-bit WAV; full-scale audio is brought to -1 dBFS. Recipes: docs/research/audio_more/sfx_more.md
@@ -107,7 +107,7 @@ class SfxMoreBackend(Backend):
 
     NEEDS = {"audioldm": ["diffusers", "transformers"], "audioldm2": ["diffusers", "transformers"],
              "tango2": ["diffusers", "transformers", "librosa", "einops"], "tangoflux": ["diffusers", "transformers", "datasets", "yaml"],
-             "sao": ["diffusers", "transformers"], "maa2": ["omegaconf", "pytorch_lightning"]}
+             "maa2": ["omegaconf", "pytorch_lightning"]}
 
     @staticmethod
     def family(mid: str) -> str:
@@ -119,8 +119,6 @@ class SfxMoreBackend(Backend):
             return "tango2"
         if mid == "tangoflux":
             return "tangoflux"
-        if mid.startswith("stable-audio-open"):
-            return "sao"
         if mid.startswith("make-an-audio"):
             return "maa2"
         raise InputError(f"The sfxmore backend does not know model '{mid}'.")
@@ -163,9 +161,6 @@ class SfxMoreBackend(Backend):
             return self._load_tango2(repo)
         if fam == "tangoflux":
             return self._load_tangoflux(repo)
-        if fam == "sao":
-            raise InputError("Stable Audio Open is gated on Hugging Face: accept the licence, log in "
-                             "(hf auth login) and download it; no inference code for it is wired yet.")
         if fam == "maa2":
             return self._load_maa2(repo)
         raise InputError(f"{model['name']} cannot run: see docs/research/audio_more/sfx_more.md")
@@ -394,9 +389,6 @@ class SfxMoreBackend(Backend):
                 seed += 7919
             self._emit(job, ctx, wave, sr, i, n, prompt, seed)
         return {"meta": {"seed": s0}}
-
-    def _run_sao(self, job, ctx, h, prompt):
-        raise InputError("Stable Audio Open is gated on Hugging Face and not wired.")
 
     # --- Make-An-Audio 2 (structured caption "<event& start>@<event& end>", DDIM, <= 10 s)
     def _run_maa2(self, job, ctx, h, prompt):

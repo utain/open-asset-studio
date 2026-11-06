@@ -48,8 +48,11 @@ def test_licences(reg):
         assert reg.models[mid]["license"]["commercial"] is True, mid
 
 
-def test_blocked_models_say_why(reg):
-    assert reg.models["csm-1b"]["features"]["blocked"]
+def test_csm_is_wired_but_gated(reg):
+    m = reg.models["csm-1b"]
+    assert not m["features"].get("blocked")            # verified through the worker, see docs/research/audio_more/tts_clone_b.md
+    assert m["license"]["name"] == "Apache-2.0" and m["license"]["commercial"] is True
+    assert "hf auth login" in m["weights"][0]["fix"] and "huggingface.co/sesame/csm-1b" in m["weights"][0]["fix"]
 
 
 def test_bark_voice_presets(reg):

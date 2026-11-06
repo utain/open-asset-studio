@@ -81,6 +81,7 @@ runtime) are in the group reports:
 | `cloneb_*` | [research/audio_more/tts_clone_b.md](research/audio_more/tts_clone_b.md) |
 | `music_*` | [research/audio_more/music.md](research/audio_more/music.md) |
 | `sfxmore` | [research/audio_more/sfx_more.md](research/audio_more/sfx_more.md) |
+| `sao` | [research/audio_more/sfx_more.md](research/audio_more/sfx_more.md) (Stable Audio Open 1.0 / Small, gated: `hf auth login` + accept terms) |
 | `foley` | [research/audio_more/foley.md](research/audio_more/foley.md) |
 | `media_audio` (subtitles, stem separation, dubbing) | [research/media_audio.md](research/media_audio.md), `install/media_audio.yaml`, `env-lock/media_audio.txt` |
 | `omni_*` | [research/audio_more/omni.md](research/audio_more/omni.md) |

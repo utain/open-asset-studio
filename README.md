@@ -197,6 +197,7 @@ Full schema, worker protocol, job API, asset meta and the frontend module contra
 | `envs/cloneb_{index,amphion,hf}` | IndexTTS, MaskGCT / Vevo, Dia / Dia2 / Bark / VibeVoice / CSM | `docs/research/audio_more/tts_clone_b.md`, `env-lock/cloneb_*.txt` |
 | `envs/music_{audiocraft,acestep,diffrhythm,yue,heartmula,magenta}` (`music_levo` is declared but not installed) | MusicGen / AudioGen / MAGNeT / Riffusion, ACE-Step, DiffRhythm, YuE, HeartMuLa, Magenta RT | `docs/research/audio_more/music.md`, `env-lock/music_*.txt` |
 | `envs/sfxmore` | AudioLDM 1/2, Tango 2, TangoFlux | `docs/research/audio_more/sfx_more.md`, `env-lock/sfxmore.txt` |
+| `envs/sao` | Stable Audio Open 1.0 / Small (gated) | `docs/research/audio_more/sfx_more.md`, `env-lock/sao.txt` |
 | `envs/foley` | MMAudio, HunyuanVideo-Foley, ThinkSound (needs `ffmpeg` on PATH to mux the video) | `docs/research/audio_more/foley.md`, `env-lock/foley.txt` |
 | `envs/omni_{moshi,qwen,glm,minicpm,step,kimi,llama2}` | speech-to-speech / omni models | `docs/research/audio_more/omni.md`, `env-lock/omni_*.txt` |
 | `envs/vc`, `envs/vc_diffsinger` | Seed-VC, RVC; DiffSinger | `docs/research/audio_more/vc_sing.md`, `env-lock/vc*.txt` |

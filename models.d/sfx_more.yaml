@@ -11,6 +11,13 @@ backends:
     device: gpu
     lock: sfxmore
     max_loaded: 1
+  sao:
+    label: envs/sao (Stable Audio Open 1.0 / Small via stable-audio-tools)
+    python: envs/sao/bin/python
+    script: workers/sao_worker.py
+    device: gpu
+    lock: sao
+    max_loaded: 1
 
 models:
   - id: audioldm-l-full
@@ -182,20 +189,21 @@ models:
       - {name: guidance, label: Guidance, type: float, min: 1, max: 8, step: 0.5, default: 4.0, group: advanced}
     presets: {fast: {batch: 2, steps: 50}, balanced: {}, quality: {batch: 6, steps: 200}}
 
-  # ---- gated on Hugging Face (HTTP 401 without a login); weights cannot be downloaded here, no inference code wired
+  # ---- Stable Audio Open (gated on Hugging Face: accept the terms + hf auth login before the first download); backend `sao` = envs/sao
   - id: stable-audio-open-1.0
     name: Stable Audio Open 1.0
     modality: audio
     tasks: [sfx, ambience, music]
     order: 130
-    tags: [stereo, 44k, blocked]
-    summary: "Stability's open 47 s stereo text-to-audio model (DiT). Gated: accept the licence on Hugging Face and log in. The studio already has Stable Audio 3."
-    features: {max_seconds: 47, sample_rate: 44100, channels: 2, negative: true, languages: [en], blocked: "gated on Hugging Face (401 without a login); accept the licence, hf auth login, then add a loader for diffusers StableAudioPipeline"}
-    backend: sfxmore
-    weights: [{hf: stabilityai/stable-audio-open-1.0, files: ["transformer/*.safetensors", "vae/*.safetensors", "text_encoder/*.safetensors"], fix: "Gated repo: accept the licence at huggingface.co/stabilityai/stable-audio-open-1.0, run hf auth login, then hf download stabilityai/stable-audio-open-1.0"}]
-    license: {name: Stability AI Community, commercial: true, note: "Free under USD 1 M revenue; training data includes CC-BY content that needs attribution."}
-    memory_gb: 10
-    speed: "-"
+    tags: [stereo, 44k, gated]
+    summary: "Stability's open 47 s stereo 44.1 kHz text-to-audio model (DiT; SFX, ambience, music). Gated repo: accept the terms on Hugging Face and run hf auth login before downloading. The studio already has Stable Audio 3."
+    features: {max_seconds: 47, sample_rate: 44100, channels: 2, negative: true, languages: [en]}
+    backend: sao
+    weights: [{hf: stabilityai/stable-audio-open-1.0, files: ["model.safetensors", "model_config.json"], fix: "Gated repo: accept the terms at huggingface.co/stabilityai/stable-audio-open-1.0, run hf auth login, then hf download stabilityai/stable-audio-open-1.0 model.safetensors model_config.json (also needs google-t5/t5-base in the cache)"}]
+    license: {name: Stability AI Community, commercial: true, verify: true, note: "Free for commercial use under USD 1 M annual revenue; above that an Enterprise licence is needed. Training data includes CC-BY content (Freesound, FMA) with attribution lists in the repo. Gated repo: each user must accept the terms on Hugging Face."}
+    memory_gb: 6
+    speed: "10 s stereo take, 100 steps: 13.8 s warm, load 10 s, peak 5.4 GB"
+    est: {load_s: 10, run_s: 14}
     prompt_style: {sfx: sfx, ambience: ambience, music: sa3_music}
     params:
       - {name: seconds, label: Duration, type: float, min: 1, max: 47, step: 1, default: 10, unit: s, group: basic}
@@ -203,21 +211,22 @@ models:
       - {name: seed, type: seed, default: -1}
       - {name: steps, type: int, min: 10, max: 250, default: 100, group: advanced}
       - {name: guidance, label: Guidance, type: float, min: 1, max: 12, step: 0.5, default: 7, group: advanced}
-    presets: {}
+    presets: {fast: {batch: 1, steps: 50}, balanced: {}, quality: {batch: 3, steps: 200}}
 
   - id: stable-audio-open-small
     name: Stable Audio Open Small
     modality: audio
     tasks: [sfx, ambience]
     order: 131
-    tags: [fast, stereo, 44k, blocked]
-    summary: "Stability's 341 M open SFX model, 11 s stereo, built for fast on-device use. Gated: accept the licence on Hugging Face and log in. The studio already has Stable Audio 3 Small."
-    features: {max_seconds: 11, sample_rate: 44100, channels: 2, negative: false, languages: [en], blocked: "gated on Hugging Face (401 without a login); needs stable-audio-tools format loading (model.safetensors + model_config.json)"}
-    backend: sfxmore
-    weights: [{hf: stabilityai/stable-audio-open-small, files: ["model.safetensors"], fix: "Gated repo: accept the licence at huggingface.co/stabilityai/stable-audio-open-small, run hf auth login, then hf download stabilityai/stable-audio-open-small"}]
-    license: {name: Stability AI Community, commercial: true, note: "Free under USD 1 M revenue."}
+    tags: [fast, stereo, 44k, gated]
+    summary: "Stability's 341 M open SFX model, 11 s stereo 44.1 kHz, ARC-distilled to 8 steps (about 1.6 s per take). Gated repo: accept the terms on Hugging Face and run hf auth login before downloading. The studio already has Stable Audio 3 Small."
+    features: {max_seconds: 11, sample_rate: 44100, channels: 2, negative: false, languages: [en]}
+    backend: sao
+    weights: [{hf: stabilityai/stable-audio-open-small, files: ["model.safetensors", "model_config.json"], fix: "Gated repo: accept the terms at huggingface.co/stabilityai/stable-audio-open-small, run hf auth login, then hf download stabilityai/stable-audio-open-small model.safetensors model_config.json (also needs google-t5/t5-base in the cache)"}]
+    license: {name: Stability AI Community, commercial: true, verify: true, note: "Free for commercial use under USD 1 M annual revenue; above that an Enterprise licence is needed. Gated repo: each user must accept the terms on Hugging Face."}
     memory_gb: 4
-    speed: "-"
+    speed: "8 steps, 5 s stereo take: 1.6 s warm, load 6.5 s, peak 2.6 GB"
+    est: {load_s: 7, run_s: 2}
     prompt_style: sfx
     params:
       - {name: seconds, label: Duration, type: float, min: 1, max: 11, step: 0.5, default: 5, unit: s, group: basic}

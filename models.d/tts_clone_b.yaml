@@ -404,15 +404,15 @@ models:
     modality: audio
     tasks: [tts, voice_clone]
     order: 91
-    tags: [conversational, blocked]
-    summary: "Conversational speech model (context-aware prosody). BLOCKED: the sesame/csm-1b repo is gated (licence acceptance + HF login) and this machine has no login. Worker path written but never run."
-    features: {blocked: "gated HF repo (sesame/csm-1b needs a logged-in account that accepted the terms); not downloaded", languages: [en], thai: false, needs_ref: false, sample_rate: 24000}
+    tags: [conversational, gated]
+    summary: "Conversational speech model (Llama backbone + Mimi codec): natural, context-aware prosody, 24 kHz English. Voice clone = a reference clip plus its exact transcript as context. Gated repo: accept the terms on Hugging Face and run hf auth login before downloading."
+    features: {languages: [en], thai: false, needs_ref: false, sample_rate: 24000, max_seconds: 60}
     backend: cloneb_hf
-    weights: [{hf: sesame/csm-1b, fix: "hf auth login, accept the terms on huggingface.co/sesame/csm-1b, then: hf download sesame/csm-1b"}]
-    license: {name: Apache-2.0, commercial: true, note: "Gated repo: terms must be accepted on Hugging Face. Contains the Llama-3.2 tokenizer (Llama 3.2 licence)."}
-    memory_gb: 8
-    speed: "-"
-    est: {load_s: 15, run_s: 10}
+    weights: [{hf: sesame/csm-1b, files: ["*.json", "chat_template.jinja", "transformers-0000*.safetensors"], fix: "Gated repo: accept the terms at huggingface.co/sesame/csm-1b, run hf auth login, then hf download sesame/csm-1b config.json generation_config.json preprocessor_config.json chat_template.jinja special_tokens_map.json tokenizer.json tokenizer_config.json transformers.safetensors.index.json transformers-00001-of-00002.safetensors transformers-00002-of-00002.safetensors (the transformers-* shards are the HF-format weights; the 6 GB model.safetensors is the original Sesame format and is not used)"}]
+    license: {name: Apache-2.0, commercial: true, note: "Apache-2.0 per the model card. Gated repo: each user must accept Sesame's terms on Hugging Face (no voice impersonation, no misuse). The tokenizer is the Llama-3.2 one (Llama 3.2 licence)."}
+    memory_gb: 5
+    speed: "5 s of speech in 6 s (RTF ~1.2), load 3-6 s, 3.1 GB resident"
+    est: {load_s: 5, run_s: 8}
     prompt_style: tts_plain
     params:
       - {name: text, label: Line, type: textarea, default: "", group: basic}

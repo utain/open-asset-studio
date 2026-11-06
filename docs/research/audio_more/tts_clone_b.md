@@ -7,7 +7,7 @@ Three backends (one venv each, because the dependency sets conflict):
 |---|---|---|---|---|
 | `cloneb_index` | `envs/cloneb_index` (torch 2.9.1+cu130, transformers 4.52.1) | `workers/cloneb_index_worker.py` | `env-lock/cloneb_index.txt` | IndexTTS 2, IndexTTS 2.5 |
 | `cloneb_amphion` | `envs/cloneb_amphion` (torch 2.9.1+cu130, **transformers 4.44.2**) | `workers/cloneb_amphion_worker.py` | `env-lock/cloneb_amphion.txt` | MaskGCT, Vevo, Vevo1.5 |
-| `cloneb_hf` | `envs/cloneb_hf` (torch 2.9.1+cu130, transformers 5.22.1, diffusers, `dia2`) | `workers/cloneb_hf_worker.py` | `env-lock/cloneb_hf.txt` | Dia 1.6B, Dia2 2B, Bark, Bark small, VibeVoice 1.5B / 7B, CSM (blocked) |
+| `cloneb_hf` | `envs/cloneb_hf` (torch 2.9.1+cu130, transformers 5.22.1, diffusers, `dia2`) | `workers/cloneb_hf_worker.py` | `env-lock/cloneb_hf.txt` | Dia 1.6B, Dia2 2B, Bark, Bark small, VibeVoice 1.5B / 7B, CSM |
 
 Upstream clones in `vendor/`: `index-tts` (d9e41aa), `Amphion` (26f6883), `dia2` (8687268).
 
@@ -37,7 +37,7 @@ adds margin. Load times are cold (first load after a cache eviction) unless note
 | `bark-small` | working | `suno/bark-small` | MIT | 0.8 GB | load 7 s | same checks: 0.94, 1.0 |
 | `vibevoice-1.5b` | working | `vibevoice/VibeVoice-1.5B-hf` (transformers conversion of `microsoft/VibeVoice-1.5B`) | MIT; Microsoft: research use, no impersonation | 5.0 GB | load 32 s; 9 s of 2-speaker audio in 7 s | two speakers, with and without a reference per speaker: recall 1.0 |
 | `vibevoice-7b` | working | `vibevoice/VibeVoice-7B-hf` (conversion of the withdrawn VibeVoice-Large) | MIT (community-hosted copy, `verify: true`) | 17.4 GB | load 111 s; 9 s of audio in 17-21 s | recall 1.0 for tts and for 2 cloned voices |
-| `csm-1b` | **blocked** | `sesame/csm-1b` | Apache-2.0, gated | - | - | repo needs a logged-in account that accepted the terms: `hf download sesame/csm-1b config.json` -> "Access denied. This repository requires approval", HTTP 401 on the file URL. Nothing downloaded; registry entry has `features.blocked`; worker path (`CsmForConditionalGeneration`) is written but never run. |
+| `csm-1b` | working (gated repo) | `sesame/csm-1b` | Apache-2.0 (card), commercial, terms gate | 3.1 GB (bf16) | load 3-6 s; tts: 5.4 s of speech in 6.3 s; voice_clone: 4.1 s in 4.9 s | tts: Whisper large-v3-turbo transcript equals the script word for word. voice_clone (3.4 s reference clip + its transcript, `role: ref`): transcript equals the new line, RMS -18 dBFS, 24 kHz mono. Needs `hf auth login` + accepted terms to download. Only the transformers-format shards are used (see below). |
 
 Whisper recall for the voice-conversion outputs is not a recall number (no target text): the converted clip of the Vevo demo source
 ("I'm a versatile zero-shot voice cloner. ...") transcribes to the same sentence as the source.
@@ -68,7 +68,7 @@ Whisper recall for the voice-conversion outputs is not a recall number (no targe
     `pause_s` of silence; tags `[laughs] [sighs] [music]`, `...`, CAPS, `♪ lyrics ♪`.
   * VibeVoice: script of `Speaker N: ...` lines (N = 1-4); a reference clip per speaker with roles `ref`, `ref2`, `ref3`, `ref4`; `cfg_scale`, `steps`
     (diffusion), optional `max_tokens`. Cancel is checked every token.
-  * CSM: written for `speaker` ids and clone context, untested because the repo is gated.
+  * CSM (verified 2026-11-06): `CsmForConditionalGeneration` + `AutoProcessor` from the existing `cloneb_hf` env (transformers 5.22 supports it natively, nothing installed). The repo holds two weight formats: `model.safetensors` / `ckpt.pt` are the original Sesame format and fail to load ("Can't find a checkpoint index"); the HF-format weights are `transformers-0000{1,2}-of-00002.safetensors` + `transformers.safetensors.index.json` (7.1 GB, fp32), loaded as bf16. Download only those plus the json/tokenizer/`chat_template.jinja` files (the registry `fix` lists them). Voice clone passes the reference clip and its transcript as a previous turn of the same speaker; the processor's float audio features must be cast to the model dtype (`.to(device, dtype)`), the worker does this. Speaker id goes into the chat role. Licence: card says Apache-2.0; the tokenizer is the Llama-3.2 one.
 
 ## Gotchas
 
@@ -131,6 +131,8 @@ hf download nari-labs/Dia-1.6B-0626 --include "*.json" "model-0000*.safetensors"
 hf download suno/bark --include "*.json" "*.txt" "pytorch_model.bin" "speaker_embeddings/*"
 hf download amphion/Vevo1.5 --include config.json "tokenizer/*" "contentstyle_modeling/ar_emilia101k_singnet7k/*" "acoustic_modeling/fm_emilia101k_singnet7k/*" "acoustic_modeling/Vocoder/*"
 hf download amphion/MaskGCT semantic_codec/model.safetensors       # (already part of the full MaskGCT download)
+# CSM is gated: accept the terms at huggingface.co/sesame/csm-1b and `hf auth login` first
+hf download sesame/csm-1b config.json generation_config.json preprocessor_config.json chat_template.jinja special_tokens_map.json tokenizer.json tokenizer_config.json transformers.safetensors.index.json transformers-00001-of-00002.safetensors transformers-00002-of-00002.safetensors
 ```
 
 Try a worker by hand: `PYTHONPATH=workers envs/cloneb_hf/bin/python workers/cloneb_hf_worker.py` and feed it one `{"op":"run",...}` line (see

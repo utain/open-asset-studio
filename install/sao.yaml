@@ -1,0 +1,16 @@
+backend: sao
+env: sao
+python: "3.12"
+torch:
+  - torch==2.9.1
+  - torchaudio==2.9.1
+lock: sao
+lock_flags: [--no-deps]         # stable-audio-tools pins torch 2.7.1 etc.; the lock is the full, already-resolved set
+vendor: []
+steps: []
+check: "import torch, stable_audio_tools, transformers, soundfile; from stable_audio_tools.inference.generation import generate_diffusion_cond"
+manual:
+  - "Weights are gated on Hugging Face: accept the terms at huggingface.co/stabilityai/stable-audio-open-1.0 and /stable-audio-open-small, run `hf auth login`, then ./install.sh model stable-audio-open-1.0 (needs only model.safetensors + model_config.json). The T5 text encoder google-t5/t5-base must also be in the HF cache."
+tested: [linux-aarch64]
+size_gb: 8
+shares_env_with: null

@@ -6,7 +6,7 @@
   bark         task tts                 suno/bark (transformers BarkModel): [laughs] [sighs] ♪ music ♪, 100+ voice presets
   vibevoice-*  task tts / voice_clone   Microsoft VibeVoice 1.5B / 7B (transformers-native `-hf` conversion):
                                         long-form, up to 4 speakers ("Speaker 1: ..." lines), optional voice per speaker
-  csm-1b       task tts / voice_clone   Sesame CSM-1B. GATED repo: blocked (no HF login), code path untested.
+  csm-1b       task tts / voice_clone   Sesame CSM-1B (gated repo: HF login + accepted terms). Verified: tts + voice_clone (context = ref clip + transcript).
 """
 from __future__ import annotations
 
@@ -401,7 +401,7 @@ class HFBackend(Backend):
                       voices=sorted(int(k) + 1 for k in refs))
         return {"meta": {"seed": s0}}
 
-    # ---- Sesame CSM (gated: untested)
+    # ---- Sesame CSM (gated; tested with the transformers-format shards)
     def run_csm(self, job, ctx, h):
         p, proc, m = job.params, h["proc"], h["model"]
         text = clean_text(job)
@@ -418,7 +418,7 @@ class HFBackend(Backend):
         for i in range(n):
             ctx.check()
             set_seeds(s0 + i)
-            inputs = proc.apply_chat_template(conv, tokenize=True, return_dict=True).to(m.device)
+            inputs = proc.apply_chat_template(conv, tokenize=True, return_dict=True).to(m.device, m.dtype)   # ref audio -> bf16
             audio = m.generate(**inputs, output_audio=True, max_new_tokens=int(float(p.get("seconds", 20)) * 12.5))
             wav = audio[0].detach().float().cpu().numpy().squeeze()
             self.emit(job, ctx, wav, 24000, text, i, n, s0 + i)
