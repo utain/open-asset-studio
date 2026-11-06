@@ -1,0 +1,187 @@
+# OpenMOSS (Fudan / MOSI) audio models beyond the four already in models.yaml (MOSS-TTS v1.5, VoiceGenerator, TTS-Nano, SoundEffect v2).
+# Report: docs/research/moss_more.md
+#
+# Backends
+#   moss_more   workers/moss_more_worker.py in the existing envs/moss (transformers 5.0.0, read-only; nothing installed into it).
+#               MOSS-TTSD v1.0 (multi-speaker dialogue), MOSS-TTS-Realtime (1.7 B), MOSS-TTS-Local-Transformer v1.5 (48 kHz stereo).
+#   moss_asr    workers/moss_asr_worker.py in envs/moss_asr (own venv: transformers 5.22.1, MOSS-Transcribe-Diarize needs >= 5.6).
+#               MOSS-Transcribe-Diarize (transcript + speakers + timestamps), MOSS-Audio-4B-Instruct (ask questions about audio).
+#
+# Dialogue follows the existing convention (Dia, VibeVoice): tasks tts / voice_clone with a multi-line script and one input slot
+# per speaker (roles ref, ref2, ref3, ref4), so the Sound studio needs no change.
+# New tasks `transcribe` and `audio_ask` produce `text` assets (no Sound-studio tab yet: use the API, a pipeline or the assistant).
+
+tasks:
+  transcribe: {label: "Transcript (speakers + timestamps)", modality: text, studio: sound}
+  audio_ask:  {label: "Ask about audio (caption / Q&A)",   modality: text, studio: sound}
+
+backends:
+  moss_more:
+    label: envs/moss (MOSS-TTSD, MOSS-TTS-Realtime, MOSS-TTS-Local v1.5; transformers 5.0.0, vendor/MOSS-TTS)
+    python: envs/moss/bin/python
+    script: workers/moss_more_worker.py
+    device: gpu
+    lock: moss
+    max_loaded: 1
+    model_idle_s: 600
+    env: {PYTHONDONTWRITEBYTECODE: "1"}      # vendor/MOSS-TTS is a shared checkout: keep it clean
+  moss_asr:
+    label: envs/moss_asr (MOSS-Transcribe-Diarize, MOSS-Audio; transformers 5.22.1)
+    python: envs/moss_asr/bin/python
+    script: workers/moss_asr_worker.py
+    device: gpu
+    lock: moss_asr
+    max_loaded: 1
+    model_idle_s: 600
+    fix: "Rebuild envs/moss_asr from env-lock/moss_asr.txt (see the header there and docs/research/moss_more.md)"
+
+models:
+  # =================================================================== dialogue / podcast
+  - id: moss-ttsd-v1
+    name: MOSS-TTSD v1.0
+    modality: audio
+    tasks: [tts, voice_clone]
+    order: 60
+    tags: [dialogue, podcast, multi-speaker, long-form]
+    summary: "Podcast / dialogue generator, 1-5 speakers, up to ~1 h per script, 20 languages (no Thai). Write [S1] / [S2] turns. Without references it invents the voices; with a reference clip + its transcript per speaker (slots Speaker 1..4) it continues in those voices. 8 B, ~17 GB, slow."
+    features: {speakers: 5, thai: false, languages: [zh, en, de, es, fr, ja, it, he, ko, ru, fa, ar, pl, pt, cs, da, sv, hu, el, tr], needs_ref: false, sample_rate: 24000, max_seconds: 3600, tags: false}
+    backend: moss_more
+    input_slots:
+      - {role: "ref",  label: "Speaker 1 voice [S1]", types: ["voice", "audio"], required: false, hint: "Optional voice for [S1] (3-15 s of clean speech). Its transcript is required (filled from the voice library).", tasks: ["tts"]}
+      - {role: "ref",  label: "Speaker 1 voice [S1]", types: ["voice", "audio"], required: true,  hint: "The voice to clone for [S1] (3-15 s of clean speech). Its transcript is required.", tasks: ["voice_clone"]}
+      - {role: "ref2", label: "Speaker 2 voice [S2]", types: ["voice", "audio"], required: false, hint: "Optional voice for [S2]. Fill only speakers that have lines; give its transcript in 'Transcript, speaker 2' if the voice has none.", tasks: ["tts", "voice_clone"]}
+      - {role: "ref3", label: "Speaker 3 voice [S3]", types: ["voice", "audio"], required: false, hint: "Optional voice for [S3].", tasks: ["tts", "voice_clone"]}
+      - {role: "ref4", label: "Speaker 4 voice [S4]", types: ["voice", "audio"], required: false, hint: "Optional voice for [S4].", tasks: ["tts", "voice_clone"]}
+    weights: [{hf: OpenMOSS-Team/MOSS-TTSD-v1.0, files: ["model-0000?-of-00004.safetensors", "*.json", "*.py", "*.txt", "*.jinja"]}, {hf: OpenMOSS-Team/MOSS-Audio-Tokenizer}]
+    license: {name: Apache-2.0, commercial: true}
+    memory_gb: 28
+    speed: "TBD"
+    est: {load_s: 120, run_s: 90}
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: "Script ([S1] / [S2] turns)", type: textarea, default: "[S1] Welcome back to the show. Today we are talking about sound design for games.\n[S2] Thanks for having me. I think audio is half of the experience, and people only notice it when it is missing.\n[S1] Let's start with footsteps.", group: basic, help: "Start every turn with [S1] .. [S5]. Keep each turn natural and short; punctuation drives the pauses. Laughter: write 'haha' or [laugh]."}
+      - {name: ref_text,  label: "Transcript, speaker 1", type: textarea, default: "", group: basic, help: "What the Speaker 1 reference clip says (filled in from the voice library). Needed whenever a reference is set."}
+      - {name: ref_text2, label: "Transcript, speaker 2", type: textarea, default: "", group: advanced, help: "What the Speaker 2 reference clip says. Empty = the voice's saved transcript."}
+      - {name: ref_text3, label: "Transcript, speaker 3", type: textarea, default: "", group: advanced}
+      - {name: ref_text4, label: "Transcript, speaker 4", type: textarea, default: "", group: advanced}
+      - {name: max_seconds, label: Max length, type: float, min: 5, max: 900, step: 5, default: 90, unit: s, group: basic, help: "Upper bound only: generation stops at the end of the script. About 12.5 tokens per second of audio."}
+      - {name: batch, label: Takes, type: int, min: 1, max: 3, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: normalize, label: Normalise script, type: bool, default: true, group: advanced, help: "The card's text clean-up (decorative punctuation, 'haha' -> [laugh], merges consecutive turns of one speaker)."}
+      - {name: temperature, type: float, min: 0.5, max: 2.0, step: 0.05, default: 1.1, group: advanced}
+      - {name: top_p, type: float, min: 0.1, max: 1.0, step: 0.05, default: 0.9, group: advanced}
+      - {name: top_k, type: int, min: 1, max: 200, default: 50, group: advanced}
+      - {name: repetition_penalty, type: float, min: 1.0, max: 1.5, step: 0.05, default: 1.1, group: advanced}
+    presets: {fast: {max_seconds: 45}, balanced: {}, quality: {batch: 2}}
+
+  # =================================================================== realtime / small TTS
+  - id: moss-tts-realtime
+    name: MOSS-TTS Realtime
+    modality: audio
+    tasks: [tts, voice_clone]
+    order: 61
+    tags: [voice, clone, fast, 1.7b]
+    summary: "1.7 B streaming-class TTS used here in whole-clip mode: fast, clones a single reference clip (no transcript needed), 20 languages (no Thai). 4.7 GB."
+    features: {needs_ref: clone, thai: false, languages: [zh, en, de, es, fr, ja, it, hu, ko, ru, fa, ar, pl, pt, cs, da, sv, el, tr], sample_rate: 24000, max_seconds: 120}
+    backend: moss_more
+    input_slots:
+      - {role: "ref", label: "Reference voice", types: ["voice", "audio"], required: false, hint: "Optional: 5-15 s of clean speech. Empty = the model's default voice.", tasks: ["tts"]}
+      - {role: "ref", label: "Reference voice", types: ["voice", "audio"], required: true,  hint: "5-15 s of clean speech to clone (no transcript needed).", tasks: ["voice_clone"]}
+    weights: [{hf: OpenMOSS-Team/MOSS-TTS-Realtime}, {hf: OpenMOSS-Team/MOSS-Audio-Tokenizer}]
+    license: {name: Apache-2.0, commercial: true}
+    memory_gb: 14
+    speed: "TBD"
+    est: {load_s: 30, run_s: 8}
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic}
+      - {name: max_seconds, label: Max length, type: float, min: 2, max: 120, step: 1, default: 30, unit: s, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: temperature, type: float, min: 0.3, max: 1.5, step: 0.05, default: 0.8, group: advanced}
+      - {name: top_p, type: float, min: 0.1, max: 1.0, step: 0.05, default: 0.6, group: advanced}
+      - {name: top_k, type: int, min: 1, max: 200, default: 30, group: advanced}
+      - {name: repetition_penalty, type: float, min: 1.0, max: 1.5, step: 0.05, default: 1.1, group: advanced}
+    presets: {}
+
+  - id: moss-tts-local-v1.5
+    name: MOSS-TTS Local v1.5
+    modality: audio
+    tasks: [tts, voice_clone]
+    order: 62
+    tags: [voice, clone, thai, stereo, 48khz, 1.7b]
+    summary: "1.7 B cloner in 31 languages incl. Thai, 48 kHz STEREO output, pause markers [pause 1.5s] and length control. Much smaller and faster than MOSS-TTS v1.5; set the language. 9 GB + 8.5 GB codec."
+    features: {needs_ref: clone, thai: true, sample_rate: 48000, channels: 2, duration_control: true, max_seconds: 120}
+    backend: moss_more
+    input_slots:
+      - {role: "ref", label: "Reference voice", types: ["voice", "audio"], required: false, hint: "Optional: 5-15 s of clean speech. Empty = the model picks a voice.", tasks: ["tts"]}
+      - {role: "ref", label: "Reference voice", types: ["voice", "audio"], required: true,  hint: "5-15 s of clean speech to clone (no transcript needed).", tasks: ["voice_clone"]}
+    weights: [{hf: OpenMOSS-Team/MOSS-TTS-Local-Transformer-v1.5}, {hf: OpenMOSS-Team/MOSS-Audio-Tokenizer-v2}]
+    license: {name: Apache-2.0, commercial: true}
+    memory_gb: 16
+    speed: "TBD"
+    est: {load_s: 60, run_s: 10}
+    prompt_style: tts_plain
+    params:
+      - {name: text, label: Line, type: textarea, default: "", group: basic, help: "Inline pause: [pause 1.5s]. Pinyin / IPA pass through."}
+      - {name: language, type: choice, choices: [auto, English, Thai, Chinese, Cantonese, Japanese, Korean, French, German, Spanish, Italian, Portuguese, Russian, Vietnamese, Indonesian, Malay, Hindi, Arabic, Turkish, Dutch, Polish], default: auto, group: basic, help: "Always set it when you know it (the card: much better than auto). Thai text is detected automatically."}
+      - {name: seconds, label: Target length, type: float, min: 0, max: 60, step: 0.5, default: 0, unit: s, group: basic, help: "0 = free. Otherwise the model aims for this duration (token-level control, approximate)."}
+      - {name: max_seconds, label: Max length, type: float, min: 2, max: 120, step: 1, default: 30, unit: s, group: basic}
+      - {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: seed, type: seed, default: -1}
+      - {name: temperature, type: float, min: 0.5, max: 2.5, step: 0.05, default: 1.7, group: advanced}
+      - {name: top_p, type: float, min: 0.1, max: 1.0, step: 0.05, default: 0.8, group: advanced}
+      - {name: top_k, type: int, min: 1, max: 200, default: 25, group: advanced}
+    presets: {}
+
+  # =================================================================== transcription / understanding
+  - id: moss-transcribe-diarize
+    name: MOSS-Transcribe-Diarize 0.9B
+    modality: audio
+    tasks: [transcribe]
+    default_for: [transcribe]
+    order: 92
+    tags: [asr, diarization, timestamps, podcast, multilingual]
+    summary: "Transcript with speaker labels ([S01], [S02] ...) and start/end timestamps in one pass, 50+ languages, audio or video up to ~90 min. Output: a text asset plus .srt and .json attachments. 1.8 GB."
+    features: {languages: 50, thai: true, max_seconds: 5400}
+    backend: moss_asr
+    input_slots:
+      - {role: "audio", label: "Recording", types: ["audio", "voice", "video"], required: true, hint: "A podcast, interview, meeting, call or video (audio is extracted).", tasks: ["transcribe"]}
+    weights: [{hf: OpenMOSS-Team/MOSS-Transcribe-Diarize}]
+    license: {name: Apache-2.0, commercial: true}
+    memory_gb: 8
+    speed: "TBD"
+    est: {load_s: 10, run_s: 20}
+    params:
+      - {name: mode, label: Output, type: choice, choices: [{value: diarized, label: "Speakers + timestamps"}, {value: speakers, label: "Speakers only"}], default: diarized, group: basic}
+      - {name: hotwords, label: Hotwords, type: text, default: "", group: basic, placeholder: "names, product terms, jargon", help: "Comma-separated terms the model should spell correctly."}
+      - {name: prompt_language, label: Prompt language, type: choice, choices: [en, zh], default: en, group: advanced, help: "Language of the instruction given to the model (not of the audio)."}
+      - {name: max_new_tokens, label: Max output tokens, type: int, min: 256, max: 65536, step: 256, default: 8192, group: advanced, help: "Raise for recordings longer than ~20 min (the transcript must fit)."}
+    presets: {}
+
+  - id: moss-audio-4b-instruct
+    name: MOSS-Audio 4B Instruct
+    modality: audio
+    tasks: [audio_ask]
+    default_for: [audio_ask]
+    order: 93
+    tags: [caption, qa, music, speech, events]
+    summary: "Ask a question about a clip: describe it, caption the speech (emotion, speaker, style), name instruments / events / scene, transcribe with timestamps, summarise. English and Chinese. 4.6 B, 10.5 GB."
+    features: {languages: [en, zh], max_seconds: 1200}
+    backend: moss_asr
+    input_slots:
+      - {role: "audio", label: "Clip", types: ["audio", "voice", "video"], required: true, hint: "Up to a few minutes works best.", tasks: ["audio_ask"]}
+    weights: [{hf: OpenMOSS-Team/MOSS-Audio-4B-Instruct, files: ["model-0000?-of-00003.safetensors", "*.json", "*.py", "*.txt", "*.jinja"]}]
+    license: {name: Apache-2.0, commercial: true}
+    memory_gb: 16
+    speed: "TBD"
+    est: {load_s: 20, run_s: 10}
+    params:
+      - {name: question, label: Question, type: textarea, default: "Describe this audio.", group: basic, help: "e.g. 'Describe the voice, emotion and recording quality.', 'What instruments are playing and what is the mood?', 'Transcribe with sentence-level timestamps.', 'Summarise the conversation.'"}
+      - {name: max_new_tokens, label: Max answer tokens, type: int, min: 64, max: 4096, step: 64, default: 1024, group: basic}
+      - {name: batch, label: Answers, type: int, min: 1, max: 4, default: 1, group: advanced}
+      - {name: temperature, type: float, min: 0.0, max: 1.5, step: 0.05, default: 0.0, group: advanced, help: "0 = greedy (best for transcription and facts)."}
+      - {name: top_p, type: float, min: 0.1, max: 1.0, step: 0.05, default: 0.95, group: advanced}
+      - {name: top_k, type: int, min: 1, max: 200, default: 50, group: advanced}
+      - {name: seed, type: seed, default: -1, group: advanced}
+    presets: {}

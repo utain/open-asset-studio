@@ -1,0 +1,86 @@
+# moss_asr env lock (MOSS-Transcribe-Diarize, MOSS-Audio-4B-Instruct; py3.12 aarch64, GB10). Recreate from the repo root:
+#   uv venv --python 3.12 envs/moss_asr
+#   VIRTUAL_ENV=$PWD/envs/moss_asr uv pip install --index-url https://download.pytorch.org/whl/cu130 torch==2.9.1 torchaudio==2.9.1
+#   VIRTUAL_ENV=$PWD/envs/moss_asr uv pip install -r env-lock/moss_asr.txt
+#   VIRTUAL_ENV=$PWD/envs/moss_asr uv pip install --no-deps -e ./vendor/MOSS-Transcribe-Diarize    (needs scripts/fetch_vendor.sh MOSS-Transcribe-Diarize)
+#   (the editable install must be --no-deps: its pyproject pins fastapi/uvicorn for a subtitle web app we do not use)
+# vendor/MOSS-Audio is NOT installed: workers/moss_asr_worker.py puts it on sys.path (its package is the generic name `src`).
+# MOSS-Transcribe-Diarize needs transformers >= 5.6; MOSS-Audio's README pins 4.57.1 but runs on 5.22.1 here (verified).
+accelerate==1.15.0
+annotated-doc==0.0.5
+anyio==4.16.0
+av==19.0.2
+certifi==2026.10.23
+cffi==2.1.1
+charset-normalizer==3.5.2
+click==8.5.0
+cloudpickle==3.1.2
+decorator==5.3.1
+einops==0.8.2
+filelock==4.2.4
+fsspec==2026.9.0
+h11==0.16.0
+hf-xet==1.8.0
+httpcore2==2.16.0
+httpx2==2.16.0
+huggingface-hub==2.4.0
+idna==3.20
+jinja2==3.1.6
+joblib==1.6.0
+lazy-loader==0.6
+librosa==1.0.0
+llvmlite==0.50.0
+markdown-it-py==4.2.0
+markupsafe==3.0.3
+mdurl==0.1.2
+mpmath==1.3.0
+msgpack==1.2.4
+narwhals==2.28.0
+networkx==3.7
+numba==0.68.1
+numpy==2.5.4
+nvidia-cublas==13.0.0.19
+nvidia-cuda-cupti==13.0.48
+nvidia-cuda-nvrtc==13.0.48
+nvidia-cuda-runtime==13.0.48
+nvidia-cudnn-cu13==9.13.0.50
+nvidia-cufft==12.0.0.15
+nvidia-cufile==1.15.0.42
+nvidia-curand==10.4.0.35
+nvidia-cusolver==12.0.3.29
+nvidia-cusparse==12.6.2.49
+nvidia-cusparselt-cu13==0.8.0
+nvidia-nccl-cu13==2.27.7
+nvidia-nvjitlink==13.0.39
+nvidia-nvshmem-cu13==3.3.24
+nvidia-nvtx==13.0.39
+packaging==26.3
+platformdirs==4.14.5
+pooch==1.9.0
+psutil==7.2.2
+pycparser==3.12
+pygments==2.21.0
+pyyaml==6.0.3
+regex==2026.9.29
+requests==2.34.2
+rich==15.0.0
+safetensors==0.8.0
+scikit-learn==1.9.1
+scipy==1.18.1
+setuptools==78.1.0
+shellingham==1.5.4
+soundfile==0.14.0
+soxr==1.1.0
+sympy==1.14.0
+threadpoolctl==3.8.0
+tiktoken==0.14.0
+tokenizers==0.23.3
+torch==2.9.1+cu130
+torchaudio==2.9.1
+tqdm==4.70.1
+transformers==5.22.1
+triton==3.5.1
+truststore==0.10.5
+typer==0.28.0
+typing-extensions==4.16.0
+urllib3==2.8.0
