@@ -1,0 +1,17 @@
+backend: music_acestep
+env: music_acestep
+python: "3.12"
+torch:
+  - torch==2.10.0
+  - torchaudio==2.10.0
+  - torchvision==0.25.0
+lock: music_acestep
+lock_flags: [--no-deps]        # the lock is a complete uv pip freeze: nothing to resolve
+vendor: [ACE-Step-1.5]
+steps: []
+check: "import torch, acestep, transformers"
+manual:
+  - "The studio links vendor/ace_project to the Hugging Face snapshot of ACE-Step/Ace-Step1.5 itself on first run, so download the weights first (./install.sh model acestep-1.5-turbo)."
+tested: []
+size_gb: 6
+shares_env_with: null

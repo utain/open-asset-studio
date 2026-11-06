@@ -1,0 +1,16 @@
+backend: clonea_openvoice
+env: clonea_openvoice
+python: "3.12"
+torch:
+  - torch==2.9.1
+  - torchaudio==2.9.1
+lock: clonea_openvoice
+lock_flags: [--no-deps]        # the lock is a complete uv pip freeze: nothing to resolve
+vendor: [MeloTTS, OpenVoice]
+steps:
+  - "$PY -c \"import nltk, sys; [nltk.download(x, download_dir=sys.prefix + '/nltk_data', quiet=True) for x in ('averaged_perceptron_tagger_eng', 'cmudict', 'punkt', 'punkt_tab')]\" || echo \"warning: NLTK data download failed (retry later: the English MeloTTS / StyleTTS2 text frontend needs it)\""
+check: "import torch, melo, openvoice, transformers"
+manual: []
+tested: []
+size_gb: 6
+shares_env_with: null

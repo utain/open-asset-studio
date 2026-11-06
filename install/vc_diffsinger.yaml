@@ -1,0 +1,15 @@
+backend: vc_diffsinger
+env: vc_diffsinger
+python: "3.12"
+torch:
+  - torch==2.9.1
+lock: vc_diffsinger
+lock_flags: [--no-deps]        # the lock is a complete uv pip freeze: nothing to resolve
+vendor: [diffsinger-legacy]
+steps: []
+check: "import torch, librosa, lightning, pyworld"
+manual:
+  - "pyworld builds from source: a C/C++ compiler (build-essential) must be installed."
+tested: []
+size_gb: 6
+shares_env_with: null

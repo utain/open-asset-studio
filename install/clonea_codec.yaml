@@ -1,0 +1,15 @@
+backend: clonea_codec
+env: clonea_codec
+python: "3.12"
+torch:
+  - torch==2.9.1
+  - torchaudio==2.9.1
+lock: clonea_codec
+lock_flags: [--no-deps]        # the lock is a complete uv pip freeze: nothing to resolve
+vendor: [Spark-TTS]
+steps: []
+check: "import torch, xcodec2, transformers, torchtune"
+manual: []
+tested: []
+size_gb: 6
+shares_env_with: null

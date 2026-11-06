@@ -1,0 +1,104 @@
+# Packs for ./install.sh: a pack is a list of registry model ids (models.yaml / models.d/*.yaml). Installing a pack
+# installs the backends (venvs + upstream source) of its models; with --weights (or the question at the end of the
+# interactive menu) it also downloads their weights, one Hugging Face repo at a time.
+#   title / description  shown in the menu
+#   models               registry model ids (a model whose backend is not installable is skipped with a message)
+#   backends             extra backends to install without a specific model
+#   include              other packs
+#   everything: true     every installable (not blocked, not cloud) model of the registry
+#   default: true        what Enter / --yes picks in the menu
+# Sizes in the menu come from install/<backend>.yaml (size_gb of each venv) and install/sizes.yaml (weights).
+# Every model listed here is flagged commercial: true in the registry. Non-commercial models (MusicGen, XTTS, ...)
+# are not in any pack except `all`: install them one by one (./install.sh model <id>) after reading their licence.
+# "Fits 24-32 GB": starter models were chosen to run on a single 24-32 GB GPU (registry memory_gb in brackets);
+# the other packs also hold larger models, marked in the comments.
+packs:
+  starter:
+    title: Starter
+    description: "small, fast, commercial-OK: one image model, sound effects, a voice, image-to-3D"
+    default: true
+    models:
+      - z-image-turbo           # image, 14.5 GB weights [30 GB]
+      - moss-sfx-v2             # sound effects / ambience, 11 GB [18 GB] (Stable Audio 3 is smaller but gated: needs a HF login)
+      - kokoro-82m              # text to speech, 0.4 GB [3 GB]
+      - triposr                 # image to 3D mesh, 1.7 GB [6 GB]
+
+  image:
+    title: Images
+    description: "text to image, edit, transparent RGBA (Qwen-Image 2.1 needs ~56 GB of memory)"
+    models:
+      - z-image-turbo           # [30 GB]
+      - lumina-image-2.0        # [25 GB]
+      - qwen-image-2.1          # [56 GB] best text rendering, RGBA, edits
+
+  3d:
+    title: 3D
+    description: "image to 3D shape (TripoSR, TripoSG, Hunyuan3D 2mini, TRELLIS) and Hunyuan3D 2.1 with textures"
+    models:
+      - triposr                 # [6 GB]
+      - triposg                 # [16 GB]
+      - hunyuan3d-2mini         # [10 GB]
+      - trellis-image-large     # [20 GB]
+      - hunyuan3d-2.1           # [45 GB] shape + texture (texturing needs nvcc)
+
+  video:
+    title: Video
+    description: "text / image to video (Wan 2.1 1.3B, Wan 2.2 5B, Kandinsky 6), frame interpolation, video to sound"
+    models:
+      - wan21-t2v-1.3b          # [14 GB]
+      - wan22-ti2v-5b           # [40 GB]
+      - kandinsky6-lite-distill # [36 GB]
+      - rife-v4                 # [4 GB] frame interpolation
+      - hunyuan-foley           # [26 GB] video to sound
+
+  sound:
+    title: Sound
+    description: "sound effects, ambience, prompt-match QA, subtitles, stem separation"
+    models:
+      - sa3-small-sfx           # [4 GB] gated on Hugging Face: accept the terms + hf auth login
+      - sa3-medium              # [10 GB] sfx / ambience / music, gated too
+      - moss-sfx-v2             # [18 GB]
+      - make-an-audio-2         # [8 GB]
+      - clap-htsat              # [2 GB] prompt match score
+      - whisper-v3-turbo        # [3 GB] transcript score
+      - whisper-subs-turbo      # [4 GB] subtitles
+      - demucs-htdemucs         # [5 GB] stem separation
+      - moss-transcribe-diarize # [8 GB] transcript with speakers
+
+  voice:
+    title: Voice
+    description: "text to speech, voice design, voice cloning and conversion"
+    models:
+      - kokoro-82m              # [3 GB]
+      - qwen3-tts-customvoice   # [6 GB]
+      - qwen3-tts-base          # [6 GB] voice cloning
+      - omnivoice               # [4 GB]
+      - chatterbox              # [6 GB]
+      - dia2-2b                 # [12 GB]
+      - moss-tts-local-v1.5     # [16 GB]
+      - seed-vc                 # [5 GB] voice conversion
+
+  music:
+    title: Music
+    description: "instrumental music and songs with vocals"
+    models:
+      - acestep-1.5-turbo       # [14 GB] songs, MIT
+      - heartmula-3b            # [20 GB] songs
+      - riffusion-v1            # [4 GB]
+      - magenta-rt2-small       # [6 GB] needs a CUDA 13 driver (JAX)
+      - minimax-music3          # [28 GB]
+
+  omni:
+    title: Speech to speech
+    description: "voice chat models (Moshi, Qwen2.5-Omni 7B, MiniCPM-o 4.5, Step-Audio 2 mini, GLM-4-Voice); one venv each"
+    models:
+      - moshi                   # [20 GB]
+      - qwen25-omni-7b          # [28 GB]
+      - minicpm-o-4_5           # [26 GB]
+      - step-audio-2-mini       # [24 GB]
+      - glm-4-voice-9b          # [24 GB]
+
+  all:
+    title: Everything
+    description: "every installable model, including non-commercial ones (hundreds of GB; read the licences first)"
+    everything: true

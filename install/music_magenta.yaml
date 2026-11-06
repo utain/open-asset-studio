@@ -1,0 +1,15 @@
+backend: music_magenta
+env: music_magenta
+python: "3.12"
+torch: []
+lock: music_magenta
+lock_flags: [--no-deps]        # the lock is a complete uv pip freeze: nothing to resolve
+vendor: [magenta-realtime]
+steps: []
+check: "import jax, magenta_rt"
+manual:
+  - "Needs a CUDA 13 driver: the JAX packages in the lock are the jax-cuda13 build (no cu128 equivalent is pinned)."
+  - "The studio links vendor/magenta_home to the HF snapshot of google/magenta-realtime-2 itself: download the weights first (./install.sh model magenta-rt2-small)."
+tested: []
+size_gb: 6
+shares_env_with: null

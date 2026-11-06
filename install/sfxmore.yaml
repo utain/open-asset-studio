@@ -1,0 +1,17 @@
+backend: sfxmore
+env: sfxmore
+python: "3.12"
+torch:
+  - torch==2.9.1
+  - torchaudio==2.9.1
+  - torchvision==0.24.1
+lock: sfxmore
+lock_flags: [--no-deps]        # the lock is a complete uv pip freeze: nothing to resolve
+vendor: [TangoFlux, vendor/tango, Make-An-Audio-2, BigVGAN-awei6]
+steps: []
+check: "import torch, diffusers, transformers, torchlibrosa"
+manual:
+  - "stable-audio-open-* are handled by the `sao` backend (gated)."
+tested: []
+size_gb: 6
+shares_env_with: null

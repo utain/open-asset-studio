@@ -193,6 +193,17 @@ class Registry:
         return False, f"unknown weight spec {w}", ""
 
     @staticmethod
+    def _installer_fix(m: dict, b: dict | None = None, w: dict | None = None, fix: str = "") -> str:
+        """Fix text that points at the installer (`./install.sh model <id>`), or the given more specific one.
+        Backend side (`b`): only when install/<backend>.yaml exists. Weight side (`w`): Hugging Face repos and entries
+        with a download_cmd (the installer runs those); the raw command stays as the manual alternative."""
+        if b is not None:
+            return f"./install.sh model {m['id']}" if (config.STUDIO / "install" / f"{b['name']}.yaml").is_file() else fix
+        if w is not None and ("hf" in w or w.get("download_cmd")):
+            return f"./install.sh model {m['id']}   # or: {fix}" if fix else f"./install.sh model {m['id']}"
+        return fix
+
+    @staticmethod
     def _glob_ok(snap: Path, pattern: str) -> bool:
         for hit in glob.glob(str(snap / pattern), recursive=True):
             if os.path.exists(hit):  # resolves the blob symlink: a dangling link means an unfinished download
@@ -230,16 +241,16 @@ class Registry:
             for w in m["weights"]:
                 ok, what, fix = self._check_weight(w)
                 if not ok:
-                    return st("missing_weights", what, fix)
+                    return st("missing_weights", what, self._installer_fix(m, w=w, fix=fix))
             return st("ready")
         py, script = self.backend_paths(b)
         if not py or not py.exists():
             return st("missing_env", f"python interpreter not found: {py}",
-                      b.get("fix") or f"Recreate the venv (see env-lock/{b.get('lock', b['name'])}.txt and README)")
+                      self._installer_fix(m, b=b, fix=b.get("fix") or f"Recreate the venv (see env-lock/{b.get('lock', b['name'])}.txt and README)"))
         for w in m["weights"]:
             ok, what, fix = self._check_weight(w)
             if not ok:
-                r = st("missing_weights", what, fix)
+                r = st("missing_weights", what, self._installer_fix(m, w=w, fix=fix))
                 r["downloadable"] = any(("hf" in x or x.get("download_cmd")) and not self._check_weight(x)[0] for x in m["weights"])
                 return r
         if not script or not script.exists():

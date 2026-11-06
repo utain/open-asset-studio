@@ -1,0 +1,14 @@
+backend: core
+env: core
+python: "3.12"
+torch: []
+lock: core
+lock_flags: []
+vendor: []
+steps: []
+check: "import fastapi, uvicorn, yaml, soundfile, PIL, huggingface_hub"
+manual:
+  - "ffmpeg and ffprobe must be on PATH (waveforms, video to sound, loudness)."
+tested: [linux-aarch64]
+size_gb: 1
+shares_env_with: null

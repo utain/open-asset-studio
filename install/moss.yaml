@@ -1,0 +1,17 @@
+backend: moss
+env: moss
+python: "3.12"
+torch:
+  - torch==2.9.1
+  - torchaudio==2.9.1
+lock: moss
+lock_flags: [--no-deps]        # the lock is a complete uv pip freeze: nothing to resolve
+vendor: [MOSS-TTS]
+steps: []
+check: "import torch, transformers, soundfile; assert transformers.__version__ == \"5.0.0\""
+manual:
+  - "transformers must stay at 5.0.0 in this venv (the MOSS-TTS remote code breaks on newer versions); envs/moss is shared with the moss_more backend."
+  - "moss-tts-nano additionally needs the upstream package github.com/OpenMOSS/MOSS-TTS-Nano (pip install -e . plus WeTextProcessing) in this venv; not automated."
+tested: []
+size_gb: 6
+shares_env_with: null

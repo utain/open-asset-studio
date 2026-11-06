@@ -1,0 +1,17 @@
+backend: audio
+env: audio
+python: "3.12"
+torch:
+  - torch==2.9.1
+  - torchaudio==2.9.1
+lock: audio
+lock_flags: [--no-deps]        # the lock is a complete uv pip freeze: nothing to resolve
+vendor: []
+steps: []
+check: "import torch, transformers, diffusers, stable_audio_tools, omnivoice, f5_tts, moss_soundeffect_v2, snac, vocos"
+manual:
+  - "Some Stable Audio 3 repos and other stabilityai/* weights are gated: accept the terms on the model page and run `envs/core/bin/hf auth login`, then ./install.sh model <id>."
+  - "git is needed during the install: stable-audio-tools, diffusers and moss-soundeffect-v2 are installed from pinned GitHub commits."
+tested: []
+size_gb: 6
+shares_env_with: null

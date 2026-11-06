@@ -1,0 +1,15 @@
+backend: qwentts
+env: qwentts
+python: "3.12"
+torch:
+  - torch==2.9.1
+  - torchaudio==2.9.1
+lock: qwentts
+lock_flags: [--no-deps]        # the lock is a complete uv pip freeze: nothing to resolve
+vendor: []
+steps: []
+check: "import torch, qwen_tts, transformers"
+manual: []
+tested: [linux-aarch64]
+size_gb: 6
+shares_env_with: null

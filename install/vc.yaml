@@ -1,0 +1,16 @@
+backend: vc
+env: vc
+python: "3.12"
+torch:
+  - torch==2.9.1
+  - torchaudio==2.9.1
+lock: vc
+lock_flags: [--no-deps]        # the lock is a complete uv pip freeze: nothing to resolve
+vendor: [seed-vc, rvc]
+steps: []
+check: "import torch, transformers, faiss, librosa"
+manual:
+  - "RVC voice models are your own: put <name>.pth + <name>.index in data/rvc_voices/<name>/ (a free example: ./install.sh model rvc shows the command)."
+tested: []
+size_gb: 6
+shares_env_with: null

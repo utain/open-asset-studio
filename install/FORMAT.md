@@ -29,3 +29,16 @@ Rules:
 - No `sudo`, no edits outside the repo, no downloads of model weights in `steps` (weights come from the
   registry: `./install.sh model <id>` downloads them one repo at a time).
 - Platform-specific steps: `steps_linux-aarch64: [...]` / `steps_linux-x86_64: [...]` are run in addition to `steps`.
+
+How `./install.sh` runs a recipe (details that are not obvious from the keys):
+- Order: `vendor` clones, `uv venv`, `torch` (from the PyTorch index), `lock`, `steps` (+ platform steps), `check`.
+  `steps` run with `bash -euo pipefail`; the extra environment variables are `VIRTUAL_ENV`, `PY`, `REPO` and
+  `TORCH_INDEX` (`cu130` or `cu128`), and `PATH` starts with the venv's `bin/`, so a plain `uv pip install ...` targets the venv.
+- `lock` files are frozen on cu130. On cu128 the installer drops the torch family, the `nvidia-*` CUDA libraries and
+  `triton` from a temporary copy (the `torch` step already brought matching ones) and removes `+cuNNN` suffixes.
+  List every torch-index package of the lock (`torch`, `torchaudio`, `torchvision`, `torchcodec`) in `torch:`.
+- `lock_flags: [--no-deps]` is right for a complete `uv pip freeze` (nothing left to resolve). If `lock_flags` contains
+  `--no-build-isolation`, setuptools and wheel are installed first.
+- A recipe with `shares_env_with` runs after the recipe it shares with; its own `vendor`, `steps` and `check` run in that venv.
+- A recipe with no `lock`, `torch`, `steps` or `shares_env_with` is manual-only: the installer prints `manual:` and does nothing else.
+- An `envs/<env>` that is a symlink is never modified. `./install.sh validate` checks every recipe against this file.

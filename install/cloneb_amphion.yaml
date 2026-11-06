@@ -1,0 +1,21 @@
+backend: cloneb_amphion
+env: cloneb_amphion
+python: "3.12"
+torch:
+  - torch==2.9.1
+  - torchaudio==2.9.1
+  - torchvision==0.24.1
+lock: cloneb_amphion
+lock_flags: [--no-deps]        # the lock is a complete uv pip freeze: nothing to resolve
+vendor: [Amphion]
+steps:
+  - |
+    SP=$($PY -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')
+    sed -i '1s/.*/from .LangSegment import LangSegment,getTexts,classify,getCounts,printList,setfilters,getfilters/' "$SP/LangSegment/__init__.py"
+check: "import torch, transformers, LangSegment, pyworld, torchcrepe"
+manual:
+  - "pyworld builds from source: a C/C++ compiler (build-essential) must be installed."
+  - "vevo needs the torchaudio HuBERT-large checkpoint (1.26 GB) and vevo15 whisper \"medium\" (1.5 GB); ./install.sh model vevo prints the exact command."
+tested: []
+size_gb: 6
+shares_env_with: null

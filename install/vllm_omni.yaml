@@ -1,0 +1,17 @@
+backend: vllm_omni              # Higgs TTS 3, Fish S2 Pro, Voxtral TTS, CosyVoice 3 through vLLM-Omni
+env: vllm_omni
+python: "3.12"
+torch: []
+lock: null
+lock_flags: []
+vendor: []
+steps: []
+check: null
+manual:
+  - "Not installed automatically: vLLM-Omni needs a vLLM build for your GPU (on the DGX Spark / GB10, aarch64 + sm_121, that is a long separate job). Clone the pinned source with `scripts/fetch_vendor.sh vllm-omni` and follow its README to build a venv, then point the studio at it: `ln -s /path/to/that/venv envs/vllm_omni` (the studio only needs envs/vllm_omni/bin/python). Reference versions: Python 3.12, torch 2.11.0+cu130, vllm 0.25.0, vllm-omni 0.25.0rc2.dev41, transformers 5.14.1 (docs/research/audio_models.md section 3)."
+  - "Then install the overlay (extra packages kept out of that venv; a plain folder, not a venv): `uv pip install --python envs/vllm_omni/bin/python --target envs/vllm_omni_overlay --no-deps -r env-lock/vllm_omni_overlay.txt`. The studio puts envs/vllm_omni_overlay on PYTHONPATH for this backend."
+  - "CosyVoice 3 also needs ~/.cache/s3tokenizer/speech_tokenizer_v3_25hz.onnx (the studio's s3tokenizer reads it from there; link it from the cached FunAudioLLM/Fun-CosyVoice3-0.5B-2512 snapshot, speech_tokenizer_v3.onnx)."
+  - "Deploy configs for the four models are in docs/research/audio_snippets/vllm_omni_deploy/ (they cap GPU memory use; the stock ones reserve 40-90 %)."
+tested: []
+size_gb: 10
+shares_env_with: null

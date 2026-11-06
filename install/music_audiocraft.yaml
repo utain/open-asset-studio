@@ -1,0 +1,15 @@
+backend: music_audiocraft
+env: music_audiocraft
+python: "3.12"
+torch:
+  - torch==2.9.1
+  - torchaudio==2.9.1
+lock: music_audiocraft
+lock_flags: [--no-deps]        # the lock is a complete uv pip freeze: nothing to resolve
+vendor: [audiocraft]
+steps: []
+check: "import torch, demucs, diffusers"
+manual: []
+tested: []
+size_gb: 6
+shares_env_with: null

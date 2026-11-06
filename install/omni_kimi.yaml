@@ -1,0 +1,17 @@
+backend: omni_kimi
+env: omni_kimi
+python: "3.12"
+torch:
+  - torch==2.9.1
+  - torchaudio==2.9.1
+  - torchvision==0.24.1
+lock: omni_kimi
+lock_flags: [--no-deps]        # the lock is a complete uv pip freeze: nothing to resolve
+vendor: [Kimi-Audio]
+steps: []
+check: "import torch, transformers"
+manual:
+  - "Kimi-Audio is 44 GB of weights (the flow detokenizer alone is 19 GB)."
+tested: []
+size_gb: 5
+shares_env_with: null

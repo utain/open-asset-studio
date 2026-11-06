@@ -1,0 +1,12 @@
+backend: echo
+env: core
+python: "3.12"
+torch: []
+lock: null
+lock_flags: []
+vendor: []
+steps: []
+manual: []
+tested: []
+size_gb: 0
+shares_env_with: core

@@ -1,0 +1,15 @@
+backend: cloneb_index
+env: cloneb_index
+python: "3.12"
+torch:
+  - torch==2.9.1
+  - torchaudio==2.9.1
+lock: cloneb_index
+lock_flags: [--no-deps]        # the lock is a complete uv pip freeze: nothing to resolve
+vendor: [index-tts]
+steps: []
+check: "import torch, transformers, wetext"
+manual: []
+tested: []
+size_gb: 6
+shares_env_with: null

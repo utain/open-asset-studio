@@ -1,0 +1,16 @@
+backend: clonea_zonos
+env: clonea_zonos
+python: "3.12"
+torch:
+  - torch==2.9.1
+  - torchaudio==2.9.1
+lock: clonea_zonos
+lock_flags: [--no-deps]        # the lock is a complete uv pip freeze: nothing to resolve
+vendor: [Zonos]
+steps: []
+check: "import torch, zonos, transformers"
+manual:
+  - "zonos-v0.1-hybrid stays blocked: it needs the mamba-ssm and causal-conv1d CUDA kernels (nvcc)."
+tested: []
+size_gb: 5
+shares_env_with: null

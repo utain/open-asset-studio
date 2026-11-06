@@ -36,16 +36,34 @@ You are responsible for following the licence of each model, and of each upstrea
 
 ## Quick start
 
-Requirements: Linux, Python 3.12, [uv](https://docs.astral.sh/uv/), git, ffmpeg, an NVIDIA GPU with a recent driver.
+Requirements: Linux (x86_64 or aarch64), an NVIDIA GPU with a driver that supports CUDA 12.8+ (CUDA 13 is the
+tested one), git, ffmpeg and [uv](https://docs.astral.sh/uv/) (`curl -LsSf https://astral.sh/uv/install.sh | sh`).
+Python 3.12 is installed by uv; nothing is installed system-wide.
 
 ```bash
-uv venv --python 3.12 envs/core && VIRTUAL_ENV=$PWD/envs/core uv pip install -r env-lock/core.txt
+git clone <repository-url> open-asset-studio && cd open-asset-studio && ./install.sh
 ./run_studio.sh                      # http://127.0.0.1:7860
 ```
 
-The core starts with no GPU backends installed: the Models page lists every model with its status
-(`missing_env` / `missing_weights`) and the command that fixes it. Install only the backends you want; see
-[docs/SETUP.md](docs/SETUP.md). The CPU test models (Diagnostics page) work right away.
+`./install.sh` checks the prerequisites, installs the core, then asks which **packs** of models to install
+(default: `starter`, about 30 GB: one image model, sound effects, a voice and image-to-3D, all commercial-OK and
+small enough for a 24-32 GB GPU). It downloads model weights one Hugging Face repo at a time and skips what is
+already in your cache. Models whose repo is gated tell you to accept the terms and run `hf auth login`.
+
+```bash
+./install.sh list                    # packs, backends, models: installed? how big?
+./install.sh doctor                  # GPU, driver, CUDA, disk, ffmpeg, HF login, broken backends
+./install.sh pack image 3d --weights # more packs (starter image 3d video sound voice music omni all)
+./install.sh model qwen-image-2.1    # one model: its backend + its weights
+./install.sh backend foley           # one backend only (add --weights for all its models' weights)
+./install.sh pack starter --dry-run  # show what would be done; --yes skips the questions
+```
+
+The core also starts with nothing installed: the Models page lists every model with its status
+(`missing_env` / `missing_weights`) and the `./install.sh model <id>` command that fixes it. The CPU test models
+(Diagnostics page) work right away. The recipes behind the installer are `install/<backend>.yaml`
+(format: [install/FORMAT.md](install/FORMAT.md)) and `install/packs.yaml`; the manual version of every step is in
+[docs/SETUP.md](docs/SETUP.md).
 
 ## Run
 
@@ -182,6 +200,7 @@ Full schema, worker protocol, job API, asset meta and the frontend module contra
 | `envs/foley` | MMAudio, HunyuanVideo-Foley, ThinkSound (needs `ffmpeg` on PATH to mux the video) | `docs/research/audio_more/foley.md`, `env-lock/foley.txt` |
 | `envs/omni_{moshi,qwen,glm,minicpm,step,kimi,llama2}` | speech-to-speech / omni models | `docs/research/audio_more/omni.md`, `env-lock/omni_*.txt` |
 | `envs/vc`, `envs/vc_diffsinger` | Seed-VC, RVC; DiffSinger | `docs/research/audio_more/vc_sing.md`, `env-lock/vc*.txt` |
+| `envs/stab3d`, `envs/shape3d`, `envs/trellis`, `envs/rig` | TripoSR, SF3D, SPAR3D, Zero123++, SV3D (Stability AI); TripoSG, Hunyuan3D-2mini, Step1X-3D; TRELLIS (image to 3D, multi-view); UniRig (auto-rigging) | `docs/research/3d_more.md`, `env-lock/stab3d.txt`, `env-lock/shape3d.txt`, `env-lock/trellis.txt`, `env-lock/rig.txt` |
 | `envs/qwen`, `envs/hy3d` | diffusers image models; Hunyuan3D-2.1, Real-ESRGAN, rembg (engine code in `engines/hy3d/`) | `docs/SETUP.md`, `env-lock/qwen.txt`, `env-lock/hy3d.txt` |
 | `envs/moss` | MOSS-TTS, MOSS-VoiceGenerator (transformers 5.0.0) | `docs/SETUP.md`, `env-lock/moss.txt` |
 

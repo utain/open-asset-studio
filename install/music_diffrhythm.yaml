@@ -1,0 +1,17 @@
+backend: music_diffrhythm
+env: music_diffrhythm
+python: "3.12"
+torch:
+  - torch==2.9.1
+  - torchaudio==2.9.1
+  - torchvision==0.24.1
+lock: music_diffrhythm
+lock_flags: [--no-deps]        # the lock is a complete uv pip freeze: nothing to resolve
+vendor: [DiffRhythm]
+steps: []
+check: "import torch, transformers, muq"
+manual:
+  - "DiffRhythm phonemizes lyrics with espeak-ng: install it with your package manager (apt install espeak-ng) if lyrics come out garbled."
+tested: []
+size_gb: 6
+shares_env_with: null

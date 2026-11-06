@@ -1,0 +1,17 @@
+backend: clonea_xtts
+env: clonea_xtts
+python: "3.12"
+torch:
+  - torch==2.9.1
+  - torchaudio==2.9.1
+  - torchcodec==0.17.0
+lock: clonea_xtts
+lock_flags: [--no-deps]        # the lock is a complete uv pip freeze: nothing to resolve
+vendor: []
+steps: []
+check: "import torch, TTS, transformers"
+manual:
+  - "torchcodec has no usable aarch64 build: the worker patches torchaudio.load to use soundfile."
+tested: []
+size_gb: 6
+shares_env_with: null

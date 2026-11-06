@@ -1,0 +1,13 @@
+backend: imgtools
+env: hy3d
+python: "3.12"
+torch: []
+lock: null
+lock_flags: []
+vendor: []
+steps: []
+check: "import torch, rembg"
+manual: []
+tested: []
+size_gb: 0
+shares_env_with: hy3d

@@ -1,0 +1,28 @@
+backend: hy3d
+env: hy3d
+python: "3.12"
+torch:
+  - torch==2.9.0
+  - torchaudio==2.9.0
+  - torchvision==0.24.0
+lock: hy3d
+lock_flags: [--no-deps, --no-build-isolation]
+vendor: [Hunyuan3D-2.1]
+steps:
+  - |
+    SP=$($PY -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')
+    mkdir -p "$SP/bpy" && cp install/files/hy3d_bpy_stub.py "$SP/bpy/__init__.py"
+  - |
+    if [ -f engines/hy3d/vendor/Hunyuan3D-2.1/hy3dpaint/custom_rasterizer/setup.py ] && command -v nvcc >/dev/null 2>&1; then
+      uv pip install --no-build-isolation ./engines/hy3d/vendor/Hunyuan3D-2.1/hy3dpaint/custom_rasterizer
+    else
+      echo "note: nvcc not found, skipping custom_rasterizer (Hunyuan3D texture stage); shape generation works without it"
+    fi
+check: "import torch, diffusers, trimesh, rembg, bpy, xatlas"
+manual:
+  - "Hunyuan3D-2.1 texturing needs the custom_rasterizer CUDA extension. It is built automatically when `nvcc` (CUDA toolkit) is on PATH; without nvcc only shape generation works (see docs/research/image_models.md)."
+  - "bpy is replaced by a stub module (no Blender wheel for CPython 3.12 on aarch64): the paint pipeline runs with save_glb=False."
+  - "rembg uses ~/.u2net/u2net.onnx (./install.sh model rembg-u2net prints how to fetch it); Real-ESRGAN needs engines/hy3d/vendor/Hunyuan3D-2.1/hy3dpaint/ckpt/RealESRGAN_x4plus.pth (https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth)."
+tested: [linux-aarch64]
+size_gb: 6
+shares_env_with: null

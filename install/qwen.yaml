@@ -1,0 +1,16 @@
+backend: qwen
+env: qwen
+python: "3.12"
+torch:
+  - torch==2.9.0
+  - torchvision==0.24.0
+lock: qwen
+lock_flags: [--no-deps]        # the lock is a complete uv pip freeze: nothing to resolve
+vendor: []
+steps: []
+check: "import torch, transformers, diffusers; assert hasattr(diffusers, \"QwenImage21Pipeline\")"
+manual:
+  - "Image weights are large (Qwen-Image 2.1 is 32 GB); FLUX.1 Kontext / Krea are non-commercial and some FLUX repos are gated on Hugging Face (accept the terms, then `envs/core/bin/hf auth login`)."
+tested: []
+size_gb: 5
+shares_env_with: null

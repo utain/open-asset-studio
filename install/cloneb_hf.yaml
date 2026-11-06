@@ -1,0 +1,16 @@
+backend: cloneb_hf
+env: cloneb_hf
+python: "3.12"
+torch:
+  - torch==2.9.1
+  - torchaudio==2.9.1
+lock: cloneb_hf
+lock_flags: [--no-deps]        # the lock is a complete uv pip freeze: nothing to resolve
+vendor: [dia2]
+steps: []
+check: "import torch, dia2, transformers, diffusers, sphn"
+manual:
+  - "csm-1b is blocked: its Hugging Face repo (sesame/csm-1b) is gated."
+tested: []
+size_gb: 6
+shares_env_with: null

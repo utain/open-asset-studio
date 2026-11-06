@@ -1,0 +1,16 @@
+backend: music_yue
+env: music_yue
+python: "3.12"
+torch:
+  - torch==2.9.1
+  - torchaudio==2.9.1
+lock: music_yue
+lock_flags: [--no-deps]        # the lock is a complete uv pip freeze: nothing to resolve
+vendor: [YuE-v1]
+steps: []
+check: "import torch, transformers, sentencepiece"
+manual:
+  - "YuE is slow (about 8 minutes for 12 s of audio). Its xcodec_mini_infer folder is linked from the HF snapshot m-a-p/xcodec_mini_infer on first run."
+tested: []
+size_gb: 6
+shares_env_with: null

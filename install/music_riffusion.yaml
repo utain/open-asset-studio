@@ -1,0 +1,13 @@
+backend: music_riffusion
+env: music_audiocraft
+python: "3.12"
+torch: []
+lock: null
+lock_flags: []
+vendor: []
+steps: []
+check: "import torch, diffusers"
+manual: []
+tested: []
+size_gb: 0
+shares_env_with: music_audiocraft

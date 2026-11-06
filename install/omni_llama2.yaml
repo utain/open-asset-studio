@@ -1,0 +1,16 @@
+backend: omni_llama2
+env: omni_llama2
+python: "3.12"
+torch:
+  - torch==2.9.1
+  - torchaudio==2.9.1
+lock: omni_llama2
+lock_flags: [--no-deps]        # the lock is a complete uv pip freeze: nothing to resolve
+vendor: [LLaMA-Omni2, Matcha-TTS]
+steps: []
+check: "import torch, transformers, whisper"
+manual:
+  - "LLaMA-Omni2 needs the OpenAI Whisper large-v3 checkpoint (3 GB) in ~/.cache/whisper: run envs/omni_llama2/bin/python -c \"import whisper; whisper.load_model('large-v3')\" once with network."
+tested: []
+size_gb: 6
+shares_env_with: null

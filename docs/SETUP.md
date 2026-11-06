@@ -1,5 +1,30 @@
 # Setup
 
+## Quick install
+
+```bash
+./install.sh                          # core + a menu of packs (default: starter); asks before downloading weights
+./install.sh list                     # packs, backends, models, what is installed
+./install.sh doctor                   # GPU / driver / CUDA / disk / ffmpeg / HF login / broken backends
+./install.sh core | pack <name>... | backend <id>... | model <model-id>...    [--weights] [--dry-run] [--yes] [--force]
+```
+
+`install.sh` needs `git`, `ffmpeg` / `ffprobe` and `uv` (it prints the install command for what is missing), reads the
+NVIDIA driver's CUDA version with `nvidia-smi` and picks the PyTorch wheel index (CUDA 13 -> `cu130`, 12.8 / 12.9 ->
+`cu128`, older -> error; override with `--torch-index`), checks the disk space, then runs `scripts/install.py` with
+uv-managed Python 3.12. What it does for each backend is written in `install/<backend>.yaml` (format:
+[install/FORMAT.md](../install/FORMAT.md): venv, torch, `env-lock/` file, upstream clones from `vendor/vendor.lock`,
+extra steps, an import check, manual notes). Model weights come from the registry's `weights:` entries (the same
+ones the Models page checks): one Hugging Face repo at a time, `HF_HUB_OFFLINE=0 HF_HUB_DISABLE_XET=1`, repos
+already in the cache are skipped, HTTP 401/403 (gated: accept the terms and `hf auth login`) and 429 (rate limit:
+retry later) stop the run. Environments that are symlinks to another install are never touched. Backends that
+cannot be scripted (`vllm_omni`, the optional `llm`) have a recipe with manual steps only; `./install.sh backend
+vllm_omni` prints them.
+
+Everything below is the manual version of the same steps, kept as a reference.
+
+---
+
 The studio is one small core plus many optional GPU backends. Each backend is its own Python venv under `envs/`,
 because the models pin incompatible versions of torch, transformers and diffusers. Install only the backends you
 want: the Models page shows every model's status and the command that fixes it.
@@ -50,15 +75,17 @@ runtime) are in the group reports:
 | backends | report |
 |---|---|
 | `audio`, `qwentts`, `moss`, `vllm_omni` | [research/audio_models.md](research/audio_models.md) §3 |
-| `moss_more` (reuses `envs/moss`), `moss_asr` | [research/moss_more.md](research/moss_more.md) |
+| `moss_more` (reuses `envs/moss`), `moss_asr`, `moss_audio` | [research/moss_more.md](research/moss_more.md) |
 | `ttslight`, `ttslight_parler` | [research/audio_more/tts_light.md](research/audio_more/tts_light.md) |
 | `clonea_*` | [research/audio_more/tts_clone_a.md](research/audio_more/tts_clone_a.md) |
 | `cloneb_*` | [research/audio_more/tts_clone_b.md](research/audio_more/tts_clone_b.md) |
 | `music_*` | [research/audio_more/music.md](research/audio_more/music.md) |
 | `sfxmore` | [research/audio_more/sfx_more.md](research/audio_more/sfx_more.md) |
 | `foley` | [research/audio_more/foley.md](research/audio_more/foley.md) |
+| `media_audio` (subtitles, stem separation, dubbing) | [research/media_audio.md](research/media_audio.md), `install/media_audio.yaml`, `env-lock/media_audio.txt` |
 | `omni_*` | [research/audio_more/omni.md](research/audio_more/omni.md) |
 | `vc`, `vc_diffsinger` | [research/audio_more/vc_sing.md](research/audio_more/vc_sing.md) |
+| `stab3d`, `shape3d`, `trellis`, `rig` (TripoSR, SF3D, SPAR3D, Zero123++, SV3D, TripoSG, Hunyuan3D-2mini, Step1X-3D, TRELLIS, UniRig auto-rigging) | [research/3d_more.md](research/3d_more.md) and `env-lock/stab3d.txt`, `shape3d.txt`, `trellis.txt`, `rig.txt` |
 | `video` (Wan 2.x, LTX-2.3, Kandinsky 6, HunyuanVideo 1.5, RIFE) | [research/video.md](research/video.md) and `env-lock/video.txt` |
 | `qwen`, `hy3d`, `imgtools` | below, and the headers of `env-lock/qwen.txt` / `env-lock/hy3d.txt` |
 
