@@ -1,0 +1,224 @@
+# Video studio (backend `video` = envs/video, workers/video_worker.py).
+#
+# Tasks: t2v (text to video), i2v (image to video: first frame), flf2v (first + last frame), interpolate (RIFE, 2x / 4x frame rate).
+# The studio sends the first frame as input role `image`, the last frame as `last_image`, and the clip to interpolate as `video`.
+# Every output is an h264 / yuv420p / faststart mp4 (asset type `video`, poster made by the core). Models marked `audio` also
+# generate synchronised sound, which is muxed into the mp4 (AAC).
+# Numbers (time, memory) were measured on a DGX Spark (GB10, 121 GB unified memory): docs/research/video.md.
+#
+# Shared parameter names (so settings carry over when the model changes): seconds, aspect, resolution (short side px),
+# match_image, fps, steps, guidance, audio, batch, seed, offload, vae_tiling.
+
+defs:
+  aspect: &aspect {name: aspect, label: Aspect ratio, type: choice, choices: ["16:9", "9:16", "1:1", "4:3", "3:4"], default: "16:9", group: basic,
+                   help: "16:9 YouTube / film, 9:16 Reels / Shorts / TikTok, 1:1 feed posts. Image to video follows the picture unless 'Match the input image' is off."}
+  match: &match {name: match_image, label: Match the input image, type: bool, default: true, group: basic, tasks: [i2v, flf2v],
+                 help: "On: the video has the aspect ratio of the first-frame image. Off: the image is cropped to the aspect ratio above."}
+  batch: &batch {name: batch, label: Takes, type: int, min: 1, max: 4, default: 1, group: basic, help: "Each take is a separate render with the next seed."}
+  seed: &seed {name: seed, type: seed, default: -1}
+  offload: &offload {name: offload, label: Memory mode, type: choice, choices: [{value: none, label: "Everything on the GPU (fastest)"}, {value: model, label: "Offload idle parts to CPU"}, {value: sequential, label: "Sequential offload (slowest, least memory)"}],
+                     default: none, group: advanced, help: "The GB10 shares one memory pool between CPU and GPU, so offloading saves little here; it is for smaller GPUs."}
+  tiling: &tiling {name: vae_tiling, label: Tiled VAE decode, type: bool, default: false, group: advanced, help: "Decodes the video in tiles: lower peak memory at 720p and above, slightly slower."}
+
+tasks:
+  t2v:         {label: Text to video,    modality: video, studio: video}
+  i2v:         {label: Image to video,   modality: video, studio: video}
+  flf2v:       {label: First + last frame, modality: video, studio: video}
+  interpolate: {label: Smooth (RIFE),    modality: video, studio: video}
+
+backends:
+  video:
+    label: envs/video (diffusers 0.42, torch 2.9 cu130)
+    python: envs/video/bin/python
+    script: workers/video_worker.py
+    device: gpu
+    lock: video
+    max_loaded: 1
+    model_idle_s: 600
+    kill_on_cancel: true
+
+models:
+  # ------------------------------------------------------------------------------------------------------ Wan 2.1 1.3B
+  - id: wan21-t2v-1.3b
+    name: Wan 2.1 T2V 1.3B
+    family: wan21
+    modality: video
+    tasks: [t2v]
+    default_for: [t2v]
+    order: 10
+    tags: [fast, preview, silent, apache]
+    summary: "Small and fast preview model: 480p, 16 fps, up to 5 s, text to video only. Good for trying prompts and camera moves before a long render. Apache-2.0."
+    features: {negative: true, max_frames: 81, fps: 16, steps: 30, guidance: 5.0, audio: false, max_resolution: 480, native_size: 480}
+    backend: video
+    prompt_style: video_wan
+    weights:
+      - {hf: Wan-AI/Wan2.1-T2V-1.3B-Diffusers, files: ["transformer/*", "vae/*", "scheduler/*", "model_index.json"]}
+      - {hf: Wan-AI/Wan2.2-TI2V-5B-Diffusers, files: ["text_encoder/*", "tokenizer/*"]}
+    license: {name: Apache-2.0, commercial: true, note: "Wan-AI weights; the shared UMT5 text encoder is Apache-2.0 too."}
+    memory_gb: 14
+    speed: "5 s 480p clip in about 1 min"
+    est: {load_s: 20, run_s: 60}
+    params:
+      - {name: seconds, label: Duration, type: float, min: 1, max: 5, step: 0.5, default: 5, unit: s, group: basic}
+      - *aspect
+      - {name: resolution, label: Resolution, type: choice, choices: [{value: 320, label: "320p (draft)"}, {value: 480, label: "480p"}], default: 480, group: basic, help: "Trained at 480p; 320p is a quick draft."}
+      - *batch
+      - *seed
+      - {name: fps, label: Frame rate, type: int, min: 8, max: 30, default: 16, unit: fps, group: advanced, help: "Trained at 16 fps. A higher value plays the same frames faster."}
+      - {name: steps, label: Steps, type: int, min: 10, max: 60, default: 30, group: advanced}
+      - {name: guidance, label: Guidance (CFG), type: float, min: 1, max: 10, step: 0.5, default: 5.0, group: advanced}
+      - *offload
+      - *tiling
+    presets: {fast: {steps: 20, resolution: 320}, balanced: {}, quality: {steps: 40, batch: 2}}
+
+  # ------------------------------------------------------------------------------------------------------ Wan 2.2 TI2V 5B
+  - id: wan22-ti2v-5b
+    name: Wan 2.2 TI2V 5B
+    family: wan22
+    modality: video
+    tasks: [t2v, i2v]
+    default_for: [i2v]
+    order: 20
+    tags: [quality, hd, silent, apache]
+    summary: "One model for text to video and image to video: up to 720p at 24 fps, 5 s clips, strong motion and prompt following. Apache-2.0."
+    features: {negative: true, max_frames: 121, fps: 24, steps: 30, guidance: 5.0, audio: false, max_resolution: 720, native_size: 720}
+    backend: video
+    prompt_style: {t2v: video_wan, i2v: video_wan}
+    weights:
+      - {hf: Wan-AI/Wan2.2-TI2V-5B-Diffusers, files: ["transformer/*", "text_encoder/*", "tokenizer/*", "vae/*", "scheduler/*", "model_index.json"]}
+    license: {name: Apache-2.0, commercial: true, note: "Wan-AI weights, no use restrictions beyond Apache-2.0."}
+    memory_gb: 40
+    speed: "5 s 720p clip: see docs/research/video.md"
+    est: {load_s: 40, run_s: 300}
+    params:
+      - {name: seconds, label: Duration, type: float, min: 1, max: 5, step: 0.5, default: 5, unit: s, group: basic, help: "The model was trained for 121 frames (5 s at 24 fps)."}
+      - *aspect
+      - *match
+      - {name: resolution, label: Resolution, type: choice, choices: [{value: 480, label: "480p"}, {value: 576, label: "576p"}, {value: 704, label: "720p (704)"}], default: 704, group: basic}
+      - *batch
+      - *seed
+      - {name: fps, label: Frame rate, type: int, min: 8, max: 30, default: 24, unit: fps, group: advanced}
+      - {name: steps, label: Steps, type: int, min: 10, max: 60, default: 30, group: advanced, help: "The model card uses 50; 30 is nearly as good."}
+      - {name: guidance, label: Guidance (CFG), type: float, min: 1, max: 10, step: 0.5, default: 5.0, group: advanced}
+      - *offload
+      - *tiling
+    presets: {fast: {steps: 20, resolution: 480}, balanced: {}, quality: {steps: 50, batch: 2}}
+
+  # ------------------------------------------------------------------------------------------------------ LTX-2.3 distilled
+  - id: ltx23-distilled
+    name: LTX-2.3 distilled (video + audio)
+    family: ltx2
+    modality: video
+    tasks: [t2v, i2v, flf2v]
+    default_for: [flf2v]
+    order: 30
+    tags: [fast, audio, quality]
+    summary: "Lightricks' 22B DiT: picture AND synchronised sound (ambience, foley, speech, music) in 8 steps, any aspect ratio, up to 10 s. Supports first + last frame. LTX-2 community licence (free below USD 10M annual revenue)."
+    features: {negative: false, max_frames: 241, fps: 24, steps: 8, guidance: 1.0, distilled: true, audio: true, max_resolution: 720, native_size: 704}
+    backend: video
+    prompt_style: video_ltx
+    weights:
+      - {hf: diffusers/LTX-2.3-Distilled-Diffusers, files: ["transformer/*", "text_encoder/*", "tokenizer/*", "processor/*", "connectors/*", "vae/*", "audio_vae/*", "vocoder/*", "scheduler/*", "model_index.json"]}
+    license: {name: LTX Video 2 Open Source License, commercial: true, verify: true,
+              note: "Lightricks licence: free for individuals and companies below USD 10M annual revenue, commercial use allowed under those terms; larger companies need a paid licence. Read LICENSE in Lightricks/LTX-2.3 before shipping."}
+    memory_gb: 80
+    speed: "5 s 704p clip with sound: see docs/research/video.md"
+    est: {load_s: 90, run_s: 120}
+    params:
+      - {name: seconds, label: Duration, type: float, min: 1, max: 10, step: 0.5, default: 5, unit: s, group: basic}
+      - *aspect
+      - *match
+      - {name: resolution, label: Resolution, type: choice, choices: [{value: 480, label: "480p"}, {value: 576, label: "576p"}, {value: 704, label: "720p (704)"}], default: 704, group: basic}
+      - {name: audio, label: Generate sound, type: bool, default: true, group: basic, help: "The model always computes sound; off drops it from the mp4."}
+      - *batch
+      - *seed
+      - {name: fps, label: Frame rate, type: choice, choices: [24, 25, 30], default: 24, unit: fps, group: advanced}
+      - *offload
+      - *tiling
+    presets: {fast: {resolution: 480}, balanced: {}, quality: {resolution: 704, batch: 2}}
+
+  # ------------------------------------------------------------------------------------------------------ Kandinsky 6.0 Lite distill
+  - id: kandinsky6-lite-distill
+    name: Kandinsky 6.0 Lite distill (video + audio)
+    family: kandinsky6
+    modality: video
+    tasks: [t2v, i2v]
+    order: 40
+    tags: [fast, audio, mit]
+    summary: "Sber's 5 s text/image-to-video-and-audio model, 16 steps without CFG. Picture and sound in one pass. MIT licence (weights and code)."
+    features: {negative: false, max_frames: 121, fps: 24, steps: 16, guidance: 1.0, distilled: true, audio: true, max_resolution: 720, native_size: 480}
+    backend: video
+    prompt_style: video_kandinsky
+    weights:
+      - {hf: kandinskylab/Kandinsky-6.0-Lite-distill-5s-Diffusers, files: ["transformer/*", "vae/*", "text_encoder/*", "text_encoder_2/*", "tokenizer/*", "tokenizer_2/*", "audio_vae/*", "vocoder/*", "scheduler/*", "model_index.json"]}
+    license: {name: MIT, commercial: true, note: "Kandinsky Lab weights are MIT-licensed per the Hugging Face model card; the Qwen2.5-VL text encoder carries its own licence (Apache-2.0 for 7B)."}
+    memory_gb: 36
+    speed: "5 s 480p clip with sound: see docs/research/video.md"
+    est: {load_s: 40, run_s: 90}
+    params:
+      - {name: seconds, label: Duration, type: float, min: 1, max: 5, step: 0.5, default: 5, unit: s, group: basic, help: "Trained for 5 s clips."}
+      - *aspect
+      - *match
+      - {name: resolution, label: Resolution, type: choice, choices: [{value: 480, label: "480p"}, {value: 640, label: "640p"}, {value: 720, label: "720p"}], default: 480, group: basic}
+      - {name: audio, label: Generate sound, type: bool, default: true, group: basic}
+      - *batch
+      - *seed
+      - {name: fps, label: Frame rate, type: int, min: 12, max: 30, default: 24, unit: fps, group: advanced}
+      - {name: steps, label: Steps, type: int, min: 8, max: 32, default: 16, group: advanced, help: "The distilled model is meant for 16."}
+      - *offload
+      - *tiling
+    presets: {fast: {steps: 12}, balanced: {}, quality: {steps: 24, resolution: 720}}
+
+  # ------------------------------------------------------------------------------------------------------ HunyuanVideo 1.5 480p i2v (step-distilled)
+  - id: hunyuan15-480p-i2v-distilled
+    name: HunyuanVideo 1.5 480p I2V (step-distilled)
+    family: hunyuan15
+    modality: video
+    tasks: [i2v]
+    order: 50
+    tags: [fast, silent, tencent]
+    summary: "Tencent's 8.3B video DiT, step-distilled image to video: 480p, 24 fps, 5 s, 12 steps. Tencent community licence (not valid in the EU, UK and South Korea)."
+    features: {negative: false, max_frames: 121, fps: 24, steps: 12, guidance: 1.0, distilled: true, audio: false, max_resolution: 480, native_size: 480}
+    backend: video
+    prompt_style: video_hunyuan
+    weights:
+      - {hf: hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_i2v_step_distilled}
+    license: {name: Tencent HunyuanVideo 1.5 Community, commercial: true, verify: true,
+              note: "Not valid in the European Union, the United Kingdom and South Korea (use and output); a Tencent licence is needed above 100 M monthly active users. Read LICENSE in tencent/HunyuanVideo-1.5 before shipping."}
+    memory_gb: 44
+    speed: "5 s 480p clip: see docs/research/video.md"
+    est: {load_s: 40, run_s: 120}
+    params:
+      - {name: seconds, label: Duration, type: float, min: 1, max: 5, step: 0.5, default: 5, unit: s, group: basic}
+      - *aspect
+      - *match
+      - *batch
+      - *seed
+      - {name: fps, label: Frame rate, type: int, min: 12, max: 30, default: 24, unit: fps, group: advanced}
+      - {name: steps, label: Steps, type: int, min: 4, max: 30, default: 12, group: advanced}
+      - *offload
+      - *tiling
+    presets: {fast: {steps: 8}, balanced: {}, quality: {steps: 20}}
+
+  # ------------------------------------------------------------------------------------------------------ RIFE interpolation
+  - id: rife-v4
+    name: RIFE v4 frame interpolation
+    family: rife
+    modality: video
+    tasks: [interpolate]
+    default_for: [interpolate]
+    order: 60
+    tags: [fastest, tool, mit]
+    summary: "Makes a clip smoother: doubles or quadruples the frame rate (16 fps Wan clips to 32 / 64 fps, 24 to 48 / 96). Fast, a few seconds per clip. MIT."
+    features: {negative: false, audio: false}
+    backend: video
+    weights:
+      - {hf: TensorForger/RIFE-safetensors, files: ["flownet.safetensors"]}
+    license: {name: MIT, commercial: true, note: "RIFE (hzwer / Megvii, MIT); safetensors re-host by TensorForger."}
+    memory_gb: 4
+    speed: "a 5 s clip in about 10 s"
+    est: {load_s: 3, run_s: 10}
+    params:
+      - {name: factor, label: Frame rate multiplier, type: choice, choices: [{value: 2, label: "x2"}, {value: 4, label: "x4"}], default: 2, group: basic}
+      - {name: keep_audio, label: Keep the sound, type: bool, default: true, group: basic}
+    presets: {balanced: {}}

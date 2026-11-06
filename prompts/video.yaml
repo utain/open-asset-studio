@@ -1,0 +1,82 @@
+# Video studio prompt-improver styles (merged after core.yaml). One style per model family: the models differ in how much
+# detail they want and in whether they also make sound (LTX-2.3, Kandinsky 6 generate audio together with the picture).
+# A chip may carry `profiles: [game|video|podcast|social|film|general]` (see prompts/image.yaml); no tag = every profile.
+
+chipsets:
+  video: &video_chips
+    - {id: cinematic, label: Cinematic, hint: "cinematic film look, shallow depth of field, anamorphic feel, motivated lighting, subtle film grain, slow deliberate camera movement", profiles: [film, video]}
+    - {id: product, label: Product shot, hint: "clean commercial product shot on a seamless backdrop, soft studio lighting with gentle reflections, slow orbiting or push-in camera, premium feel", profiles: [social, video]}
+    - {id: broll, label: B-roll, hint: "documentary b-roll footage, natural light, handheld stabilised camera, real location, observational and unposed", profiles: [video, film]}
+    - {id: anime, label: Anime, hint: "2D anime style, hand-drawn cel animation look, clean line art, flat shading, expressive motion", profiles: [film, social]}
+    - {id: vertical, label: Social vertical, hint: "vertical 9:16 framing for mobile, subject centred and large in frame, bold readable action in the first second, bright punchy colours", profiles: [social]}
+    - {id: timelapse, label: Time-lapse, hint: "time-lapse, fast moving clouds and light, static tripod camera", profiles: [video, film]}
+    - {id: drone, label: Aerial, hint: "smooth aerial drone shot, high altitude, slowly gliding forward, wide landscape", profiles: [video, film]}
+    - {id: macro, label: Macro, hint: "extreme close-up macro shot, tiny details, very shallow depth of field, slow motion", profiles: [video, social]}
+    - {id: slowmo, label: Slow motion, hint: "slow motion, high frame rate look, fluid movement, fine detail in the motion", profiles: [film, social]}
+    - {id: game_cine, label: Game cinematic, hint: "game cinematic trailer look, stylised CGI, dramatic lighting, dynamic camera", profiles: [game]}
+    - {id: loop, label: Looping, hint: "seamless looping motion, calm repeating movement, static camera, locked-off frame", profiles: [game, social]}
+    - {id: ugc, label: UGC / phone, hint: "user generated content, shot on a phone, handheld, natural light, casual and authentic", profiles: [social]}
+
+styles:
+  video_wan:
+    label: Wan 2.x video prompt
+    modality: video
+    negative: true
+    chips: *video_chips
+    apply: {prompt: prompt, negative: negative}
+    system: |
+      TARGET: Wan 2.1 / 2.2 text-to-video and image-to-video. It follows 80-150 word English descriptions that read like a shot
+      list. CONTEXT may contain an auto-caption of the first-frame image (image-to-video).
+      "prompt": ONE paragraph, in this order: subject (who/what, with 2-3 concrete visual traits) -> the ACTION as a short
+      sequence of movements in time order ("first ... then ...") -> setting and time of day -> shot type and camera movement
+      (static, slow push-in, pan left, tracking, orbit, handheld) -> lighting and colour mood -> visual style ("cinematic,
+      35mm", "3D animation", ...). For image-to-video describe only what MOVES and how the camera moves; do not re-describe
+      what the image already shows. One scene, one continuous shot, 5 seconds of action: never a montage or scene cuts.
+      No text overlays, no logos, no sound words (this model is silent).
+      "negative": short comma list ("blurry, jittery, distorted hands, watermark, subtitles, static image"). Optional.
+      Variations: different camera movement, lighting or pacing of the same shot.
+  video_ltx:
+    label: LTX-2.3 video + audio prompt
+    modality: video
+    negative: false
+    chips: *video_chips
+    apply: {prompt: prompt}
+    system: |
+      TARGET: LTX-2.3 (distilled) text/image-to-video WITH SYNCHRONISED SOUND: the model generates the picture and its audio
+      (ambience, foley, music, speech) in one pass. CONTEXT may contain an auto-caption of the first-frame image.
+      "prompt": ONE flowing paragraph of 4-8 present-tense sentences, chronological: opening framing and subject -> the action
+      beat by beat -> camera movement and lens ("slow dolly in, 35mm, shallow depth of field") -> lighting and colour ->
+      then the SOUND: name the ambience, the specific sound effects that match the actions and, if any, the music mood. When a
+      person speaks, put the exact words in double quotes, e.g. She whispers: "We are almost there." and describe the voice
+      (calm, low, young). For image-to-video describe motion and sound only, not what the image already shows.
+      One continuous shot, no cuts. No on-screen text.
+      "negative": "" (the distilled model ignores negatives).
+      Variations: different camera work, pacing or sound design of the same shot.
+  video_kandinsky:
+    label: Kandinsky 6 video + audio prompt
+    modality: video
+    negative: false
+    chips: *video_chips
+    apply: {prompt: prompt}
+    system: |
+      TARGET: Kandinsky 6.0 text/image-to-video-and-audio. Its prompt format is a detailed description of the finished video
+      (it is trained on captions): subject and what it does, location, camera behaviour (static / follows / zoom / shake),
+      dynamics, visual style (professional footage, UGC, animation, game footage), visual effects, and the order of key actions.
+      "prompt": 60-130 words of English prose covering exactly those points, then one sentence about the sound
+      (ambience, effects, music). One continuous shot of about 5 seconds. For image-to-video describe the motion, not the
+      image content.
+      "negative": "" (the distilled model runs without CFG).
+      Variations: different camera behaviour, pacing, visual style or sound.
+  video_hunyuan:
+    label: HunyuanVideo 1.5 video prompt
+    modality: video
+    negative: false
+    chips: *video_chips
+    apply: {prompt: prompt}
+    system: |
+      TARGET: HunyuanVideo 1.5 text/image-to-video (480p, silent). It likes rich English prose: 80-160 words with the style
+      first ("Cinematic style, ...", "Summer beach vacation style, ..."), then subject and appearance, the action in time
+      order, the environment, the camera ("a close-up shot", "slowly tracking"), lighting and mood. For image-to-video
+      describe the motion and camera only. One continuous shot, no scene cuts, no text overlays, no sound words.
+      "negative": "".
+      Variations: different style prefix, camera or lighting of the same shot.
