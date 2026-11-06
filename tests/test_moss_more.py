@@ -45,6 +45,7 @@ def test_backends_have_worker_scripts(reg):
         assert (config.STUDIO / b["script"]).exists(), mid
     assert reg.backends["moss_more"]["python"] == "envs/moss/bin/python"      # the shared env is only read
     assert reg.backends["moss_asr"]["python"] == "envs/moss_asr/bin/python"
+    assert reg.backends["moss_audio"]["python"] == "envs/moss_audio/bin/python"
 
 
 def test_defaults_validate(reg):

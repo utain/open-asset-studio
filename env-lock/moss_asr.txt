@@ -1,11 +1,11 @@
-# moss_asr env lock (MOSS-Transcribe-Diarize, MOSS-Audio-4B-Instruct; py3.12 aarch64, GB10). Recreate from the repo root:
+# moss_asr env lock (MOSS-Transcribe-Diarize; py3.12 aarch64, GB10). Recreate from the repo root:
 #   uv venv --python 3.12 envs/moss_asr
 #   VIRTUAL_ENV=$PWD/envs/moss_asr uv pip install --index-url https://download.pytorch.org/whl/cu130 torch==2.9.1 torchaudio==2.9.1
 #   VIRTUAL_ENV=$PWD/envs/moss_asr uv pip install -r env-lock/moss_asr.txt
 #   VIRTUAL_ENV=$PWD/envs/moss_asr uv pip install --no-deps -e ./vendor/MOSS-Transcribe-Diarize    (needs scripts/fetch_vendor.sh MOSS-Transcribe-Diarize)
 #   (the editable install must be --no-deps: its pyproject pins fastapi/uvicorn for a subtitle web app we do not use)
-# vendor/MOSS-Audio is NOT installed: workers/moss_asr_worker.py puts it on sys.path (its package is the generic name `src`).
-# MOSS-Transcribe-Diarize needs transformers >= 5.6; MOSS-Audio's README pins 4.57.1 but runs on 5.22.1 here (verified).
+# MOSS-Audio does NOT run here (needs transformers 4.57.1): it has its own env, env-lock/moss_audio.txt.
+# MOSS-Transcribe-Diarize needs transformers >= 5.6.
 accelerate==1.15.0
 annotated-doc==0.0.5
 anyio==4.16.0

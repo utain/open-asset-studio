@@ -1,13 +1,11 @@
-"""MOSS audio-understanding backend (envs/moss_asr: torch 2.9.1 cu130, transformers 5.22.1).
+"""MOSS transcription backend (envs/moss_asr: torch 2.9.1 cu130, transformers 5.22.1).
 
   moss-transcribe-diarize  task transcribe    long-form transcript with speaker labels ([S01], [S02] ...) and timestamps,
                                               50+ languages, audio or video up to ~90 min. 0.9 B.
                                               Output: a `text` asset (one line per segment) + .srt + .json attachments.
-  moss-audio-4b-instruct   task audio_ask     ask anything about a clip: describe it, caption the speech, name the
-                                              instruments / events / mood, transcribe with timestamps, summarise.
-                                              Output: a `text` asset with the answer.
 
-Code: vendor/MOSS-Transcribe-Diarize (pip -e, --no-deps) and vendor/MOSS-Audio (added to sys.path; `src` package).
+(MOSS-Audio, task audio_ask, lives in workers/moss_audio_worker.py: it needs transformers 4.57.1, this env has 5.22.)
+Code: vendor/MOSS-Transcribe-Diarize (pip -e, --no-deps).
 Audio is decoded with soundfile / ffmpeg (no torchaudio.load, which needs torchcodec).
 """
 from __future__ import annotations
@@ -24,7 +22,6 @@ import numpy as np
 from studio_worker import Backend, InputError, serve
 
 ROOT = Path(__file__).resolve().parent.parent
-VENDOR_AUDIO = ROOT / "vendor" / "MOSS-Audio"
 AUDIO_ROLES = ("audio", "source", "ref", "video")
 
 MTD_PROMPTS = {
@@ -89,8 +86,6 @@ class MossAsrBackend(Backend):
         missing = [m for m in ("transformers", "torch", "soundfile", "soxr") if importlib.util.find_spec(m) is None]
         if model["id"] == "moss-transcribe-diarize" and importlib.util.find_spec("moss_transcribe_diarize") is None:
             missing.append("moss_transcribe_diarize (pip install --no-deps -e vendor/MOSS-Transcribe-Diarize)")
-        if model["id"].startswith("moss-audio") and not (VENDOR_AUDIO / "src").is_dir():
-            missing.append("vendor/MOSS-Audio")
         return (not missing, f"missing: {', '.join(missing)}" if missing else "")
 
     # ------------------------------------------------------------ load
@@ -106,14 +101,6 @@ class MossAsrBackend(Backend):
             proc = AutoProcessor.from_pretrained(repo, trust_remote_code=True)
             return {"kind": "mtd", "model": m, "proc": proc}
         sys.dont_write_bytecode = True
-        if str(VENDOR_AUDIO) not in sys.path:
-            sys.path.insert(0, str(VENDOR_AUDIO))
-        from src.modeling_moss_audio import MossAudioModel
-        from src.processing_moss_audio import MossAudioProcessor
-
-        m = MossAudioModel.from_pretrained(repo, trust_remote_code=True, dtype="auto", device_map="cuda").eval()
-        proc = MossAudioProcessor.from_pretrained(repo, trust_remote_code=True, enable_time_marker=True)
-        return {"kind": "audio", "model": m, "proc": proc}
 
     # ------------------------------------------------------------ run
     def run(self, job, ctx):
@@ -121,7 +108,7 @@ class MossAsrBackend(Backend):
         inp = pick_input(job)
         if not inp:
             raise InputError("Add the audio (or video) clip first.")
-        return self._run_mtd(job, ctx, h, inp) if h["kind"] == "mtd" else self._run_audio(job, ctx, h, inp)
+        return self._run_mtd(job, ctx, h, inp)
 
     def _run_mtd(self, job, ctx, h, inp):
         import torch
@@ -182,45 +169,6 @@ class MossAsrBackend(Backend):
                    audio_seconds=round(dur, 2), generated_tokens=out["generated_tokens"], parsed=bool(segs))
         ctx.progress(1, 1, "transcribing", "done")
         return {"meta": {"segments": len(segs), "speakers": speakers}}
-
-    def _run_audio(self, job, ctx, h, inp):
-        import torch
-
-        p = job.params
-        q = (p.get("question") or p.get("prompt") or "").strip() or "Describe this audio."
-        model, proc = h["model"], h["proc"]
-        ctx.progress(0, 0, "listening", "Decoding the audio", interruptible=False)
-        wav = load_wave(inp["path"], int(proc.config.mel_sr))
-        dur = len(wav) / proc.config.mel_sr
-        if dur < 0.3:
-            raise InputError("The clip is too short.")
-        if dur > 20 * 60:
-            raise InputError("MOSS-Audio is meant for clips up to a few minutes; trim the clip first (20 min max).")
-        n, s0 = max(1, int(p.get("batch", 1))), seed0(p)
-        temp = float(p.get("temperature", 0.0))
-        for i in range(n):
-            ctx.check()
-            seed = s0 + i
-            torch.manual_seed(seed)
-            ctx.progress(i, n, "listening", f"answering {i + 1}/{n} (cannot be interrupted midway)", interruptible=False)
-            inputs = proc(text=q, audios=[wav], return_tensors="pt").to(model.device)
-            if inputs.get("audio_data") is not None:
-                inputs["audio_data"] = inputs["audio_data"].to(model.dtype)
-            inputs["audio_input_mask"] = inputs["input_ids"] == proc.audio_token_id
-            gen = dict(max_new_tokens=int(p.get("max_new_tokens", 1024)), num_beams=1, use_cache=True)
-            if temp > 0:
-                gen.update(do_sample=True, temperature=temp, top_p=float(p.get("top_p", 0.95)), top_k=int(p.get("top_k", 50)))
-            else:
-                gen.update(do_sample=False)
-            with torch.no_grad():
-                ids = model.generate(**inputs, **gen)
-            ans = proc.decode(ids[0, inputs["input_ids"].shape[1]:], skip_special_tokens=True).strip()
-            f = job.out_dir / f"take_{i + 1}.txt"
-            f.write_text(ans + "\n", encoding="utf-8")
-            ctx.output(f, "text", seed=seed, index=i, name=f"{q[:40]}" + (f" #{i + 1}" if n > 1 else ""), final_prompt=q,
-                       input_asset=inp.get("asset_id"), audio_seconds=round(dur, 2), reply_text=ans)
-            ctx.progress(i + 1, n, "listening", f"answer {i + 1}/{n} done")
-        return {"meta": {"seed": s0}}
 
     def unload(self, model_id):
         self.models.pop(model_id, None)

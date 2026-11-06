@@ -27,12 +27,17 @@ Upstream source code that the workers import, cloned at the pinned commit from `
 | `vendor/audiocraft` | [facebookresearch/audiocraft](https://github.com/facebookresearch/audiocraft) | `896ec7c47f5e` | MIT (code; the MusicGen/AudioGen/MAGNeT weights are CC-BY-NC-4.0) |
 | `vendor/BigVGAN-awei6` | [awei-6/BigVGAN](https://github.com/awei-6/BigVGAN) | `ac17a79ca9ab` | MIT |
 | `vendor/delayed-streams-modeling` | [kyutai-labs/delayed-streams-modeling](https://github.com/kyutai-labs/delayed-streams-modeling) | `4c4f65e147df` | Apache-2.0 / MIT (dual) |
+| `vendor/demucs` | [adefossez/demucs](https://github.com/adefossez/demucs) | `829d21890023` | MIT (code and the HTDemucs weights). Also pip-installed without vendoring: `bs-roformer` 0.4.1 (MIT) for the Mel-Band RoFormer vocal model, whose weights ([KimberleyJSN/melbandroformer](https://huggingface.co/KimberleyJSN/melbandroformer)) are MIT per the model card |
 | `vendor/dia2` | [nari-labs/dia2](https://github.com/nari-labs/dia2) | `8687268f4ed3` | Apache-2.0 |
 | `vendor/DiffRhythm` | [ASLP-lab/DiffRhythm](https://github.com/ASLP-lab/DiffRhythm) | `28ad63c0f096` | Apache-2.0 (code) |
 | `vendor/diffsinger` | [openvpi/DiffSinger](https://github.com/openvpi/DiffSinger) | `cb7869b8733a` | Apache-2.0 |
 | `vendor/diffsinger-legacy` | [MoonInTheRiver/DiffSinger](https://github.com/MoonInTheRiver/DiffSinger) | `4662c53a27a5` | MIT (code; the Opencpop voice data is non-commercial) |
+| `vendor/dinov2` | [facebookresearch/dinov2](https://github.com/facebookresearch/dinov2) | `7764ea0f912e` | Apache-2.0 (code; the DINOv2 weights are Apache-2.0 as well) |
+| `vendor/FlexiCubes` | [MaxtirError/FlexiCubes](https://github.com/MaxtirError/FlexiCubes) | `815e075a2a40` | Apache-2.0 (git submodule of TRELLIS; used for its mesh decoder) |
+| `vendor/generative-models` | [Stability-AI/generative-models](https://github.com/Stability-AI/generative-models) | `e8cd657656fa` | MIT (code; the SV3D weights are under the Stability AI Community License) |
 | `vendor/GLM-4-Voice` | [zai-org/GLM-4-Voice](https://github.com/zai-org/GLM-4-Voice) | `eb00ce9142e8` | Apache-2.0 (code; model licence separate) |
 | `vendor/heartlib` | [HeartMuLa/heartlib](https://github.com/HeartMuLa/heartlib) | `5858ca8f1ffe` | Apache-2.0 |
+| `vendor/Hunyuan3D-2` | [Tencent-Hunyuan/Hunyuan3D-2](https://github.com/Tencent-Hunyuan/Hunyuan3D-2) | `f8db63096c82` | Tencent Hunyuan 3D 2.0 Community License (not valid in the EU, UK and South Korea) |
 | `vendor/HunyuanVideo-Foley` | [Tencent-Hunyuan/HunyuanVideo-Foley](https://github.com/Tencent-Hunyuan/HunyuanVideo-Foley) | `df7b005b5023` | Tencent Hunyuan Community License (not valid in the EU, UK and South Korea) |
 | `vendor/index-tts` | [index-tts/index-tts](https://github.com/index-tts/index-tts) | `d9e41aac89fd` | bilibili Model Use License Agreement |
 | `vendor/Kimi-Audio` | [MoonshotAI/Kimi-Audio](https://github.com/MoonshotAI/Kimi-Audio) | `349251e1d8f4` | Apache-2.0 (Qwen-derived parts) + MIT (README; no LICENSE file) |
@@ -48,11 +53,18 @@ Upstream source code that the workers import, cloned at the pinned commit from `
 | `vendor/rvc` | [RVC-Project/Retrieval-based-Voice-Conversion-WebUI](https://github.com/RVC-Project/Retrieval-based-Voice-Conversion-WebUI) | `81eed5e8f68b` | MIT |
 | `vendor/seed-vc` | [Plachtaa/seed-vc](https://github.com/Plachtaa/seed-vc) | `51383efd9210` | GPL-3.0 |
 | `vendor/Spark-TTS` | [SparkAudio/Spark-TTS](https://github.com/SparkAudio/Spark-TTS) | `2f1ea9082400` | Apache-2.0 (code; weights CC-BY-NC-SA-4.0) |
+| `vendor/stable-fast-3d` | [Stability-AI/stable-fast-3d](https://github.com/Stability-AI/stable-fast-3d) | `ff21fc491b4d` | Stability AI Community License (free for research and commercial use below USD 1M annual revenue; the weights are gated on Hugging Face) |
+| `vendor/stable-point-aware-3d` | [Stability-AI/stable-point-aware-3d](https://github.com/Stability-AI/stable-point-aware-3d) | `fdc311b16809` | Stability AI Community License (same terms; weights gated) |
 | `vendor/Step-Audio2` | [stepfun-ai/Step-Audio2](https://github.com/stepfun-ai/Step-Audio2) | `76e272b56c39` | Apache-2.0 |
+| `vendor/Step1X-3D` | [stepfun-ai/Step1X-3D](https://github.com/stepfun-ai/Step1X-3D) | `cb5ac944709c` | Apache-2.0 |
 | `vendor/StyleTTS2` | [yl4579/StyleTTS2](https://github.com/yl4579/StyleTTS2) | `5cedc71c333f` | MIT |
 | `vendor/tango` | [declare-lab/tango](https://github.com/declare-lab/tango) | `34ecd3889850` | CC-BY-NC-SA-4.0 |
 | `vendor/TangoFlux` | [declare-lab/TangoFlux](https://github.com/declare-lab/TangoFlux) | `164420faa2b3` | TangoFlux non-commercial community licence |
 | `vendor/ThinkSound` | [FunAudioLLM/ThinkSound](https://github.com/FunAudioLLM/ThinkSound) | `4e2cfd57efaa` | Apache-2.0 (README; no LICENSE file) |
+| `vendor/TRELLIS` | [microsoft/TRELLIS](https://github.com/microsoft/TRELLIS) | `193e0502b5cb` | MIT |
+| `vendor/TripoSG` | [VAST-AI-Research/TripoSG](https://github.com/VAST-AI-Research/TripoSG) | `fc5c40990181` | MIT |
+| `vendor/TripoSR` | [VAST-AI-Research/TripoSR](https://github.com/VAST-AI-Research/TripoSR) | `107cefdc244c` | MIT |
+| `vendor/UniRig` | [VAST-AI-Research/UniRig](https://github.com/VAST-AI-Research/UniRig) | `6793c6640ff0` | MIT |
 | `vendor/YuE` | [multimodal-art-projection/YuE](https://github.com/multimodal-art-projection/YuE) | `1116bea76032` | Apache-2.0 |
 | `vendor/YuE-v1` | [multimodal-art-projection/YuE](https://github.com/multimodal-art-projection/YuE) | `6d4f0b1f8ce6` | Apache-2.0 |
 | `vendor/Zonos` | [Zyphra/Zonos](https://github.com/Zyphra/Zonos) | `bc40d98e1e1a` | Apache-2.0 |
@@ -91,6 +103,8 @@ licences vary widely (Apache-2.0, MIT, CC-BY-NC, CPML, research-only, community 
 gated terms). Each model's licence, with a commercial yes/no flag, is in its registry entry (`models.yaml`,
 `models.d/*.yaml`), shown on the Models page and stored on every asset. Audio models are indexed in
 [docs/research/audio_more/README.md](docs/research/audio_more/README.md).
+3D models (image to mesh, rigging, multi-view; Stability AI Community License weights are gated) are indexed in
+[docs/research/3d_more.md](docs/research/3d_more.md).
 
 Some outputs carry watermarks added by upstream code (for example Chatterbox's Perth watermark).
 

@@ -1,0 +1,18 @@
+backend: moss_asr
+env: moss_asr
+python: "3.12"
+torch:
+  - torch==2.9.1
+  - torchaudio==2.9.1
+lock: moss_asr
+lock_flags: []
+vendor: [MOSS-Transcribe-Diarize]
+steps:
+  # MOSS-Transcribe-Diarize's pyproject pins fastapi/uvicorn for a subtitle web app we do not use: install it without deps.
+  - uv pip install --no-deps -e ./vendor/MOSS-Transcribe-Diarize
+  # MOSS-Audio lives in its own backend/env (install/moss_audio.yaml): it needs transformers 4.57.1.
+check: "import torch, transformers, soundfile, soxr, moss_transcribe_diarize; assert tuple(map(int, transformers.__version__.split('.')[:2])) >= (5, 6)"
+manual: []
+tested: [linux-aarch64]
+size_gb: 5
+shares_env_with: null

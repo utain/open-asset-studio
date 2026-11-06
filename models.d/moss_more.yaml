@@ -4,8 +4,10 @@
 # Backends
 #   moss_more   workers/moss_more_worker.py in the existing envs/moss (transformers 5.0.0, read-only; nothing installed into it).
 #               MOSS-TTSD v1.0 (multi-speaker dialogue), MOSS-TTS-Realtime (1.7 B), MOSS-TTS-Local-Transformer v1.5 (48 kHz stereo).
-#   moss_asr    workers/moss_asr_worker.py in envs/moss_asr (own venv: transformers 5.22.1, MOSS-Transcribe-Diarize needs >= 5.6).
-#               MOSS-Transcribe-Diarize (transcript + speakers + timestamps), MOSS-Audio-4B-Instruct (ask questions about audio).
+#   moss_asr    workers/moss_asr_worker.py in envs/moss_asr (own venv: transformers 5.22.1; needs >= 5.6).
+#               MOSS-Transcribe-Diarize (transcript + speakers + timestamps).
+#   moss_audio  workers/moss_audio_worker.py in envs/moss_audio (own venv: transformers 4.57.1 exactly).
+#               MOSS-Audio-4B-Instruct (ask questions about audio).
 #
 # Dialogue follows the existing convention (Dia, VibeVoice): tasks tts / voice_clone with a multi-line script and one input slot
 # per speaker (roles ref, ref2, ref3, ref4), so the Sound studio needs no change.
@@ -26,7 +28,7 @@ backends:
     model_idle_s: 600
     env: {PYTHONDONTWRITEBYTECODE: "1"}      # vendor/MOSS-TTS is a shared checkout: keep it clean
   moss_asr:
-    label: envs/moss_asr (MOSS-Transcribe-Diarize, MOSS-Audio; transformers 5.22.1)
+    label: envs/moss_asr (MOSS-Transcribe-Diarize; transformers 5.22.1)
     python: envs/moss_asr/bin/python
     script: workers/moss_asr_worker.py
     device: gpu
@@ -34,6 +36,15 @@ backends:
     max_loaded: 1
     model_idle_s: 600
     fix: "Rebuild envs/moss_asr from env-lock/moss_asr.txt (see the header there and docs/research/moss_more.md)"
+  moss_audio:
+    label: envs/moss_audio (MOSS-Audio-4B; transformers 4.57.1)
+    python: envs/moss_audio/bin/python
+    script: workers/moss_audio_worker.py
+    device: gpu
+    lock: moss_audio
+    max_loaded: 1
+    model_idle_s: 600
+    fix: "Rebuild envs/moss_audio from env-lock/moss_audio.txt (see the header there and docs/research/moss_more.md)"
 
 models:
   # =================================================================== dialogue / podcast
@@ -55,8 +66,8 @@ models:
     weights: [{hf: OpenMOSS-Team/MOSS-TTSD-v1.0, files: ["model-0000?-of-00004.safetensors", "*.json", "*.py", "*.txt", "*.jinja"]}, {hf: OpenMOSS-Team/MOSS-Audio-Tokenizer}]
     license: {name: Apache-2.0, commercial: true}
     memory_gb: 28
-    speed: "TBD"
-    est: {load_s: 120, run_s: 90}
+    speed: "20 s of 2-speaker dialogue in 26 s (about 1.3x real time) after a 120 s cold load; 14 s with cloned voices in 20 s"
+    est: {load_s: 120, run_s: 30}
     prompt_style: tts_plain
     params:
       - {name: text, label: "Script ([S1] / [S2] turns)", type: textarea, default: "[S1] Welcome back to the show. Today we are talking about sound design for games.\n[S2] Thanks for having me. I think audio is half of the experience, and people only notice it when it is missing.\n[S1] Let's start with footsteps.", group: basic, help: "Start every turn with [S1] .. [S5]. Keep each turn natural and short; punctuation drives the pauses. Laughter: write 'haha' or [laugh]."}
@@ -90,8 +101,8 @@ models:
     weights: [{hf: OpenMOSS-Team/MOSS-TTS-Realtime}, {hf: OpenMOSS-Team/MOSS-Audio-Tokenizer}]
     license: {name: Apache-2.0, commercial: true}
     memory_gb: 14
-    speed: "TBD"
-    est: {load_s: 30, run_s: 8}
+    speed: "about 1.25x real time (4 s of speech in ~5 s) after a 60 s cold load"
+    est: {load_s: 60, run_s: 8}
     prompt_style: tts_plain
     params:
       - {name: text, label: Line, type: textarea, default: "", group: basic}
@@ -119,8 +130,8 @@ models:
     weights: [{hf: OpenMOSS-Team/MOSS-TTS-Local-Transformer-v1.5}, {hf: OpenMOSS-Team/MOSS-Audio-Tokenizer-v2}]
     license: {name: Apache-2.0, commercial: true}
     memory_gb: 16
-    speed: "TBD"
-    est: {load_s: 60, run_s: 10}
+    speed: "about real time: 4 s of speech in 4.2 s after a 48 s cold load"
+    est: {load_s: 50, run_s: 8}
     prompt_style: tts_plain
     params:
       - {name: text, label: Line, type: textarea, default: "", group: basic, help: "Inline pause: [pause 1.5s]. Pinyin / IPA pass through."}
@@ -150,8 +161,8 @@ models:
     weights: [{hf: OpenMOSS-Team/MOSS-Transcribe-Diarize}]
     license: {name: Apache-2.0, commercial: true}
     memory_gb: 8
-    speed: "TBD"
-    est: {load_s: 10, run_s: 20}
+    speed: "20 s clip in 3 s, a 52 s clip in ~8 s, after an 11 s cold load"
+    est: {load_s: 11, run_s: 5}
     params:
       - {name: mode, label: Output, type: choice, choices: [{value: diarized, label: "Speakers + timestamps"}, {value: speakers, label: "Speakers only"}], default: diarized, group: basic}
       - {name: hotwords, label: Hotwords, type: text, default: "", group: basic, placeholder: "names, product terms, jargon", help: "Comma-separated terms the model should spell correctly."}
@@ -168,14 +179,14 @@ models:
     tags: [caption, qa, music, speech, events]
     summary: "Ask a question about a clip: describe it, caption the speech (emotion, speaker, style), name instruments / events / scene, transcribe with timestamps, summarise. English and Chinese. 4.6 B, 10.5 GB."
     features: {languages: [en, zh], max_seconds: 1200}
-    backend: moss_asr
+    backend: moss_audio
     input_slots:
       - {role: "audio", label: "Clip", types: ["audio", "voice", "video"], required: true, hint: "Up to a few minutes works best.", tasks: ["audio_ask"]}
     weights: [{hf: OpenMOSS-Team/MOSS-Audio-4B-Instruct, files: ["model-0000?-of-00003.safetensors", "*.json", "*.py", "*.txt", "*.jinja"]}]
     license: {name: Apache-2.0, commercial: true}
     memory_gb: 16
-    speed: "TBD"
-    est: {load_s: 20, run_s: 10}
+    speed: "a 52 s clip is described in 7 s after a 60 s cold load"
+    est: {load_s: 60, run_s: 8}
     params:
       - {name: question, label: Question, type: textarea, default: "Describe this audio.", group: basic, help: "e.g. 'Describe the voice, emotion and recording quality.', 'What instruments are playing and what is the mood?', 'Transcribe with sentence-level timestamps.', 'Summarise the conversation.'"}
       - {name: max_new_tokens, label: Max answer tokens, type: int, min: 64, max: 4096, step: 64, default: 1024, group: basic}

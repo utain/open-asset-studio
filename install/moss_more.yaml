@@ -1,0 +1,14 @@
+backend: moss_more
+env: moss
+python: "3.12"
+torch: []
+lock: null
+lock_flags: []
+vendor: [MOSS-TTS]
+steps: []
+check: "import torch, transformers, soundfile; assert transformers.__version__ == '5.0.0'"
+manual:
+  - "No venv of its own: workers/moss_more_worker.py runs in envs/moss (transformers 5.0.0 exactly; the MOSS-TTS remote code breaks on newer versions). Install the `moss` backend first. It also imports vendor/MOSS-TTS/moss_tts_realtime from the checkout (read only)."
+tested: [linux-aarch64]
+size_gb: 0
+shares_env_with: moss
