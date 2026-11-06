@@ -3,7 +3,7 @@
 Backend `foley` = `envs/foley` + `workers/foley_worker.py` + `models.d/foley.yaml` (one venv for all three models).
 All three models ran end to end through the worker protocol (JSON lines) under the GPU lock. Test clip:
 MMAudio's `examples/sora_beach.mp4` (5.0 s, 1080p-ish) plus our own ffmpeg `testsrc2` clip
-(`docs/research/audio_more/foley_media/foley_testsrc.mp4`, 640x360, 24 fps, 6 s, no audio).
+(an ffmpeg test pattern, 640x360, 24 fps, 6 s, no audio: `ffmpeg -f lavfi -i testsrc=size=640x360:rate=24 -t 6 -pix_fmt yuv420p foley_testsrc.mp4`).
 
 ## Status
 

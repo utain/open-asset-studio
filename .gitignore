@@ -33,3 +33,36 @@ __pycache__/
 .DS_Store
 /.cache/
 /.gpu_test.lock
+
+# generated media / meshes / subtitles (outputs live in data/)
+*.mp4
+*.mov
+*.webm
+*.mkv
+*.m4a
+*.aac
+*.opus
+*.ogg
+*.glb
+*.gltf
+*.obj
+*.ply
+*.fbx
+*.srt
+*.vtt
+*.npz
+*.npy
+*.pt
+*.bin
+
+# misc local files
+*.log
+*.tmp
+*.swp
+*.egg-info/
+.env
+.env.*
+.ipynb_checkpoints/
+node_modules/
+/tmp/
+/outputs/
