@@ -8,6 +8,7 @@ Gaussian rasterizer.  None of them exist for aarch64 / without nvcc, so:
   * attention of the dense transformers uses torch SDPA (ATTN_BACKEND=sdpa),
   * only the *mesh* decoder is run (FlexiCubes, pure PyTorch) and its per-vertex colours are written to the GLB; the upstream
     texture bake (rendering the Gaussians through nvdiffrast) is skipped.
+  * FlexiCubes (a git submodule of TRELLIS) comes from vendor/FlexiCubes (Apache-2.0).
   * DINOv2 (image conditioning) is loaded from vendor/dinov2 + the torch-hub cache (the runtime never downloads).
 """
 from __future__ import annotations
@@ -36,6 +37,23 @@ def _setup():
     import trellis_shims
     trellis_shims.install()
     C.shim_missing("utils3d", "utils3d.numpy", "utils3d.torch", "utils3d.io", "open3d")
+    # FlexiCubes is a git submodule of TRELLIS (empty in the clone): serve it from vendor/FlexiCubes under its package name
+    import types
+    fc = "trellis.representations.mesh.flexicubes"
+    if fc not in sys.modules:
+        m = types.ModuleType(fc)
+        m.__path__ = [str(VENDOR / "FlexiCubes")]
+        sys.modules[fc] = m
+    if "kaolin" not in sys.modules:                  # FlexiCubes only uses kaolin's debug-time shape checks
+        import importlib.machinery
+        for n in ("kaolin", "kaolin.utils", "kaolin.utils.testing"):
+            km = types.ModuleType(n)
+            km.__path__ = []
+            km.__spec__ = importlib.machinery.ModuleSpec(n, None)
+            sys.modules[n] = km
+        sys.modules["kaolin.utils.testing"].check_tensor = lambda *a, **k: True
+        sys.modules["kaolin"].utils = sys.modules["kaolin.utils"]
+        sys.modules["kaolin.utils"].testing = sys.modules["kaolin.utils.testing"]
     p = str(VENDOR / "TRELLIS")
     if p not in sys.path:
         sys.path.insert(0, p)
@@ -114,7 +132,7 @@ class TrellisBackend(Backend):
                 s._inference_model = (lambda orig: (lambda model, x_t, t_, cond=None, **kw: (hook(), orig(model, x_t, t_, cond=cond, **kw))[1]))(s._oas_inf)
         with torch.no_grad():
             outputs = pipe.run(
-                rgba, seed=seed, formats=["mesh"], preprocess_image=True,
+                rgba, seed=seed, formats=["mesh", "gaussian"], preprocess_image=True,
                 sparse_structure_sampler_params={"steps": ss_steps, "cfg_strength": float(p.get("ss_cfg", 7.5))},
                 slat_sampler_params={"steps": slat_steps, "cfg_strength": float(p.get("slat_cfg", 3.0))},
             )
@@ -122,10 +140,10 @@ class TrellisBackend(Backend):
         m = outputs["mesh"][0]
         v = m.vertices.detach().float().cpu().numpy()
         f = m.faces.detach().cpu().numpy()
-        col = None
-        if getattr(m, "vertex_attrs", None) is not None:
-            col = m.vertex_attrs.detach().float().cpu().numpy()[:, :3]
-            col = np.clip(col, 0, 1)
+        # the mesh decoder only predicts geometry: colour every vertex from the nearest Gaussians of the same latent (their DC
+        # spherical-harmonics term is the albedo); no rasterizer needed
+        g = outputs["gaussian"][0]
+        col = _gaussian_colors(v, g)
         t["gen_s"] = round(time.time() - t1, 2)
         ctx.progress(total, total, "export", "Writing GLB")
         # TRELLIS is z-up (front -y?): rotate to glTF +Y up, front +Z
@@ -138,6 +156,20 @@ class TrellisBackend(Backend):
         ctx.output(out / "mesh.glb", "mesh", seed=seed, name=f"{(inp.get('name') or 'mesh')[:50]} ({job.model.get('name', 'TRELLIS')})",
                    attach=["input.png"], textured=False, vertex_colors=col is not None, stats=info)
         return {"meta": {"timings": t, "peak_gpu_gb": peak}}
+
+
+def _gaussian_colors(verts, g, k=8):
+    """Vertex colours (N, 3) in [0, 1]: opacity- and distance-weighted mean of the k nearest Gaussians' base colour."""
+    import numpy as np
+    from scipy.spatial import cKDTree
+    xyz = g.get_xyz.detach().float().cpu().numpy()
+    dc = g._features_dc.detach().float().cpu().numpy().reshape(len(xyz), 3)
+    rgb = np.clip(0.5 + 0.28209479177387814 * dc, 0.0, 1.0)
+    op = g.get_opacity.detach().float().cpu().numpy().reshape(-1)
+    d, idx = cKDTree(xyz).query(verts, k=k)
+    w = op[idx] / (d + 1e-4)
+    w = w / np.maximum(w.sum(1, keepdims=True), 1e-9)
+    return np.clip((rgb[idx] * w[..., None]).sum(1), 0.0, 1.0).astype(np.float32)
 
 
 def _flipped(v, f):

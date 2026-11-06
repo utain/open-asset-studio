@@ -1,0 +1,17 @@
+backend: shape3d
+env: shape3d
+python: "3.12"
+torch:
+  - torch==2.9.0
+  - torchvision==0.24.0
+lock: shape3d
+lock_flags: []
+vendor: [TripoSG, vendor/Hunyuan3D-2, Step1X-3D]   # the Hunyuan3D-2 filter also matches the 2.1 checkout of the hy3d backend
+steps: []
+check: "import torch, diffusers, trimesh, pymeshlab, rembg, skimage, omegaconf, einops, pytorch_lightning, timm"
+manual:
+  - "No CUDA extensions: `diso` (TripoSG's CUDA marching cubes) is stubbed by the worker, the hierarchical decoder is used instead. Hunyuan3D-2 texture stage (custom_rasterizer) is not installed: meshes are white, paint them with the Texture tab (Hunyuan3D 2.1)."
+  - "rembg default model u2net: run `rembg d u2net` once with network (~/.u2net/u2net.onnx)."
+tested: [linux-aarch64]
+size_gb: 9
+shares_env_with: null

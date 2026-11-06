@@ -10,7 +10,8 @@ import pytest
 from app import config
 from app.registry import Registry
 
-IDS = ["triposr", "sf3d", "spar3d", "trellis-image-large", "triposg", "hunyuan3d-2mini-turbo", "hunyuan3d-2mini",
+RIG = "unirig"
+IDS = ["step1x3d", "triposr", "sf3d", "spar3d", "trellis-image-large", "triposg", "hunyuan3d-2mini-turbo", "hunyuan3d-2mini",
        "zero123plus", "sv3d-u", "sv3d-p"]
 GATED = {"sf3d", "spar3d", "sv3d-u", "sv3d-p"}
 WORKERS = config.STUDIO / "workers"
@@ -38,13 +39,13 @@ def test_group_loads_without_errors(reg):
 
 
 def test_tasks_backends_workers_exist(reg):
-    assert reg.tasks["multiview"]["studio"] == "3d"
-    for mid in IDS:
+    assert reg.tasks["multiview"]["studio"] == "3d" and reg.tasks["rig"]["studio"] == "3d"
+    for mid in IDS + [RIG]:
         m = reg.models[mid]
         assert set(m["tasks"]) <= set(reg.tasks), mid
         b = reg.backends[m["backend"]]
         assert (config.STUDIO / b["script"]).is_file(), b["script"]
-        assert b["python"].startswith("envs/") and b["python"].split("/")[1] in ("stab3d", "shape3d", "trellis")
+        assert b["python"].startswith("envs/") and b["python"].split("/")[1] in ("stab3d", "shape3d", "trellis", "rig")
 
 
 def test_licences_and_gating(reg):
@@ -94,7 +95,7 @@ def test_mesh_slot_type_is_known():
 def test_vendor_lock_has_every_clone():
     lock = (config.STUDIO / "vendor" / "vendor.lock").read_text()
     for d in ("TripoSR", "stable-fast-3d", "stable-point-aware-3d", "generative-models", "TripoSG", "TRELLIS",
-              "Hunyuan3D-2", "dinov2"):
+              "Hunyuan3D-2", "dinov2", "FlexiCubes", "Step1X-3D", "UniRig"):
         line = [l for l in lock.splitlines() if l.startswith(f"vendor/{d} ")]
         assert line, d
         assert len(line[0].split()[2]) == 40, d
@@ -269,3 +270,138 @@ def test_torchmcubes_shim_sphere():
     v, f = torchmcubes.marching_cubes(vol, 0.0)
     assert len(v) > 100 and f.shape[1] == 3
     sys.modules.pop("torchmcubes", None)
+
+
+# ------------------------------------------------------------------ UniRig worker (numpy-only helpers)
+def test_unirig_registry_entry(reg):
+    m = reg.models[RIG]
+    assert m["tasks"] == ["rig"] and m["backend"] == "rig" and reg.models[RIG]["default_for"] == ["rig"]
+    assert m["input_slots"][0]["types"] == ["mesh"] and m["input_slots"][0]["role"] == "mesh"
+    assert m["license"]["name"] == "MIT"
+    for p in m["params"]:
+        if p["type"] == "choice":
+            assert p["default"] in p["choices"]
+
+
+def _rig_worker():
+    sys.modules.setdefault("studio_worker", type(sys)("studio_worker"))
+    sw = sys.modules["studio_worker"]
+    for n in ("InputError", "Backend", "Cancelled", "serve"):
+        if not hasattr(sw, n):
+            setattr(sw, n, type(n, (Exception,), {}))
+    return _load("rig_worker")
+
+
+def test_blender_frame_roundtrip():
+    rw = _rig_worker()
+    v = np.random.default_rng(0).normal(size=(50, 3))
+    b = rw._to_blender(v)
+    assert np.allclose(rw._from_blender(b), v)
+    # glTF +Y up -> Blender +Z up, glTF +Z (front) -> Blender -Y
+    assert np.allclose(rw._to_blender(np.array([[0, 1.0, 0]])), [[0, 0, 1]])
+    assert np.allclose(rw._to_blender(np.array([[0, 0, 1.0]])), [[0, -1, 0]])
+
+
+def test_norm_fits_unit_box():
+    rw = _rig_worker()
+    v = np.array([[0, 0, 0], [4, 2, 1.0], [2, 1, 0.5]])
+    c, s = rw._norm(v)
+    n = (v - c) / s
+    assert np.abs(n).max() <= 1.0 + 1e-9 and np.isclose(np.abs(n).max(), 1.0)
+
+
+def test_raw_npz_has_unirig_fields(tmp_path):
+    pytest.importorskip("trimesh")
+    rw = _rig_worker()
+    v = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1.0]])
+    f = np.array([[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]])
+    rw._write_raw(tmp_path, v, f)
+    d = np.load(tmp_path / "dataset_inference_clean" / "job" / "raw_data.npz", allow_pickle=True)
+    for k in ("vertices", "vertex_normals", "faces", "face_normals", "joints", "skin", "parents", "names", "matrix_local",
+              "tails", "no_skin", "path", "cls"):
+        assert k in d.files, k
+    assert d["joints"][()] is None and d["vertices"].shape == (4, 3)
+    assert (tmp_path / "dataset_inference_clean" / "inference_datalist.txt").read_text().strip() == "job"
+
+
+def test_cpu_voxelization_fills_a_cube(shims):
+    pytest.importorskip("trimesh")
+    pytest.importorskip("scipy")
+    rs = _load("rig_shims")
+    import trimesh
+    box = trimesh.creation.box(extents=(1.0, 1.0, 1.0))
+    g = 32
+    c = rs.voxelization_cpu(np.asarray(box.vertices), np.asarray(box.faces), grid=g)
+    assert c.ndim == 2 and c.shape[1] == 3 and np.abs(c).max() < 1.0
+    # a 1x1x1 cube spans half of [-1, 1]^3: about (g/2)^3 filled voxels (interior included)
+    assert 0.8 * (g / 2) ** 3 < len(c) < 1.4 * (g / 2) ** 3
+
+
+def test_segment_csr_and_fps(shims):
+    import torch
+    rs = _load("rig_shims")
+    x = torch.arange(12, dtype=torch.float32).view(6, 2)
+    ptr = torch.tensor([0, 2, 6])
+    assert torch.equal(rs.segment_csr(x, ptr, reduce="min"), torch.tensor([[0.0, 1.0], [4.0, 5.0]]))
+    assert torch.allclose(rs.segment_csr(x, ptr, reduce="mean"), torch.tensor([[1.0, 2.0], [7.0, 8.0]]))
+    pos = torch.rand(40, 3)
+    idx = rs.fps(pos, torch.zeros(40, dtype=torch.long), ratio=0.25, random_start=False)
+    assert len(idx) == 10 and len(set(idx.tolist())) == 10
+
+
+def test_mha_standin_matches_manual(shims):
+    import torch
+    rs = _load("rig_shims")
+    torch.manual_seed(0)
+    m = rs.MHA(16, 4, cross_attn=True)
+    q, kv = torch.randn(2, 5, 16), torch.randn(2, 7, 16)
+    out = m(q, x_kv=kv)
+    assert out.shape == (2, 5, 16)
+    assert {"Wq.weight", "Wkv.weight", "out_proj.weight"} <= set(m.state_dict())
+
+
+# ------------------------------------------------------------------ later fixes
+def test_shim_missing_attribute_chain_for_annotations():
+    C = _load("m3d_common")
+    C.shim_missing("some_absent_pkg_xyz")
+    import some_absent_pkg_xyz as mod
+    annotation = mod.geometry.TriangleMesh                    # evaluated by `def f(m: o3d.geometry.TriangleMesh)`
+    assert annotation is not None
+    with pytest.raises(RuntimeError):
+        mod.geometry.TriangleMesh()
+    assert not hasattr(mod, "__wrapped__")                    # inspect probes must look like a plain module
+    del sys.modules["some_absent_pkg_xyz"]
+
+
+def test_rig_configs_use_sdpa_and_write_npz_only(tmp_path):
+    yaml = pytest.importorskip("yaml")
+    if not (config.STUDIO / "vendor" / "UniRig" / "configs").is_dir():
+        pytest.skip("vendor/UniRig not cloned")
+    rw = _load("rig_worker")
+    rw._make_configs(tmp_path, {"num_beams": 3, "skin_grid": 96, "temperature": 1.0})
+    for f in (tmp_path / "configs" / "model").glob("*.yaml"):
+        assert "flash_attention_2" not in f.read_text()
+    sk = yaml.safe_load((tmp_path / "skeleton_task.yaml").read_text())
+    sn = yaml.safe_load((tmp_path / "skin_task.yaml").read_text())
+    assert sk["writer"]["export_fbx"] is None and sk["writer"]["export_npz"] == "predict_skeleton"
+    assert sn["writer"]["export_fbx"] is None and sn["writer"]["output_dir"] is None
+    assert "grid: 96" in (tmp_path / "configs" / "transform" / "inference_skin_transform.yaml").read_text()
+    assert yaml.safe_load((tmp_path / "configs" / "system" / "ar_inference_articulationxl.yaml").read_text())[
+        "generate_kwargs"]["num_beams"] == 3
+
+
+def test_trellis_gaussian_colors_nearest():
+    pytest.importorskip("scipy")
+    pytest.importorskip("torch")
+    import torch
+    tw = _load("trellis_worker")
+
+    class G:
+        get_xyz = torch.tensor([[0.0, 0, 0], [1.0, 0, 0]])
+        _features_dc = torch.tensor([[[2.0, 0.0, 0.0]], [[0.0, 0.0, 2.0]]])
+        get_opacity = torch.ones(2, 1)
+
+    col = tw._gaussian_colors(np.array([[0.05, 0, 0], [0.95, 0, 0]]), G, k=2)
+    assert col.shape == (2, 3)
+    assert col[0, 0] > col[0, 2] and col[1, 2] > col[1, 0]    # the vertex near a Gaussian takes its colour
+    assert col.min() >= 0 and col.max() <= 1

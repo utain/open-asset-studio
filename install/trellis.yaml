@@ -1,0 +1,17 @@
+backend: trellis
+env: trellis
+python: "3.12"
+torch:
+  - torch==2.9.0
+  - torchvision==0.24.0
+lock: trellis
+lock_flags: []
+vendor: [vendor/TRELLIS, dinov2, FlexiCubes]
+steps: []
+check: "import torch, transformers, trimesh, rembg, easydict, imageio, pymeshlab, plyfile, scipy"
+manual:
+  - "No CUDA extensions: spconv and flash-attn are pure-torch stand-ins (workers/trellis_shims.py), utils3d / open3d are stubbed, nvdiffrast texture baking is skipped (vertex colours from the Gaussian decoder). FlexiCubes (a TRELLIS submodule) is cloned separately; kaolin is stubbed."
+  - "DINOv2 ViT-L/14 reg4 weights are read from the torch-hub cache: ./install.sh model trellis-image-large downloads microsoft/TRELLIS-image-large and ~/.cache/torch/hub/checkpoints/dinov2_vitl14_reg4_pretrain.pth."
+tested: [linux-aarch64]
+size_gb: 8
+shares_env_with: null

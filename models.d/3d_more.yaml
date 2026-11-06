@@ -6,6 +6,7 @@
 
 tasks:
   multiview: {label: Multi-view / orbit, modality: image, studio: 3d}
+  rig: {label: Auto-rig, modality: mesh, studio: 3d}
 
 backends:
   stab3d:
@@ -24,6 +25,14 @@ backends:
     lock: shape3d
     fix: "Rebuild from env-lock/shape3d.txt (header lists the CPU builds and stubs; see docs/research/3d_more.md)"
     model_idle_s: 600
+  rig:
+    label: envs/rig (UniRig auto-rigging)
+    python: envs/rig/bin/python
+    script: workers/rig_worker.py
+    device: gpu
+    lock: rig
+    fix: "Rebuild from env-lock/rig.txt (see docs/research/3d_more.md)"
+    model_idle_s: 300
   trellis:
     label: envs/trellis (TRELLIS, pure-torch spconv / flash-attn stand-ins)
     python: envs/trellis/bin/python
@@ -78,9 +87,9 @@ models:
       - {hf: facebook/dinov2-large, files: [config.json, model.safetensors]}
       - {hf: laion/CLIP-ViT-B-32-laion2B-s34B-b79K, files: [open_clip_pytorch_model.bin]}
     license: {name: Stability AI Community, commercial: true, note: "Free for research, personal and commercial use below USD 1 M annual revenue; above that an Enterprise licence from Stability AI is required (also for outputs). Gated: accept the terms on the model page.", verify: true}
-    memory_gb: 12
+    memory_gb: 8
     speed: "~1-3 s per mesh warm (CPU texture bake)"
-    est: {load_s: 20, run_s: 6}
+    est: {load_s: 20, run_s: 4}
     params:
       - {name: texture_resolution, label: Texture size, type: choice, choices: [512, 1024, 2048], default: 1024, group: basic}
       - {name: remove_bg, label: Remove background, type: bool, default: true, group: basic}
@@ -103,9 +112,9 @@ models:
       - {hf: stabilityai/stable-point-aware-3d, files: [config.yaml, model.safetensors]}
       - {path: "~/.cache/clip/ViT-L-14-336px.pt", fix: "mkdir -p ~/.cache/clip && curl -L -o ~/.cache/clip/ViT-L-14-336px.pt https://openaipublic.azureedge.net/clip/models/3035c92b350959924f9f00213499208652fc7ea050643e8b385c2dac08641f02/ViT-L-14-336px.pt", download_cmd: ["bash", "-c", "mkdir -p ~/.cache/clip && curl -L -o ~/.cache/clip/ViT-L-14-336px.pt https://openaipublic.azureedge.net/clip/models/3035c92b350959924f9f00213499208652fc7ea050643e8b385c2dac08641f02/ViT-L-14-336px.pt"]}
     license: {name: Stability AI Community, commercial: true, note: "Free for research, personal and commercial use below USD 1 M annual revenue; above that an Enterprise licence from Stability AI is required (also for outputs). Gated: accept the terms on the model page.", verify: true}
-    memory_gb: 14
+    memory_gb: 12
     speed: "~2-4 s per mesh warm"
-    est: {load_s: 30, run_s: 8}
+    est: {load_s: 30, run_s: 6}
     params:
       - {name: texture_resolution, label: Texture size, type: choice, choices: [512, 1024, 2048], default: 1024, group: basic}
       - {name: remove_bg, label: Remove background, type: bool, default: true, group: basic}
@@ -129,9 +138,9 @@ models:
       - {hf: microsoft/TRELLIS-image-large, files: ["pipeline.json", "ckpts/*"]}
       - {path: "~/.cache/torch/hub/checkpoints/dinov2_vitl14_reg4_pretrain.pth", fix: "curl -L -o ~/.cache/torch/hub/checkpoints/dinov2_vitl14_reg4_pretrain.pth https://dl.fbaipublicfiles.com/dinov2/dinov2_vitl14/dinov2_vitl14_reg4_pretrain.pth", download_cmd: ["bash", "-c", "mkdir -p ~/.cache/torch/hub/checkpoints && curl -L -o ~/.cache/torch/hub/checkpoints/dinov2_vitl14_reg4_pretrain.pth https://dl.fbaipublicfiles.com/dinov2/dinov2_vitl14/dinov2_vitl14_reg4_pretrain.pth"]}
     license: {name: MIT, commercial: true}
-    memory_gb: 20
+    memory_gb: 14
     speed: "see docs/research/3d_more.md"
-    est: {load_s: 40, run_s: 60}
+    est: {load_s: 40, run_s: 20}
     params:
       - {name: ss_steps, label: Structure steps, type: int, min: 4, max: 50, default: 12, group: basic}
       - {name: slat_steps, label: Detail steps, type: int, min: 4, max: 50, default: 12, group: basic}
@@ -157,7 +166,7 @@ models:
     weights:
       - {hf: VAST-AI/TripoSG, files: ["model_index.json", "transformer/config.json", "transformer/*.safetensors", "vae/*.safetensors", "image_encoder_dinov2/*.safetensors"]}
     license: {name: MIT, commercial: true}
-    memory_gb: 16
+    memory_gb: 10
     speed: "see docs/research/3d_more.md"
     est: {load_s: 30, run_s: 60}
     params:
@@ -166,7 +175,7 @@ models:
       - {name: octree, label: Mesh resolution, type: choice, choices: [256, 512, 1024], default: 512, group: basic}
       - {name: remove_bg, label: Remove background, type: bool, default: true, group: basic}
       - {name: foreground_ratio, label: Object size in frame, type: float, min: 0.5, max: 1.0, step: 0.05, default: 0.85, group: advanced}
-      - {name: max_faces, label: Max faces (0 = keep all), type: int, min: 0, max: 1000000, default: 0, group: advanced}
+      - {name: max_faces, label: Max faces (0 = keep all), type: int, min: 0, max: 2000000, default: 300000, group: advanced}
       - {name: seed, type: seed, default: -1}
     presets: {fast: {steps: 25, octree: 256}, balanced: {}, quality: {steps: 75, octree: 1024}}
 
@@ -186,14 +195,14 @@ models:
     license: {name: Tencent Hunyuan Community, commercial: true, note: "Not licensed in the EU, UK and South Korea; >1 M MAU needs a licence from Tencent.", verify: true}
     memory_gb: 10
     speed: "see docs/research/3d_more.md"
-    est: {load_s: 20, run_s: 15}
+    est: {load_s: 20, run_s: 8}
     params:
       - {name: steps, label: Steps, type: int, min: 3, max: 20, default: 5, group: basic}
       - {name: guidance, label: Guidance (distilled embedding), type: float, min: 1, max: 10, step: 0.5, default: 5.0, group: advanced}
       - {name: octree, label: Mesh resolution, type: choice, choices: [256, 384, 512], default: 384, group: basic}
       - {name: remove_bg, label: Remove background, type: bool, default: true, group: basic}
       - {name: foreground_ratio, label: Object size in frame, type: float, min: 0.5, max: 1.0, step: 0.05, default: 0.85, group: advanced}
-      - {name: max_faces, label: Max faces (0 = keep all), type: int, min: 0, max: 1000000, default: 0, group: advanced}
+      - {name: max_faces, label: Max faces (0 = keep all), type: int, min: 0, max: 2000000, default: 300000, group: advanced}
       - {name: seed, type: seed, default: -1}
     presets: {fast: {steps: 3, octree: 256}, balanced: {}, quality: {steps: 8, octree: 512}}
 
@@ -211,7 +220,7 @@ models:
     weights:
       - {hf: tencent/Hunyuan3D-2mini, files: ["hunyuan3d-dit-v2-mini/model.fp16.safetensors", "hunyuan3d-dit-v2-mini/config.yaml", "hunyuan3d-vae-v2-mini/model.fp16.safetensors", "hunyuan3d-vae-v2-mini/config.yaml"]}
     license: {name: Tencent Hunyuan Community, commercial: true, note: "Not licensed in the EU, UK and South Korea; >1 M MAU needs a licence from Tencent.", verify: true}
-    memory_gb: 10
+    memory_gb: 8
     speed: "see docs/research/3d_more.md"
     est: {load_s: 20, run_s: 45}
     params:
@@ -220,7 +229,34 @@ models:
       - {name: octree, label: Mesh resolution, type: choice, choices: [256, 384, 512], default: 384, group: basic}
       - {name: remove_bg, label: Remove background, type: bool, default: true, group: basic}
       - {name: foreground_ratio, label: Object size in frame, type: float, min: 0.5, max: 1.0, step: 0.05, default: 0.85, group: advanced}
-      - {name: max_faces, label: Max faces (0 = keep all), type: int, min: 0, max: 1000000, default: 0, group: advanced}
+      - {name: max_faces, label: Max faces (0 = keep all), type: int, min: 0, max: 2000000, default: 300000, group: advanced}
+      - {name: seed, type: seed, default: -1}
+    presets: {fast: {steps: 20, octree: 256}, balanced: {}, quality: {steps: 50, octree: 512}}
+
+  - id: step1x3d
+    name: Step1X-3D (geometry)
+    modality: mesh
+    tasks: [shape]
+    order: 24
+    tags: [quality, apache, geometry-only]
+    summary: "StepFun Step1X-3D geometry model (1.3B flow-matching DiT + Michelangelo VAE, DINOv2 condition). Clean, watertight shapes. Geometry only (white mesh): the upstream texture stage needs nvcc, so paint it with Texture (Hunyuan3D 2.1)."
+    features: {input: image, texture: none, pbr: false, export: [glb], max_refs: 1}
+    input_slots:
+      - {role: image, label: Object image, types: [image], required: true, hint: "One object, plain or transparent background (removed automatically)."}
+    backend: shape3d
+    weights:
+      - {hf: stepfun-ai/Step1X-3D, files: ["Step1X-3D-Geometry-1300m/model_index.json", "Step1X-3D-Geometry-1300m/*/config.json", "Step1X-3D-Geometry-1300m/*/*.safetensors"]}
+    license: {name: Apache-2.0, commercial: true}
+    memory_gb: 10
+    speed: "see docs/research/3d_more.md"
+    est: {load_s: 40, run_s: 25}
+    params:
+      - {name: steps, label: Steps, type: int, min: 10, max: 100, default: 30, group: basic}
+      - {name: guidance, label: Guidance, type: float, min: 1, max: 15, step: 0.5, default: 7.5, group: basic}
+      - {name: octree, label: Mesh resolution, type: choice, choices: [256, 384, 512], default: 384, group: basic}
+      - {name: remove_bg, label: Remove background, type: bool, default: true, group: basic}
+      - {name: foreground_ratio, label: Object size in frame, type: float, min: 0.5, max: 1.0, step: 0.05, default: 0.85, group: advanced}
+      - {name: max_faces, label: Max faces (0 = keep all), type: int, min: 0, max: 2000000, default: 300000, group: advanced}
       - {name: seed, type: seed, default: -1}
     presets: {fast: {steps: 20, octree: 256}, balanced: {}, quality: {steps: 50, octree: 512}}
 
@@ -241,9 +277,9 @@ models:
       - {hf: sudo-ai/zero123plus-v1.2, files: ["model_index.json", "unet/*.safetensors", "vae/*.safetensors", "vision_encoder/*.safetensors", "text_encoder/*.safetensors"]}
       - {hf: sudo-ai/zero123plus-pipeline, files: [pipeline.py]}
     license: {name: Apache-2.0, commercial: true, note: "Weights: CC-BY-NC-4.0 on some mirrors; the sudo-ai release card says Apache-2.0.", verify: true}
-    memory_gb: 10
+    memory_gb: 8
     speed: "see docs/research/3d_more.md"
-    est: {load_s: 25, run_s: 25}
+    est: {load_s: 25, run_s: 20}
     params:
       - {name: steps, label: Steps, type: int, min: 20, max: 100, default: 75, group: basic}
       - {name: guidance, label: Guidance, type: float, min: 1, max: 10, step: 0.5, default: 4.0, group: advanced}
@@ -309,3 +345,31 @@ models:
       - {name: foreground_ratio, label: Object size in frame, type: float, min: 0.5, max: 1.0, step: 0.05, default: 0.85, group: advanced}
       - {name: seed, type: seed, default: -1}
     presets: {fast: {steps: 25}, balanced: {}, quality: {steps: 75}}
+
+  # =================================================================== auto-rigging
+  - id: unirig
+    name: UniRig (auto-rig)
+    modality: mesh
+    tasks: [rig]
+    default_for: [rig]
+    order: 10
+    tags: [rig, mit, skeleton, skin]
+    summary: "VAST-AI UniRig: predicts a skeleton and skin weights for any mesh (humanoids, quadrupeds, creatures, props) and writes a rigged GLB (glTF skin, 4 influences per vertex). Runs without Blender; bone names are generic (bone_0 ...), no Mixamo / VRM retargeting. Mesh is decimated to max_faces for the prediction only, the weights are transferred to every original vertex."
+    features: {input: mesh, export: [glb], rig: true}
+    input_slots:
+      - {role: mesh, label: Mesh to rig, types: [mesh], required: true, hint: "A GLB from the Shape tab or Texture tab. Works best in a neutral pose (T / A pose for characters)."}
+    backend: rig
+    weights:
+      - {hf: VAST-AI/UniRig, files: ["skeleton/articulation-xl_quantization_256/model.ckpt", "skin/articulation-xl/model.ckpt"]}
+      - {hf: facebook/opt-350m, files: ["config.json", "vocab.json", "merges.txt", "tokenizer_config.json"]}
+    license: {name: MIT, commercial: true, note: "Code MIT; the checkpoints are trained on Articulation-XL / VRoid / Mixamo-derived data: check the UniRig model card for dataset terms if you ship rigged output commercially.", verify: true}
+    memory_gb: 16
+    speed: "see docs/research/3d_more.md"
+    est: {load_s: 30, run_s: 80}
+    params:
+      - {name: num_beams, label: Skeleton beams, type: int, min: 1, max: 20, default: 8, group: basic, help: "Beam search width of the skeleton generator: more = steadier skeleton, slower."}
+      - {name: skin_grid, label: Skin voxel grid, type: choice, choices: [96, 128, 196], default: 128, group: basic, help: "Resolution of the voxel graph used for the skin prior (196 = reference quality, slowest)."}
+      - {name: max_faces, label: Faces used for prediction, type: int, min: 5000, max: 100000, default: 50000, group: advanced}
+      - {name: temperature, label: Skeleton temperature, type: float, min: 0.5, max: 2.5, step: 0.1, default: 1.5, group: advanced}
+      - {name: seed, type: seed, default: -1}
+    presets: {fast: {num_beams: 4, skin_grid: 96}, balanced: {}, quality: {num_beams: 15, skin_grid: 196}}

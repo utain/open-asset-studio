@@ -4,7 +4,7 @@
 #   VIRTUAL_ENV=envs/trellis uv pip install -r env-lock/trellis.txt
 # NOT installed (stand-ins, see workers/trellis_shims.py and workers/trellis_worker.py): spconv (pure-torch SubMConv3d), flash-attn
 #   (SDPA), utils3d + open3d (stubs, only used by export paths), nvdiffrast / diffoctreerast / mip-splatting (texture bake and
-#   Gaussian rendering skipped: vertex colours from the mesh decoder). DINOv2 comes from vendor/dinov2 + the torch-hub cache
+#   Gaussian rendering skipped: vertex colours come from the Gaussian decoder, FlexiCubes from vendor/FlexiCubes, kaolin stubbed). DINOv2 comes from vendor/dinov2 + the torch-hub cache
 #   (~/.cache/torch/hub/checkpoints/dinov2_vitl14_reg4_pretrain.pth). Upstream code is imported from vendor/TRELLIS, never edited.
 attrs==26.1.0
 certifi==2026.10.23
@@ -50,6 +50,7 @@ opencv-python-headless==5.0.0.93
 packaging==26.3
 pillow==13.0.0
 platformdirs==4.14.5
+plyfile==1.1.5
 pooch==1.9.0
 protobuf==7.36.2
 pymatting==1.1.16

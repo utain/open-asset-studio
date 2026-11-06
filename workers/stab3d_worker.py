@@ -40,6 +40,26 @@ def _add_path(*names):
             sys.path.insert(0, p)
 
 
+def _patch_baker():
+    """texture_baker is a CPU-only build here (no nvcc): hand it CPU tensors and move the results back to the caller's device."""
+    import torch
+    import texture_baker
+    tb = texture_baker.TextureBaker
+    if getattr(tb, "_oas_cpu", False):
+        return
+
+    def wrap(fn):
+        def f(self, *args, **kw):
+            dev = next((a.device for a in args if torch.is_tensor(a)), torch.device("cpu"))
+            out = fn(self, *[a.cpu() if torch.is_tensor(a) else a for a in args], **kw)
+            return out.to(dev) if torch.is_tensor(out) else out
+        return f
+
+    tb.rasterize = wrap(tb.rasterize)
+    tb.interpolate = wrap(tb.interpolate)
+    tb._oas_cpu = True
+
+
 class Stab3DBackend(Backend):
     name = "stab3d"
     max_loaded = 1
@@ -82,13 +102,16 @@ class Stab3DBackend(Backend):
             return {"kind": "triposr", "model": m}
         if mid == "sf3d":
             C.shim_missing("gpytoolbox", "pynanoinstantmeshes")
+            _patch_baker()
             _add_path("stable-fast-3d")
             from sf3d.system import SF3D
             m = SF3D.from_pretrained("stabilityai/stable-fast-3d", config_name="config.yaml", weight_name="model.safetensors")
             m.to("cuda").eval()
             return {"kind": "sf3d", "model": m}
         if mid == "spar3d":
-            C.shim_missing("gpytoolbox", "pynanoinstantmeshes")
+            # transparent_background (SPAR3D's own background remover) is not used: the worker removes backgrounds with rembg
+            C.shim_missing("gpytoolbox", "pynanoinstantmeshes", "transparent_background")
+            _patch_baker()
             _add_path("stable-point-aware-3d")
             clip_dir = Path(os.path.expanduser("~/.cache/clip"))
             os.environ.setdefault("ALPHA_CLIP_PATH", str(clip_dir))

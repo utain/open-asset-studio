@@ -164,6 +164,7 @@ def _postprocess(mesh, max_faces, ctx):
     import numpy as np
     import trimesh
     try:
+        mesh.merge_vertices()
         parts = mesh.split(only_watertight=False)
         if len(parts) > 1:
             big = max(len(x.faces) for x in parts)

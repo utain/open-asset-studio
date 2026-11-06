@@ -1,0 +1,37 @@
+backend: stab3d
+env: stab3d
+python: "3.12"
+torch:
+  - torch==2.9.0
+  - torchvision==0.24.0
+lock: stab3d
+lock_flags: []
+vendor: [TripoSR, stable-fast-3d, stable-point-aware-3d, generative-models]
+steps:
+  # texture_baker / uv_unwrapper (SF3D + SPAR3D texture baking and UV unwrap): CPU-only C++ builds, no nvcc.
+  # Built from a copy so vendor/ stays untouched.
+  - |
+    $PY -c "import texture_baker, uv_unwrapper" 2>/dev/null || {
+      B="$REPO/envs/stab3d/.build3d"; rm -rf "$B"; mkdir -p "$B"
+      cp -r vendor/stable-fast-3d/texture_baker vendor/stable-fast-3d/uv_unwrapper "$B/"
+      uv pip install setuptools wheel
+      for p in texture_baker uv_unwrapper; do USE_CUDA=0 uv pip install --no-build-isolation "$B/$p"; done
+      rm -rf "$B"
+    }
+  # SPAR3D: OpenAI CLIP + AlphaCLIP (git packages, no build isolation because their setup.py imports pkg_resources)
+  - |
+    $PY -c "import alpha_clip, clip" 2>/dev/null || {
+      uv pip install setuptools wheel ftfy regex loralib
+      uv pip install --no-build-isolation --no-deps "git+https://github.com/openai/CLIP.git" "git+https://github.com/SunzeY/AlphaCLIP.git"
+    }
+  # numpy 1.26 is required by transformers 4.42.3 (opencv / pandas would otherwise pull numpy 2)
+  - uv pip install "numpy==1.26.4" "opencv-python-headless<4.11" "pandas<2.3"
+check: "import torch, trimesh, rembg, open_clip, diffusers, texture_baker, uv_unwrapper, alpha_clip; assert __import__('numpy').__version__.startswith('1.26')"
+manual:
+  - "Not installable here (no aarch64 wheel / needs CMake+nvcc): gpytoolbox, pynanoinstantmeshes (stubbed by workers/stab3d_worker.py; SF3D remesh options are off), torchmcubes (CPU skimage shim), xformers (SDPA stand-in injected into sgm by workers/stab3d_multiview.py)."
+  - "Gated weights (stable-fast-3d, stable-point-aware-3d, sv3d): accept the licence on each Hugging Face model page and run `hf auth login`, then `./install.sh model sf3d` etc."
+  - "SPAR3D also needs ~/.cache/clip/ViT-L-14-336px.pt (OpenAI CLIP, fetched by the model's fix/download command)."
+  - "rembg downloads its u2net model (~/.u2net/u2net.onnx) the first time it runs outside the worker: run `rembg d u2net` once with network."
+tested: [linux-aarch64]
+size_gb: 11
+shares_env_with: null

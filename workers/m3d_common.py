@@ -171,6 +171,27 @@ def shim_torchmcubes():
     sys.modules["torchmcubes"] = mod
 
 
+class _Missing:
+    """Placeholder for an attribute of a stubbed module: attribute access chains (so annotations such as
+    `o3d.geometry.TriangleMesh` evaluate), calling it raises."""
+
+    def __init__(self, name):
+        self._name = name
+
+    def __getattr__(self, attr):
+        if attr.startswith("__"):
+            raise AttributeError(attr)
+        return _Missing(f"{self._name}.{attr}")
+
+    def __call__(self, *a, **k):
+        raise RuntimeError(f"{self._name}: its package is not installed in this environment (the feature is disabled)")
+
+    def __or__(self, other):                   # `X | None` annotations
+        return self
+
+    __ror__ = __or__
+
+
 def shim_missing(*names):
     """Register stub modules for optional heavy dependencies that are only used by code paths we never call."""
     for n in names:
@@ -181,12 +202,17 @@ def shim_missing(*names):
             continue
         except Exception:  # noqa: BLE001
             pass
+        import importlib.machinery
         mod = types.ModuleType(n)
+        mod.__spec__ = importlib.machinery.ModuleSpec(n, None)
+        mod.__path__ = []
 
-        def _missing(*a, _n=n, **k):
-            raise RuntimeError(f"{_n} is not installed in this environment (remeshing options are disabled)")
+        def _getattr(attr, _n=n):
+            if attr.startswith("__"):          # inspect / importlib probe dunders: must look like a plain module
+                raise AttributeError(attr)
+            return _Missing(f"{_n}.{attr}")
 
-        mod.__getattr__ = lambda attr, _m=_missing: _m
+        mod.__getattr__ = _getattr
         sys.modules[n] = mod
 
 

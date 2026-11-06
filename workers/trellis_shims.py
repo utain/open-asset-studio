@@ -212,3 +212,7 @@ def install():
     fa.flash_attn_varlen_qkvpacked_func = flash_attn_varlen_qkvpacked_func
     fa.flash_attn_varlen_kvpacked_func = flash_attn_varlen_kvpacked_func
     sys.modules["flash_attn"] = fa
+    # transformers probes optional packages with importlib.util.find_spec, which raises for a module with __spec__ None
+    import importlib.machinery
+    for name in ("spconv", "spconv.pytorch", "flash_attn"):
+        sys.modules[name].__spec__ = importlib.machinery.ModuleSpec(name, None)

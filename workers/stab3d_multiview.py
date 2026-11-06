@@ -159,6 +159,23 @@ def _zero123plus(h, rgba, p, seed, ctx):
 
 
 # --------------------------------------------------------------------------- SV3D
+def _fake_xformers():
+    """sgm's attention layers call xformers.ops.memory_efficient_attention (no aarch64 wheel): a stand-in on PyTorch SDPA."""
+    import types
+    import torch.nn.functional as F
+
+    def mea(q, k, v, attn_bias=None, op=None, **kw):
+        if q.dim() == 4:                                    # xformers layout (B, N, H, D)
+            o = F.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), attn_mask=attn_bias)
+            return o.transpose(1, 2)
+        return F.scaled_dot_product_attention(q, k, v, attn_mask=attn_bias)    # (B * heads, N, D)
+
+    x = types.ModuleType("xformers")
+    x.__version__ = "0.0.30"
+    x.ops = types.SimpleNamespace(memory_efficient_attention=mea)
+    return x
+
+
 def _load_sv3d(mid):
     import torch
     sys.path.insert(0, str(VENDOR / "generative-models"))
@@ -166,6 +183,10 @@ def _load_sv3d(mid):
     from omegaconf import OmegaConf
     from safetensors.torch import load_file
     from sgm.util import instantiate_from_config
+    import sgm.modules.attention as _sa
+    import sgm.modules.diffusionmodules.model as _sm
+    if getattr(_sa, "xformers", None) is None or not hasattr(_sa.xformers, "ops"):
+        _sa.xformers = _sm.xformers = _fake_xformers()
     variant = "sv3d_p" if mid.endswith(("-p", "_p")) else "sv3d_u"
     cfg = OmegaConf.load(VENDOR / "generative-models" / "scripts" / "sampling" / "configs" / f"{variant}.yaml")
     ckpt = hf_hub_download("stabilityai/sv3d", f"{variant}.safetensors")
@@ -174,6 +195,8 @@ def _load_sv3d(mid):
     # the CLIP image tower is in the checkpoint: do not download another copy to initialise it
     cfg.model.params.conditioner_config.params.emb_models[0].params.open_clip_embedding_config.params.version = ""
     cfg.model.params.sampler_config.params.verbose = False
+    cfg.model.params.sampler_config.params.num_steps = 50
+    cfg.model.params.sampler_config.params.guider_config.params.num_frames = 21     # SV3D always renders 21 frames
     model = instantiate_from_config(cfg.model)
     sd = load_file(ckpt)
     missing, unexpected = model.load_state_dict(sd, strict=False)

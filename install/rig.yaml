@@ -1,0 +1,17 @@
+backend: rig
+env: rig
+python: "3.12"
+torch:
+  - torch==2.9.0
+  - torchvision==0.24.0
+lock: rig
+lock_flags: []
+vendor: [UniRig]
+steps: []
+check: "import torch, transformers, pytorch_lightning, pygltflib, trimesh, box, omegaconf, addict, timm, pymeshlab"
+manual:
+  - "No CUDA / Blender packages: bpy, spconv, flash-attn, torch_scatter, torch_cluster, open3d and pyrender are replaced by pure-PyTorch / CPU stand-ins in workers/rig_shims.py (nothing to install)."
+  - "Weights: ./install.sh model unirig (VAST-AI/UniRig skeleton + skin checkpoints, facebook/opt-350m config and tokenizer)."
+tested: [linux-aarch64]
+size_gb: 5
+shares_env_with: null
