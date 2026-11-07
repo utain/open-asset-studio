@@ -17,6 +17,7 @@ import re
 from typing import Any
 
 from . import config, profiles
+from .settings_info import CLI_BINARY_INFO, CLI_MODEL_INFO, ENV_INFO, FIELD_INFO, GROUP_INFO, TASK_INFO
 
 TYPES = ("bool", "int", "float", "string", "text", "choice", "model", "backend", "list_str", "json")
 SCOPES = ("system", "project")
@@ -44,10 +45,12 @@ GROUPS = [
 ]
 
 
-def _f(key: str, type: str, label: str, group: str, *, help: str = "", scope=("system", "project"),  # noqa: A002
+def _f(key: str, type: str, label: str, group: str, *, help: str = "", info: str = "", scope=("system", "project"),  # noqa: A002
        apply: str = "live", default: Any = None, nullable: bool = False, editable: bool = True, **kw) -> dict:
-    return {"key": key, "type": type, "label": label, "help": help, "group": group, "scope": list(scope), "apply": apply,
-            "default": default, "nullable": nullable, "editable": editable, **kw}
+    """`help` = the one-line hint under the label; `info` = the beginner explanation shown in the (i) balloon
+    (settings_info.py; additive field, older clients ignore it)."""
+    return {"key": key, "type": type, "label": label, "help": help, "info": info or FIELD_INFO.get(key, ""), "group": group,
+            "scope": list(scope), "apply": apply, "default": default, "nullable": nullable, "editable": editable, **kw}
 
 
 SYS = ("system",)
@@ -85,10 +88,11 @@ def _static_fields() -> list[dict]:
 
     for name, info in CLI_INFO.items():
         add(_f(f"textgen.cli.{name}.model", "string", f"{info['label']} model", "prompts", scope=SYS, pattern=CLI_MODEL_RE.pattern,
-               maxlen=80, nullable=True, default=None, subgroup="CLI models",
+               maxlen=80, nullable=True, default=None, subgroup="CLI models", info=CLI_MODEL_INFO.format(label=info["label"]),
                help=f"Model flag passed to {info['binary']}. Empty = its default.", suggestions=info.get("models") or []))
         add(_f(f"textgen.cli.{name}.binary", "string", f"{info['label']} binary", "prompts", scope=SYS, nullable=True, default=None,
-               editable=False, subgroup="CLI models", help="Path of the executable. It is run, so it is file-only."))
+               editable=False, subgroup="CLI models", info=CLI_BINARY_INFO.format(label=info["label"]),
+               help="Path of the executable. It is run, so it is file-only."))
     add(_f("textgen.api_models", "json", "API models", "prompts", scope=SYS, default=[], gui=False,
            help="Managed in the Assistant > Text backends dialog."))
     add(_f("textgen.endpoints", "json", "Custom endpoints", "prompts", scope=SYS, default={}, gui=False,
@@ -142,11 +146,15 @@ def _static_fields() -> list[dict]:
     return f
 
 
+_STUDIO_NAMES = {"image": "Image", "3d": "3D", "sound": "Sound", "video": "Video", "assistant": "Assistant", "system": "System", "other": "other"}
+
+
 def _task_fields(core) -> list[dict]:
     out = []
     for tid, t in (core.registry.tasks if core is not None else {}).items():
         out.append(_f(f"defaults.{tid}", "model", t.get("label") or tid, "models", task=tid, nullable=True, default=None,
-                      subgroup=t.get("studio") or "other", help=f"Default model for '{tid}'."))
+                      subgroup=t.get("studio") or "other", help=f"Default model for '{tid}'.",
+                      info=TASK_INFO.format(label=t.get("label") or tid, studio=_STUDIO_NAMES.get(t.get("studio") or "other", t.get("studio") or "other"))))
     return out
 
 
@@ -173,7 +181,7 @@ def env_info() -> list[dict]:
     """Read-only environment panel. Never a secret: no API keys, tokens or provider variables."""
     def e(key, label, help="", value=None):  # noqa: A002
         v = os.environ.get(key) if value is None else value
-        return {"key": key, "value": v if v not in (None, "") else None, "label": label, "help": help}
+        return {"key": key, "value": v if v not in (None, "") else None, "label": label, "help": help, "info": ENV_INFO.get(key, "")}
 
     return [
         e("STUDIO_HOST", "Bind address", "--host of run_studio.sh (0.0.0.0 = reachable on the LAN, there is no login)"),
@@ -208,7 +216,8 @@ def build(core) -> dict:
             p = config.resolve_model_file(val) if val else None
             f["file"] = {"found": bool(p and p.exists()), "path": str(p) if p else None} if val else None
         flds.append(f)
-    return {"version": 1, "groups": GROUPS, "fields": flds, "env": env_info(),
+    groups = [{**g, "info": GROUP_INFO.get(g["id"], "")} for g in GROUPS]
+    return {"version": 1, "groups": groups, "fields": flds, "env": env_info(),
             "files": {"settings_json": str(config.SETTINGS_JSON), "data": str(config.DATA), "logs": str(config.LOGS),
                       "project_json_template": str(config.DATA / "projects" / "<project>" / "project.json")}}
 

@@ -96,6 +96,33 @@ def test_field_metadata(client):
             assert f["task"], k
 
 
+def test_every_setting_has_beginner_info(client):
+    """Each field, group and environment entry carries a plain-English `info` (shown in the (i) balloon), distinct from `help`."""
+    from app import settings_info
+
+    c, _ = client
+    body = c.get("/api/settings/schema").json()
+
+    def ok(item, name):
+        info = item.get("info")
+        assert isinstance(info, str) and 40 <= len(info.strip()) <= 600, f"{name}: info must be 40-600 characters (got {len(info or '')})"
+        assert info.strip() != (item.get("help") or "").strip(), f"{name}: info must not repeat help"
+
+    for f in body["fields"]:
+        ok(f, f["key"])
+    assert body["groups"]
+    for g in body["groups"]:
+        ok(g, f"group {g['id']}")
+    assert body["env"]
+    for e in body["env"]:
+        ok(e, f"env {e['key']}")
+    # no orphan texts (a typo in a key would silently leave a field without its own explanation)
+    keys = {f["key"] for f in body["fields"]}
+    assert set(settings_info.FIELD_INFO) <= keys, set(settings_info.FIELD_INFO) - keys
+    assert set(settings_info.GROUP_INFO) == {g["id"] for g in body["groups"]}
+    assert set(settings_info.ENV_INFO) == {e["key"] for e in body["env"]}
+
+
 def test_defaults_validate(client):
     _, core = client
     for f in settings_schema.fields(core):
