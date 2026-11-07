@@ -275,7 +275,7 @@ def test_torchmcubes_shim_sphere():
 # ------------------------------------------------------------------ UniRig worker (numpy-only helpers)
 def test_unirig_registry_entry(reg):
     m = reg.models[RIG]
-    assert m["tasks"] == ["rig"] and m["backend"] == "rig" and reg.models[RIG]["default_for"] == ["rig"]
+    assert m["tasks"] == ["rig", "reskin"] and m["backend"] == "rig" and reg.models[RIG]["default_for"] == ["rig", "reskin"]
     assert m["input_slots"][0]["types"] == ["mesh"] and m["input_slots"][0]["role"] == "mesh"
     assert m["license"]["name"] == "MIT"
     for p in m["params"]:

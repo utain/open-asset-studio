@@ -105,7 +105,7 @@ def asset_view(a: dict, full: bool = False) -> dict:
 
 # attachments the 3D tasks write next to mesh.glb, and what they are for
 MESH_ATTACHMENTS = {
-    "skeleton.json": "joint names / hierarchy of the rig (rig task)",
+    "skeleton.json": "joint names / hierarchy of the rig (rig task, tool rig.edit)",
     "rigged_plain.glb": "the same rigged mesh without the flex / wiggle test clips (rig task)",
     "white_mesh.glb": "untextured mesh (shape / texture tasks)",
     "motion.npz": "raw motion data (motion task)",
@@ -119,6 +119,7 @@ def mesh_view(a: dict, files: list, full: bool = False) -> dict:
     anims = w.get("animations") or info.get("animations") or []
     rigged = bool(w.get("rigged") or info.get("rigged"))
     out = {"rigged": rigged, "joints": w.get("joints") or info.get("joints"), "animations": list(anims),
+           "needs_reskin": True if info.get("needs_reskin") else None,
            "textured": w.get("textured") if "textured" in w else None,
            "vertices": info.get("vertices"), "faces": info.get("faces"), "motion": w.get("motion")}
     out = {k: v for k, v in out.items() if v not in (None, [], {})}
@@ -128,7 +129,10 @@ def mesh_view(a: dict, files: list, full: bool = False) -> dict:
         out["attachments"] = {n: MESH_ATTACHMENTS.get(n, "attachment") for n in att}
     if not full:
         return out
-    if rigged and not anims:
+    if info.get("needs_reskin"):
+        out["hint"] = ("Rig edited: new bones have no skin weight yet. Run submit_job(task='reskin', inputs=[{asset: <this id>, role: 'mesh'}]) "
+                       "(GPU, ~35 s) so the mesh follows them; get_rig shows the bones.")
+    elif rigged and not anims:
         out["hint"] = "Rigged but no clips: run submit_job(tool='mesh.flex_preview') or task 'motion' on it."
     elif not rigged:
         out["hint"] = "Not rigged: run task 'rig' on it before 'motion' or tool 'mesh.flex_preview'."
@@ -212,6 +216,19 @@ TOOL_PARAMS = {
     "mesh.flex_preview": {"in": "1+ mesh assets (GLB) that are RIGGED (have a skin; make one with task 'rig')",
                           "params": {"clips": "list of 'flex' (each joint swings in turn, a skinning test) and 'wiggle' (gentle loop); default both", "angle": "degrees, 5..80 (default 30)"},
                           "note": "Writes a NEW mesh asset with those animation clips (get_asset -> mesh3d.animations). Fails with kind 'input' when the mesh has no skeleton."},
+    "rig.edit": {"in": "ONE rigged mesh asset (GLB with a skeleton; look at it with get_rig first)",
+                 "params": {"ops": ("list of operations, applied in order (later ones see earlier results). Bones are named by node name, by the index get_rig shows, or by role word on a humanoid "
+                                    "('left elbow', 'left forearm', 'head', 'hips', 'spine 2'). Units: metres, +Y up, the character faces +Z, its left is +X. Ops: "
+                                    "{op:'rename', bone, to} | {op:'rename_standard', scheme:'mixamo'|'vrm'|'unreal'} (humanoids only) | "
+                                    "{op:'move_joint', bone, offset:[x,y,z] | delta:[x,y,z] (fractions of the bone length) | to:[x,y,z], children:'stay'(default)|'follow', mirror:bool} | "
+                                    "{op:'delete_bone', bone | match:'gun*', merge_weights_to?, include_children?:bool} (weights go to the parent, the mesh stays bound) | "
+                                    "{op:'add_bone', parent, to:[x,y,z] | direction:'up'|'down'|'left'|'right'|'forward'|'back'|[x,y,z] + length, name?} | "
+                                    "{op:'add_chain', parent, count, direction, length (per bone) | total_length, name_prefix?} (tails, ears, hair) | {op:'reparent', bone, parent}"),
+                            "clips": "bool, rebuild the flex / wiggle preview clips when the input had them (default true)"},
+                 "note": ("Writes a NEW mesh asset (rest pose, mesh and textures unchanged; other animation clips are dropped). New bones have ZERO skin weight: when get_asset -> mesh3d.needs_reskin is true, "
+                          "run submit_job(task='reskin') on the result. Examples: ops=[{op:'add_chain', parent:'hips', count:5, direction:'back', length:0.08, name_prefix:'tail'}] (a 5-bone tail); "
+                          "[{op:'move_joint', bone:'left elbow', offset:[0,-0.03,0]}]; [{op:'delete_bone', match:'gun*', include_children:true}]; [{op:'rename_standard', scheme:'mixamo'}]. "
+                          "Errors (kind 'input') name the candidates when a bone is unknown or ambiguous.")},
     "audio.process": {"in": "1+ audio / voice assets", "params": {"ops": "{trim:{threshold_db,pad_ms}, fade:{in_ms,out_ms}, loop:{xfade_ms}, normalize:{lufs,ceiling_db}, sample_rate, channels:'mono'|'stereo'} (or the flat keys trim, fade, loop, normalize, lufs, sample_rate, channels)", **AUDIO_OUT}, "note": "A chain of the single audio tools in one pass."},
     "audio.trim": {"in": "audio", "params": {"threshold_db": "default -50", "pad_ms": "default 30", **AUDIO_OUT}},
     "audio.fade": {"in": "audio", "params": {"in_ms": "default 10", "out_ms": "default 200", **AUDIO_OUT}},
@@ -237,6 +254,20 @@ def t_list_tools(_a, _ctx):
     tools = http("GET", "/api/bootstrap").get("tools") or {}
     out = [{"id": k, "label": v, **TOOL_PARAMS.get(k, {"note": "params: see docs/CONTRACTS.md and app/plugins/*.py"})} for k, v in tools.items()]
     return {"tools": out, "hint": "Run one with submit_job(tool=<id>, params=..., inputs=[{asset: <id>}]); the result is a new asset whose parents are the inputs."}
+
+
+def t_get_rig(a, _ctx):
+    d = http("GET", f"/api/x/rig/{urllib.parse.quote(a['asset'])}/skeleton")
+    hum = d.get("humanoid") or {}
+    rows = [{"index": r["index"], "name": r["name"], "parent": r["parent"], "position": [round(x, 3) for x in r["position"]],
+             **({"role": r["role"]} if r.get("role") else {}), "children": r["children"], "weight": round(r["weight_share"], 3)} for r in d.get("joints", [])]
+    out = {"asset": d.get("asset"), "name": d.get("name"), "joints": rows, "count": d.get("count"), "height": d.get("height"), "bounds": d.get("bounds"),
+           "units": d.get("units"), "humanoid": hum if hum.get("ok") else {"ok": False, "reason": hum.get("reason")},
+           "animations": d.get("animations"), "zero_weight": d.get("zero_weight"), "needs_reskin": d.get("needs_reskin")}
+    out["hint"] = ("Edit with submit_job(tool='rig.edit', params={ops: [...]}, inputs=[{asset: <id>, role: 'mesh'}]) - list_tools shows the ops; "
+                   "bone = name, index or role word (a humanoid's roles are listed above). " +
+                   ("This rig has bones without weights: run submit_job(task='reskin') on it." if d.get("zero_weight") else "After adding bones, run task 'reskin'."))
+    return out
 
 
 def t_list_projects(_a, _ctx):
@@ -508,7 +539,7 @@ PROJECT = {"type": "string", "description": "project id (default: default)"}
 INPUTS = {"type": "array", "description": "input assets, e.g. [{asset: '<id>', role: 'ref'}] (roles per model: get_model -> input_slots)",
           "items": {"type": "object", "properties": {"asset": S, "role": S}, "required": ["asset"]}}
 RO = {"readOnlyHint": True, "openWorldHint": False}
-TASKS_HELP = 'Tasks: image (t2i, edit, multi_ref, inpaint, rgba, extract, rmbg, upscale, recenter), 3D (multiview, text3d, shape, texture, rig = auto-rig a mesh, motion = text to motion for a rigged humanoid, mesh_export), audio (sfx, ambience, music, song, tts, voice_design, voice_clone, voice_convert, sing, s2s, v2a, separate, dub, qa_clap, qa_asr), text (transcribe, subtitles, audio_ask), video (t2v, i2v, flf2v, interpolate).'
+TASKS_HELP = 'Tasks: image (t2i, edit, multi_ref, inpaint, rgba, extract, rmbg, upscale, recenter), 3D (multiview, text3d, shape, texture, rig = auto-rig a mesh, reskin = recompute the skin weights of a rigged mesh after editing its skeleton with tool rig.edit, motion = text to motion for a rigged humanoid, mesh_export), audio (sfx, ambience, music, song, tts, voice_design, voice_clone, voice_convert, sing, s2s, v2a, separate, dub, qa_clap, qa_asr), text (transcribe, subtitles, audio_ask), video (t2v, i2v, flf2v, interpolate).'
 TOOLS = [
     {"name": "studio_status", "description": "Studio health, queue (running / queued jobs), free memory, loaded models, profile and licence filter.",
      "inputSchema": {"type": "object", "properties": {}}, "annotations": RO, "fn": t_status},
@@ -518,8 +549,12 @@ TOOLS = [
      "annotations": RO, "fn": t_list_models},
     {"name": "get_model", "description": "One model: params (name, type, default, range, choices), presets, input slots, features, licence.",
      "inputSchema": {"type": "object", "properties": {"id": S}, "required": ["id"]}, "annotations": RO, "fn": t_get_model},
-    {"name": "list_tools", "description": "CPU tools that post-process existing assets (audio.*, image.convert, video.*, asset.export, mesh.flex_preview), each with its input assets and params. Run with submit_job(tool=...).",
+    {"name": "list_tools", "description": "CPU tools that post-process existing assets (audio.*, image.convert, video.*, asset.export, mesh.flex_preview, rig.edit), each with its input assets and params. Run with submit_job(tool=...).",
      "inputSchema": {"type": "object", "properties": {}}, "annotations": RO, "fn": t_list_tools},
+    {"name": "get_rig", "description": ("The skeleton of a rigged mesh: every bone with index, name, parent, world position, role on a humanoid (hips, left_forearm, head ...), "
+                                       "child count and share of the skin weight; humanoid detection (role -> bone name), animation clips, bones without weights. Look at it before "
+                                       "editing a rig with submit_job(tool='rig.edit') (add a tail, move / delete / rename bones) and re-skinning with task 'reskin'."),
+     "inputSchema": {"type": "object", "properties": {"asset": {**S, "description": "mesh asset id (a rigged GLB)"}}, "required": ["asset"]}, "annotations": RO, "fn": t_get_rig},
     {"name": "list_projects", "description": "Projects (asset libraries).", "inputSchema": {"type": "object", "properties": {}}, "annotations": RO, "fn": t_list_projects},
     {"name": "create_project", "description": "Create a project (id: lowercase letters, digits, - and _), or with update=true change the title / description of an existing one.",
      "inputSchema": {"type": "object", "properties": {"id": S, "title": S, "description": S, "update": B}, "required": ["id"]}, "fn": t_create_project},
@@ -537,6 +572,9 @@ TOOLS = [
         "Use list_models / get_model first for valid params and input slots (roles); list_tools for CPU tools. seed=-1 is random; the real seed is in the asset. "
         "3D chain: t2i / rgba -> recenter -> shape -> texture -> rig (inputs=[{asset: mesh}]) -> motion (inputs=[{asset: rigged mesh, role: 'mesh'}], params.prompt); "
         "or tool 'mesh.flex_preview' on a rigged mesh for test clips. "
+        "Edit a rig: get_rig(asset) to see the bones, then tool 'rig.edit' with params.ops (add_chain / add_bone / move_joint / delete_bone / rename / rename_standard / reparent; list_tools has the full syntax), "
+        "e.g. submit_job(tool='rig.edit', params={ops:[{op:'add_chain', parent:'hips', count:5, direction:'back', length:0.08, name_prefix:'tail'}]}, inputs=[{asset:'<rigged mesh>', role:'mesh'}]); "
+        "the result is a NEW asset; if it reports needs_reskin (new bones have no weights) run submit_job(task='reskin', inputs=[{asset:'<edited mesh>', role:'mesh'}]) (GPU, ~35 s, keeps the skeleton, recomputes the weights). "
         "Cloud models: only set confirm_cost / confirm_upload after the user agreed to the cost / to uploading the inputs."),
      "inputSchema": {"type": "object", "properties": {
          "task": S, "model": {**S, "description": "model id (omit = the task's default)"}, "tool": {**S, "description": "CPU tool id instead of task/model"},
@@ -640,7 +678,7 @@ def handle(msg: dict, emit=None, allow_paths=True) -> dict | None:
             "capabilities": {"tools": {"listChanged": False}}, "serverInfo": {"name": "open-asset-studio", "version": "1.0"},
             "instructions": ("Open Asset Studio makes images, 3D models, sound and video with local open-weight models. "
                              "Typical flow: list_models(task=...) -> get_model(id) -> [improve_prompt] -> submit_job(...) -> use the returned file paths; "
-                             "export_assets packages results. 3D: shape -> texture -> rig -> motion (get_asset shows mesh3d: rigged, joints, animation clips). "
+                             "export_assets packages results. 3D: shape -> texture -> rig -> motion (get_asset shows mesh3d: rigged, joints, animation clips); edit a rig with get_rig + submit_job(tool='rig.edit') then task 'reskin'. "
                              "Check each model's licence before commercial use; many are non-commercial. "
                              "Never delete, spend cloud money or upload files without the user's explicit OK.")}}
     if method == "ping":

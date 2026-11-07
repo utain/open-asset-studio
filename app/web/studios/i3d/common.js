@@ -1,6 +1,7 @@
 // Shared helpers of the Image, 3D and Pipelines pages (not a studio module: it lives in a sub-folder so the shell
 // does not import it as a page). Mesh viewer, automatic mesh thumbnails, alpha background toggle, job helpers.
 import * as S from '../../core/sdk.js';
+import { rigEditor } from './rigedit.js';
 const { h, ic, btn } = S;
 
 let cssDone = false;
@@ -210,9 +211,11 @@ export function meshViewer({ height = 420, empty: emptyText = 'Generate or pick 
   const box = h('div.i3d-viewer', { style: { '--vh': `${height}px` } });
   const bar = h('div.i3d-vbar');
   const stats = h('div.i3d-vstats.dim');
-  const el = h('div.i3d-viewer-wrap', box, bar, stats);
+  const edBox = h('div.rige-host', { hidden: true });        // the rig editor panel (rigedit.js) lives here
+  const el = h('div.i3d-viewer-wrap', box, bar, stats, edBox);
   let cur = null, mode = 'textured', rotate = S.prefs.get('i3d.rotate', true), light = S.prefs.get('i3d.light', 'neutral');
   let playing = true, clip = null;       // animation state: kept while the element is re-created (mode / light changes)
+  let editing = false, ed = null, edSt = { id: null, log: [], redo: [], sel: null };   // rig editor: open flag, instance, undo log (kept while the element is re-created)
   let bones = S.prefs.get('i3d.bones', false);   // skeleton overlay on / off (a pref; the button only shows for a GLB that has a skeleton)
   const hasWhite = a => (a?.files || []).some(f => f.name === 'white_mesh.glb');
   const geo = () => mode !== 'textured';   // shape, edges and wireframe all show the untextured mesh when there is one
@@ -236,14 +239,19 @@ export function meshViewer({ height = 420, empty: emptyText = 'Generate or pick 
   };
   const render = () => {
     const a = cur;
+    ed?.destroy(); ed = null; edBox.hidden = true; edBox.replaceChildren();
+    if (edSt.id !== a?.id) edSt = { id: a?.id || null, log: [], redo: [], sel: null };
     if (!a) { box.replaceChildren(S.empty('cuboid', 'No mesh yet', emptyText)); bar.replaceChildren(); stats.replaceChildren(); return; }
     const animBox = h('span.i3d-anim', { hidden: true });
-    const boneBtn = btn('Bones', { size: 'sm', kind: bones ? 'primary' : '', title: 'Show the skeleton (follows the animation)', onClick: () => { bones = !bones; S.prefs.set('i3d.bones', bones); render(); } });
+    const boneBtn = btn('Bones', { size: 'sm', kind: bones ? 'primary' : '', title: 'Show the skeleton (follows the animation)', onClick: () => { bones = !bones; if (!bones) editing = false; S.prefs.set('i3d.bones', bones); render(); } });
     boneBtn.hidden = true; boneBtn.setAttribute('aria-pressed', String(bones));
+    const editBtn = btn('Edit rig', { size: 'sm', icon: 'pencil', kind: editing ? 'primary' : '', title: 'Edit the skeleton: move, rename, delete or add bones, then re-skin',
+      onClick: () => { editing = !editing; render(); } });
+    editBtn.hidden = true; editBtn.setAttribute('aria-pressed', String(editing));
     box.replaceChildren(h('div.empty', ic('loader', 22, 'spin'), h('p', 'Loading the 3D viewer…')));
     S.loadModelViewer().then(() => {
       if (cur !== a) return;
-      const mv = h('model-viewer', { src: srcOf(a), 'camera-controls': true, 'auto-rotate': rotate || null, 'shadow-intensity': '0.8',
+      const mv = h('model-viewer', { src: srcOf(a), 'camera-controls': true, 'auto-rotate': (rotate && !editing) || null, 'shadow-intensity': '0.8',
         exposure: light === 'bright' ? '1.4' : light === 'dark' ? '0.7' : '1', 'environment-image': 'neutral', 'interaction-prompt': 'none', alt: a.name || '3D model', 'touch-action': 'pan-y',
         autoplay: true });           // a GLB with animation clips plays the first one; static meshes are unaffected
       const t0a = Date.now();      // poll like the wireframe overlay below: the 'load' event is unreliable for a re-created element
@@ -255,7 +263,13 @@ export function meshViewer({ height = 420, empty: emptyText = 'Generate or pick 
         const sk = mv.loaded && findSkeleton(mv); if (!sk) return setTimeout(tickBones, 150);
         if (!sk.bones.length) return;
         boneBtn.hidden = false; skel = true;
-        if (bones && !applyBones(mv, sk)) setTimeout(tickBones, 150); };
+        editBtn.hidden = !bones || !/\.glb$/i.test(a.main || '');
+        if (bones && !applyBones(mv, sk)) return setTimeout(tickBones, 150);
+        if (bones && editing && !ed && !editBtn.hidden) {      // the editor needs the Bones overlay; it shows the skeleton at rest
+          playing = false; try { mv.pause(); mv.currentTime = 0; } catch { /* no animation */ }
+          ed = rigEditor({ asset: a, mv, host: edBox, overlayHost: box, scene: sk.scene, root: sk.root, st: edSt, runJob,
+            onClose: () => { editing = false; render(); } });
+        } };
       setTimeout(tickBones, 150);
       if (mode === 'edges' || mode === 'wire') {   // poll: model-viewer's 'load' event is not reliable for a re-created element
         const view = mode, t0 = Date.now();
@@ -289,6 +303,7 @@ export function meshViewer({ height = 420, empty: emptyText = 'Generate or pick 
       btn('', { size: 'sm', icon: 'sun', title: `Light: ${light}`, onClick: () => { light = { neutral: 'bright', bright: 'dark', dark: 'neutral' }[light]; S.prefs.set('i3d.light', light); render(); } }),
       animBox,
       boneBtn,
+      editBtn,
       h('span.spacer'),
       btn('', { size: 'sm', icon: 'image', title: 'Use this view as the thumbnail', onClick: async () => {
         try { const blob = await el._mv.toBlob({ mimeType: 'image/webp', qualityArgument: 0.9 }); await S.api.setThumb(a.id, blob); S.toast('Thumbnail updated', { kind: 'ok' }); } catch (e) { S.toastError(e); }

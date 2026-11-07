@@ -5,6 +5,7 @@ Tools (all read-only, except propose_plan, which only *records* a proposal; noth
   list_models    models with status, cost, licence, tasks and their params
   search_assets  list / search assets of the current project
   get_asset      one asset's meta
+  get_rig        the bones of a rigged mesh (name, index, parent, position, role, weight share), to plan a rig.edit step
   propose_plan   a structured plan (steps of task / model / params / inputs), validated by the studio
 
 Every call is forwarded to the studio core: POST $STUDIO_API/api/x/assistant/tools/<name> with the run token in
@@ -28,8 +29,8 @@ STEP = {
     "properties": {
         "id": {"type": "string", "description": "short step id, e.g. s1, props_img, amb"},
         "title": {"type": "string"},
-        "task": {"type": "string", "description": "registry task id (t2i, rgba, shape, texture, rig, motion, sfx, ambience, music, tts, ...; list_models shows them all)"},
-        "tool": {"type": "string", "description": "instead of task+model: a CPU tool id such as audio.loop or audio.normalize"},
+        "task": {"type": "string", "description": "registry task id (t2i, rgba, shape, texture, rig, reskin, motion, sfx, ambience, music, tts, ...; list_models shows them all)"},
+        "tool": {"type": "string", "description": "instead of task+model: a CPU tool id such as audio.loop, audio.normalize or rig.edit (params.ops = list of rig edit operations; see the system prompt)"},
         "model": {"type": "string", "description": "model id from list_models (omit = the task's default)"},
         "params": {"type": "object", "description": "model params by name (prompt, negative, seconds, batch, seed, ...)"},
         "inputs": {"type": "array", "items": {"type": "object", "properties": {
@@ -50,6 +51,8 @@ TOOLS = [
                                                       "tag": {"type": "string"}, "limit": {"type": "integer"}}}},
     {"name": "get_asset", "description": "Read one asset's metadata (prompt, model, params, parents, tags, rating; meshes also mesh3d: rigged, joints, animation clip names).",
      "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
+    {"name": "get_rig", "description": "The skeleton of a rigged mesh asset: bones with index, name, parent, world position (metres, +Y up, +Z front, +X the character's left), humanoid role (hips, left_forearm, head ...), child count and skin-weight share; bones without weight. Call it before proposing a tool step rig.edit (add a tail, move / delete / rename bones) and copy bone names from it.",
+     "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "mesh asset id"}}, "required": ["id"]}},
     {"name": "propose_plan", "description": "Propose a plan to the user. It is shown as an editable card; the USER approves and runs it. Returns validation errors to fix (call again with a corrected plan).",
      "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}, "summary": {"type": "string"},
                                                       "steps": {"type": "array", "items": STEP, "minItems": 1}},

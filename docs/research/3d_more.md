@@ -118,6 +118,36 @@ new derived mesh asset (parents = the input, `info.animations`), refused with an
 both clips. The viewer (`meshViewer` in `app/web/studios/i3d/common.js`) autoplays the first clip of any GLB that has animations and shows
 a play / pause button plus a clip picker next to the view toggles; static meshes are unchanged.
 
+### Editing a rig and re-skinning it
+
+`workers/rig_edit.py` (numpy + stdlib, `tests/test_rig_edit.py`) edits the skeleton of a skinned GLB without touching the mesh: rename
+(or Mixamo / VRM / Unreal names for humanoids), move a joint, delete a bone (its skin weights merge into the parent), add a bone or a
+chain (tail, ears, hair), reparent. After every op the inverse bind matrices are recomputed (`new IBM = inv(G_new) * G_old * IBM_old`), so
+`joint world * IBM` is unchanged for every existing joint and the rest-pose skinned mesh is unchanged (checked with an
+independent skinning evaluator on the real UniRig output: max vertex difference below 1e-4 after move + delete + add_chain + rename).
+New bones get zero weight, so the result is flagged `needs_reskin`; animation clips are dropped on structural edits (flex / wiggle are rebuilt).
+It runs as the CPU tool `tool:rig.edit` (`app/plugins/rig.py`) and is reachable from the 3D viewer (Edit rig), the public MCP (`get_rig`,
+`submit_job(tool='rig.edit')`) and the Assistant (`get_rig` + a `rig.edit` step).
+
+**Re-skin** is task `reskin` on the same UniRig model: the rig worker skips the skeleton stage, writes the skeleton read from the input
+GLB as `predict_skeleton.npz` (joints normalised like the mesh, parents in UniRig order, tails as in `make_skeleton`) and runs the skin
+stage on it, so names, hierarchy and positions are kept and only the weights are recomputed. flex / wiggle clips are added again.
+
+Measured on the GB10 (idle queue, worker started by hand, model already in the cache): the rigged soldier (38,679 vertices, 60k faces,
+decimated to 50k for prediction), 27 joints after the edit (left elbow moved 4 cm down, a 5-bone tail added under the hips, Mixamo names),
+seed 42, `skin_grid` 128:
+
+| stage | time |
+|---|---|
+| prep (load, decimate) | 0.9 s |
+| skeleton | 0.0 s (skipped) |
+| skin | 26.5 s |
+| export (GLB + clips) | 5.9 s |
+| **total** | **33.4 s** |
+
+For comparison, a full rig of the same mesh takes about 46 s (skeleton about 23 s + skin about 22 s). The five new tail bones received 16.8 %
+of the total skin weight (0 before).
+
 ## Install
 
 `./install.sh` builds the four envs from `install/<backend>.yaml` (torch cu130, `env-lock/<backend>.txt`, steps, vendor clones):

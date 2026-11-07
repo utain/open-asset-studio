@@ -7,6 +7,7 @@
 tasks:
   multiview: {label: Multi-view / orbit, modality: image, studio: 3d}
   rig: {label: Auto-rig, modality: mesh, studio: 3d}
+  reskin: {label: Re-skin (keep the skeleton), modality: mesh, studio: 3d}
 
 backends:
   stab3d:
@@ -350,14 +351,15 @@ models:
   - id: unirig
     name: UniRig (auto-rig)
     modality: mesh
-    tasks: [rig]
-    default_for: [rig]
+    tasks: [rig, reskin]
+    default_for: [rig, reskin]
     order: 10
     tags: [rig, mit, skeleton, skin]
-    summary: "VAST-AI UniRig: predicts a skeleton and skin weights for any mesh (humanoids, quadrupeds, creatures, props) and writes a rigged GLB (glTF skin, 4 influences per vertex) that also carries a flex-test and a wiggle preview animation (rigged_plain.glb = without). Runs without Blender; bone names are generic (bone_0 ...), no Mixamo / VRM retargeting. Mesh is decimated to max_faces for the prediction only, the weights are transferred to every original vertex."
+    summary: "VAST-AI UniRig: predicts a skeleton and skin weights for any mesh (humanoids, quadrupeds, creatures, props) and writes a rigged GLB (glTF skin, 4 influences per vertex) that also carries a flex-test and a wiggle preview animation (rigged_plain.glb = without). Runs without Blender; bone names are generic (bone_0 ...), no Mixamo / VRM retargeting (rename afterwards with tool rig.edit). Mesh is decimated to max_faces for the prediction only, the weights are transferred to every original vertex. Task reskin keeps the skeleton of an already rigged GLB (for example one edited with tool rig.edit: added tail / ears, moved joints, deleted bones) and only recomputes the skin weights for it."
     features: {input: mesh, export: [glb], rig: true}
     input_slots:
-      - {role: mesh, label: Mesh to rig, types: [mesh], required: true, hint: "A GLB from the Shape tab or Texture tab. Works best in a neutral pose (T / A pose for characters)."}
+      - {role: mesh, label: Mesh to rig, types: [mesh], required: true, tasks: [rig], hint: "A GLB from the Shape tab or Texture tab. Works best in a neutral pose (T / A pose for characters)."}
+      - {role: mesh, label: Rigged mesh to re-skin, types: [mesh], required: true, tasks: [reskin], hint: "A rigged GLB (Rig tab result, or the output of tool rig.edit). Its skeleton is kept as it is; only the skin weights are recomputed. Bones need unique names and one root."}
     backend: rig
     weights:
       - {hf: VAST-AI/UniRig, files: ["skeleton/articulation-xl_quantization_256/model.ckpt", "skin/articulation-xl/model.ckpt"]}
@@ -367,9 +369,9 @@ models:
     speed: "see docs/research/3d_more.md"
     est: {load_s: 30, run_s: 80}
     params:
-      - {name: num_beams, label: Skeleton beams, type: int, min: 1, max: 20, default: 8, group: basic, help: "Beam search width of the skeleton generator: more = steadier skeleton, slower."}
+      - {name: num_beams, label: Skeleton beams, type: int, min: 1, max: 20, default: 8, group: basic, tasks: [rig], help: "Beam search width of the skeleton generator: more = steadier skeleton, slower."}
       - {name: skin_grid, label: Skin voxel grid, type: choice, choices: [96, 128, 196], default: 128, group: basic, help: "Resolution of the voxel graph used for the skin prior (196 = reference quality, slowest)."}
       - {name: max_faces, label: Faces used for prediction, type: int, min: 5000, max: 100000, default: 50000, group: advanced}
-      - {name: temperature, label: Skeleton temperature, type: float, min: 0.5, max: 2.5, step: 0.1, default: 1.5, group: advanced}
+      - {name: temperature, label: Skeleton temperature, type: float, min: 0.5, max: 2.5, step: 0.1, default: 1.5, group: advanced, tasks: [rig]}
       - {name: seed, type: seed, default: -1}
     presets: {fast: {num_beams: 4, skin_grid: 96}, balanced: {}, quality: {num_beams: 15, skin_grid: 196}}

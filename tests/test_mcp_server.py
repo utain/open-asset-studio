@@ -217,9 +217,24 @@ def test_list_tools_describes_params(mcp, monkeypatch):
         assert "params" in mcp.TOOL_PARAMS[t] and "in" in mcp.TOOL_PARAMS[t]
 
 
+def test_get_rig_reads_the_skeleton_and_documents_the_edit_flow(mcp, monkeypatch):
+    sk = {"asset": "r1", "name": "Soldier", "needs_reskin": True, "count": 2, "height": 1.8, "bounds": [[0, 0, 0], [1, 1, 1]], "units": "m",
+          "animations": [], "zero_weight": ["tail_01"], "humanoid": {"ok": False, "reason": "no arms"},
+          "joints": [{"index": 0, "name": "hips", "parent": -1, "position": [0, 1, 0], "role": "hips", "children": 1, "weight_share": 0.9},
+                     {"index": 1, "name": "tail_01", "parent": 0, "position": [0, 1, -0.1], "role": None, "children": 0, "weight_share": 0.0}]}
+    seen = fake(mcp, monkeypatch, {("GET", "/api/x/rig/r1/skeleton"): sk})
+    res, d = call(mcp, "get_rig", {"asset": "r1"})
+    assert not res["isError"] and seen[0][:2] == ("GET", "/api/x/rig/r1/skeleton")
+    assert d["count"] == 2 and d["joints"][1]["name"] == "tail_01" and d["zero_weight"] == ["tail_01"] and d["needs_reskin"] is True
+    assert "reskin" in d["hint"] and "rig.edit" in d["hint"]
+    ops = mcp.TOOL_PARAMS["rig.edit"]
+    assert "add_chain" in ops["params"]["ops"] and "reskin" in ops["note"]
+    assert "rig.edit" in {t["name"]: t for t in mcp.TOOLS}["submit_job"]["description"]
+
+
 def test_tool_params_table_matches_registered_handlers():
     from app.jobs import HANDLERS
-    from app.plugins import core_tools, mesh, sound, video  # noqa: F401  (importing registers the handlers)
+    from app.plugins import core_tools, mesh, rig, sound, video  # noqa: F401  (importing registers the handlers)
 
     import importlib.util
     spec = importlib.util.spec_from_file_location("mcp_server3", config.STUDIO / "scripts" / "mcp_server.py")
@@ -352,7 +367,7 @@ def test_create_project_update_mode(mcp, monkeypatch):
 
 
 def test_assistant_mcp_stays_read_propose_only(monkeypatch):
-    """workers/studio_mcp.py: the Assistant's server keeps its 4 tools (no submit / delete), knows rig + motion, and its get_asset shows 3D info."""
+    """workers/studio_mcp.py: the Assistant's server keeps its 5 tools (no submit / delete), knows rig + motion, and its get_asset shows 3D info."""
     import sys
     sys.path.insert(0, str(config.STUDIO / "workers"))
     try:
@@ -360,9 +375,9 @@ def test_assistant_mcp_stays_read_propose_only(monkeypatch):
     finally:
         sys.path.pop(0)
     from app.plugins import assistant
-    assert {t["name"] for t in studio_mcp.TOOLS} == {"list_models", "search_assets", "get_asset", "propose_plan"}
-    step = studio_mcp.TOOLS[3]["inputSchema"]["properties"]["steps"]["items"]["properties"]
-    assert "rig" in step["task"]["description"] and "motion" in step["task"]["description"]
+    assert {t["name"] for t in studio_mcp.TOOLS} == {"list_models", "search_assets", "get_asset", "get_rig", "propose_plan"}
+    step = [t for t in studio_mcp.TOOLS if t["name"] == "propose_plan"][0]["inputSchema"]["properties"]["steps"]["items"]["properties"]
+    assert "rig" in step["task"]["description"] and "motion" in step["task"]["description"] and "reskin" in step["task"]["description"]
 
     class Store:
         def get(self, aid):

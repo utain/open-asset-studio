@@ -175,7 +175,7 @@ def test_mcp_server_exposes_only_the_studio_tools(monkeypatch):
     import studio_mcp
     sys.path.pop(0)
     from app.plugins import assistant
-    assert {t["name"] for t in studio_mcp.TOOLS} == {"list_models", "search_assets", "get_asset", "propose_plan"}
+    assert {t["name"] for t in studio_mcp.TOOLS} == {"list_models", "search_assets", "get_asset", "get_rig", "propose_plan"}
     assert set(assistant.MCP_TOOLS) == {t["name"] for t in studio_mcp.TOOLS}
     assert assistant.ALLOWED_MCP == [f"mcp__studio__{n}" for n in assistant.MCP_TOOLS]
     r = studio_mcp.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
@@ -260,6 +260,59 @@ def test_plan_validation_rejects_unknown_models_tasks_params(env):
     v2 = validate_plan({"steps": [{"id": "x", "title": "t", "task": "sfx", "model": "test-tone", "params": {}}]}, "default",
                        registry=reg, assets=store, include_test=False)
     assert "self-test" in " ".join(v2["errors"]["x"])
+
+
+def test_plan_validation_accepts_rig_edit_ops_and_checks_them(env):
+    import app.plugins.rig  # noqa: F401  (registers tool:rig.edit)
+    from app.plugins.assistant import validate_plan
+    reg, store, _ = env
+    good = [{"op": "add_chain", "parent": "hips", "count": 5, "direction": "back", "length": 0.1, "name_prefix": "tail"},
+            {"op": "move_joint", "bone": "left elbow", "offset": [0, -0.03, 0]}]
+    v = validate_plan({"title": "t", "steps": [
+        {"id": "a", "title": "tail", "tool": "rig.edit", "params": {"ops": good}, "inputs": [{"asset": "20261107-123527-d7b8c6"}]},
+        {"id": "b", "title": "no ops", "tool": "rig.edit", "params": {}, "inputs": [{"step": "a"}]},
+        {"id": "c", "title": "bad op", "tool": "rig.edit", "params": {"ops": [{"op": "explode", "bone": "x"}]}, "inputs": [{"step": "a"}]},
+        {"id": "d", "title": "typo field", "tool": "rig.edit", "params": {"ops": [{"op": "rename", "bone": "x", "to": "y", "colour": 1}]}, "inputs": [{"step": "a"}]},
+        {"id": "e", "title": "other param", "tool": "rig.edit", "params": {"ops": good, "cmd": "x"}, "inputs": [{"step": "a"}]},
+    ]}, "default", registry=reg, assets=store, include_test=True)
+    e = v["errors"]
+    assert "a" not in e or all("not found" in m for m in e["a"])          # the asset id is made up; only that may be wrong
+    assert "ops" in " ".join(e["b"]) and "explode" in " ".join(e["c"]) or "op" in " ".join(e["c"])
+    assert "colour" in " ".join(e["d"]) and "cmd" in " ".join(e["e"])
+    assert v["plan"]["steps"][0]["params"]["ops"] == good                 # lists survive the scalar filter for ops
+
+
+def test_assistant_get_rig_is_compact_and_read_only(monkeypatch):
+    sys.path.insert(0, str(ROOT / "workers"))
+    try:
+        import rig_edit
+    finally:
+        sys.path.pop(0)
+    from app.plugins import assistant
+    desc = {"count": 2, "height": 1.8, "units": "m", "animations": [], "zero_weight": ["tail_01"], "humanoid": {"ok": False, "reason": "x"},
+            "joints": [{"index": 0, "name": "hips", "parent": -1, "position": [0, 1.0, 0], "role": "hips", "children": 1, "weight_share": 0.5},
+                       {"index": 1, "name": "tail_01", "parent": 0, "position": [0, 1.0, -0.1], "role": None, "children": 0, "weight_share": 0.0}]}
+    monkeypatch.setattr(rig_edit, "describe", lambda p: desc)
+
+    class Store:
+        def get(self, aid):
+            if aid == "r1":
+                return {"id": "r1", "project": "default", "type": "mesh", "main": "mesh.glb", "name": "Soldier", "info": {"needs_reskin": True}}
+            if aid == "i1":
+                return {"id": "i1", "project": "default", "type": "image", "main": "a.png"}
+            raise KeyError(aid)
+
+        def file_path(self, p, a, f):
+            return Path("/x") / f
+
+    class Core:
+        assets = Store()
+    monkeypatch.setattr(assistant, "CORE", Core())
+    d = assistant.tool_get_rig("default", {"id": "r1"})
+    assert d["count"] == 2 and d["needs_reskin"] is True and d["joints"][1][:3] == [1, "tail_01", 0] and d["bones_without_weight"] == ["tail_01"]
+    assert "error" in assistant.tool_get_rig("default", {"id": "i1"}) and "error" in assistant.tool_get_rig("other", {"id": "r1"})
+    assert "error" in assistant.tool_get_rig("default", {"id": "nope"})
+    assert "rig.edit" in assistant.SYSTEM and "reskin" in assistant.SYSTEM and "get_rig" in assistant.SYSTEM
 
 
 def test_plan_execution_goes_through_the_job_api(env):

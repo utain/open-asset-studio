@@ -51,7 +51,7 @@ _LOCK = threading.RLock()
 RUNS_BY_TOKEN: dict[str, dict] = {}       # MCP token -> {chat, project, proposals: [], tools: []}
 TURNS: dict[str, threading.Event] = {}    # chat id -> cancel event of the turn in flight
 PLAN_RUNS: dict[str, dict] = {}           # run id -> {cancel, thread}
-MCP_TOOLS = ["list_models", "search_assets", "get_asset", "propose_plan"]
+MCP_TOOLS = ["list_models", "search_assets", "get_asset", "get_rig", "propose_plan"]
 ALLOWED_MCP = [f"mcp__studio__{n}" for n in MCP_TOOLS]
 
 SHARED_PARAMS = {"prompt", "negative", "batch", "seed"}       # accepted by every model job (not always in params:)
@@ -67,7 +67,9 @@ TOOL_PARAMS = {
                       "fade_in_ms", "fade_out_ms", "xfade_ms", "lufs", "ceiling_db", "bit_depth", "quality"},
     "image.convert": {"format", "max_side", "square"},
     "asset.export": {"preset", "audio", "image"},       # export preset: loudness / sample rate / format / crop; derived copies
+    "rig.edit": {"ops", "clips"},                       # edit the skeleton of a rigged mesh (workers/rig_edit.py); ops is a list of objects
 }
+JSON_TOOL_PARAMS = {"rig.edit": {"ops"}}                 # tool params that may be lists / objects (all others must be scalars)
 
 
 def setup(core):
@@ -154,6 +156,41 @@ def _param_public(p: dict) -> str:
     return d
 
 
+def _rig_edit():
+    if str(config.WORKERS) not in sys.path:
+        sys.path.append(str(config.WORKERS))
+    import rig_edit
+    return rig_edit
+
+
+def tool_get_rig(project: str, args: dict) -> dict:
+    """The bones of a rigged mesh, compact: [index, name, parent index, [x, y, z], role, child count, weight share]."""
+    c = _core()
+    try:
+        a = c.assets.get(str(args.get("id") or args.get("asset") or ""))
+    except (AssetError, KeyError):
+        return {"error": "asset not found"}
+    if a.get("project") != project:
+        return {"error": "asset not in this project"}
+    if a.get("type") != "mesh" or not str(a.get("main") or "").lower().endswith(".glb"):
+        return {"error": "get_rig needs a rigged mesh asset (GLB)"}
+    re_ = _rig_edit()
+    try:
+        d = re_.describe(c.assets.file_path(a["project"], a["id"], a["main"]))
+    except re_.NoSkinError:
+        return {"error": "this mesh has no skeleton; propose the task rig first"}
+    except re_.RigAnimError as e:
+        return {"error": str(e)}
+    hum = d.get("humanoid") or {}
+    return {"id": a["id"], "name": a.get("name"), "count": d["count"], "height_m": d["height"], "units": d["units"],
+            "columns": ["index", "name", "parent", "position", "role", "children", "weight_share"],
+            "joints": [[r["index"], r["name"], r["parent"], [round(x, 3) for x in r["position"]], r["role"], r["children"], round(r["weight_share"], 3)]
+                       for r in d["joints"]],
+            "humanoid": ({"roles": hum["roles"]} if hum.get("ok") else {"roles": None, "reason": hum.get("reason")}),
+            "animations": d["animations"], "bones_without_weight": d["zero_weight"], "needs_reskin": bool((a.get("info") or {}).get("needs_reskin")),
+            "hint": "Edit with a step {tool: 'rig.edit', params: {ops: [...]}}; name bones exactly as listed here (or role words like 'left elbow')."}
+
+
 def tool_search_assets(project: str, args: dict) -> dict:
     lim = max(1, min(int(args.get("limit") or 30), 100))
     r = _core().assets.list(project, type=args.get("type") or None, tag=args.get("tag") or None, q=args.get("q") or None, limit=lim)
@@ -237,7 +274,14 @@ def validate_plan(plan: dict, project: str, *, registry=None, assets=None, inclu
                     err(sid, f"Unknown params for {tool}: {', '.join(bad)}.")
             st["tool"] = tool
             st["task"] = None
-            st["params"] = {k: v for k, v in params.items() if isinstance(v, (str, int, float, bool)) or v is None}
+            json_ok = JSON_TOOL_PARAMS.get(tool, set())
+            st["params"] = {k: v for k, v in params.items() if isinstance(v, (str, int, float, bool)) or v is None or (k in json_ok and isinstance(v, (list, dict)))}
+            if tool == "rig.edit":
+                if not params.get("ops"):
+                    err(sid, "rig.edit needs params.ops (a list of operations).")
+                else:
+                    for msg in _rig_edit().validate_ops(params.get("ops")):
+                        err(sid, msg)
             if not s.get("inputs"):
                 err(sid, f"The tool {tool} needs an input (an earlier step or an asset).")
         else:
@@ -371,6 +415,8 @@ def execute_tool(run: dict, name: str, args: dict) -> dict:
             return tool_search_assets(run["project"], args)
         if name == "get_asset":
             return tool_get_asset(run["project"], args)
+        if name == "get_rig":
+            return tool_get_rig(run["project"], args)
         if name == "propose_plan":
             return tool_propose_plan(run, args)
     except (ValueError, TypeError, AssetError) as e:
@@ -446,6 +492,19 @@ Rules:
 - Honour the USE CASE line when present (aspect ratios, lengths, loudness targets) and keep game support intact when the
   request is about a game.
 - Keep plans short (usually <= 12 steps). Step ids: short snake_case. Give every step a clear title.
+- Editing an existing rig ("add a 5-bone tail", "move the left elbow down a bit", "delete the gun bones", "rename to Mixamo names",
+  "re-skin"): first call get_rig(id) on the rigged mesh (find it with search_assets; mesh3d.rigged must be true) and copy bone names
+  from it; never invent bones. Then propose ONE step {"tool": "rig.edit", "params": {"ops": [...]}, "inputs": [{"asset": id}]}.
+  Ops (applied in order; units metres, +Y up, the character faces +Z, its left is +X; a bone is a name, an index or a role word like
+  "left elbow", "head", "hips"):
+  {"op":"rename","bone":B,"to":NAME} | {"op":"rename_standard","scheme":"mixamo"|"vrm"|"unreal"} (humanoids) |
+  {"op":"move_joint","bone":B,"offset":[x,y,z]} (or "delta":[x,y,z] as fractions of the bone length, or "to":[x,y,z]; "children":"follow"
+  moves the whole subtree, "mirror":true moves the opposite side too) | {"op":"delete_bone","bone":B} (or "match":"gun*",
+  "include_children":true; skin weights go to the parent) | {"op":"add_bone","parent":B,"direction":"up"|"down"|"left"|"right"|"forward"|"back"|[x,y,z],
+  "length":m,"name":NAME} | {"op":"add_chain","parent":B,"count":5,"direction":"back","length":0.08,"name_prefix":"tail"} (tails, ears, hair) |
+  {"op":"reparent","bone":B,"parent":B2}. Example 5-bone tail: [{"op":"add_chain","parent":"hips","count":5,"direction":"back","length":0.1,"name_prefix":"tail"}].
+  New bones start with no skin weight: when the edit adds bones (or the user says re-skin) add a second step {"task": "reskin",
+  "inputs": [{"step": "<edit step id>"}]} (keeps the skeleton, recomputes the weights, GPU ~35 s). A rename or a move does not need it.
 - Reply briefly in the user's language. If something cannot be done with the ready models, say what is missing.
 """
 

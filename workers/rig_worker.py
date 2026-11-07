@@ -1,9 +1,13 @@
 """Auto-rigging backend (envs/rig): UniRig (VAST-AI-Research/UniRig, MIT), mesh -> skeleton + skin weights -> rigged GLB.
 
-  task rig   input role `mesh` (a mesh asset, GLB)  ->  mesh asset `rigged.glb` (the original geometry / materials plus a glTF
+  task rig     input role `mesh` (a mesh asset, GLB)  ->  mesh asset `rigged.glb` (the original geometry / materials plus a glTF
                                                          skeleton, `skin` with JOINTS_0 / WEIGHTS_0, and the animation clips
                                                          `flex` / `wiggle` of rig_anim.py so the studio can show the skinning
                                                          moving) + `rigged_plain.glb` (the same without clips) + `skeleton.json`
+  task reskin  input role `mesh` = an already RIGGED GLB (typically edited with tool:rig.edit): skips the skeleton stage, takes the
+                                                         skeleton from the GLB (workers/rig_edit.py), writes it as UniRig's
+                                                         predict_skeleton.npz (same normalised frame, tails as UniRig's decoder makes
+                                                         them) and runs only the skin stage on the mesh. Same outputs as `rig`.
 
 UniRig's own pipeline needs Blender (bpy) to read meshes and write FBX, and CUDA extensions (spconv, flash-attn, torch-scatter,
 torch-cluster) plus an OpenGL context for voxelisation. None exists here, so:
@@ -33,6 +37,7 @@ import numpy as np
 
 import m3d_common as C
 import rig_anim
+import rig_edit
 from studio_worker import Backend, Cancelled, InputError, serve
 
 STUDIO = Path(os.environ.get("STUDIO_ROOT") or Path(__file__).resolve().parent.parent)
@@ -63,11 +68,12 @@ class RigBackend(Backend):
 
     # ------------------------------------------------------------------ run
     def run(self, job, ctx):
-        if job.task != "rig":
+        if job.task not in ("rig", "reskin"):
             raise InputError(f"{job.model.get('name', job.model_id)} cannot do '{job.task}'.")
+        reskin = job.task == "reskin"
         inp = job.input(role="mesh") or job.input(type="mesh")
         if inp is None:
-            raise InputError("Pick the mesh to rig.")
+            raise InputError("Pick the rigged mesh to re-skin." if reskin else "Pick the mesh to rig.")
         p = job.params
         out = job.out_dir / "asset"
         out.mkdir(parents=True, exist_ok=True)
@@ -91,21 +97,27 @@ class RigBackend(Backend):
         ctx.check()
         seed = C.seed_of(p)
 
-        # 2. skeleton
-        ctx.progress(1, 4, "skeleton", "Predicting the skeleton")
-        t1 = time.time()
-        _make_configs(work, p)
-        self._stage(work, "skeleton_task", seed, ctx)
-        t["skeleton_s"] = round(time.time() - t1, 2)
-        sk_path = work / "dataset_inference_clean" / "job" / "predict_skeleton.npz"
-        if not sk_path.is_file():
-            raise RuntimeError("UniRig produced no skeleton (see the worker log); try another seed or a cleaner mesh.")
-        sk = np.load(sk_path, allow_pickle=True)
-        joints_in = np.asarray(sk["joints"], dtype=np.float64)
-        parents = [None if q is None else int(q) for q in list(sk["parents"])]
-        names = [str(n) for n in list(sk["names"])]
-        sk_vertices = np.asarray(sk["vertices"], dtype=np.float64)
-        ctx.log(f"skeleton: {len(names)} joints; stored vertices span {np.abs(sk_vertices).max():.3f}")
+        # 2. skeleton: predicted (rig) or taken from the input GLB (reskin)
+        if reskin:
+            ctx.progress(1, 4, "skeleton", "Reading the skeleton of the input GLB")
+            t["skeleton_s"] = 0.0
+            _make_configs(work, p)                      # the skin stage needs the configs copy (skin_grid)
+            parents, names = self._write_given_skeleton(work, inp["path"], dv, df, center, scale, ctx)
+        else:
+            ctx.progress(1, 4, "skeleton", "Predicting the skeleton")
+            t1 = time.time()
+            _make_configs(work, p)
+            self._stage(work, "skeleton_task", seed, ctx)
+            t["skeleton_s"] = round(time.time() - t1, 2)
+            sk_path = work / "dataset_inference_clean" / "job" / "predict_skeleton.npz"
+            if not sk_path.is_file():
+                raise RuntimeError("UniRig produced no skeleton (see the worker log); try another seed or a cleaner mesh.")
+            sk = np.load(sk_path, allow_pickle=True)
+            joints_in = np.asarray(sk["joints"], dtype=np.float64)
+            parents = [None if q is None else int(q) for q in list(sk["parents"])]
+            names = [str(n) for n in list(sk["names"])]
+            sk_vertices = np.asarray(sk["vertices"], dtype=np.float64)
+            ctx.log(f"skeleton: {len(names)} joints; stored vertices span {np.abs(sk_vertices).max():.3f}")
         ctx.check()
 
         # 3. skin
@@ -148,9 +160,39 @@ class RigBackend(Backend):
         t["export_s"] = round(time.time() - t3, 2)
         ctx.log(f"timings {t}, {len(names)} joints, {info}")
         shutil.rmtree(work, ignore_errors=True)
-        ctx.output(glb, "mesh", seed=seed, name=f"{(inp.get('name') or 'mesh')[:50]} (rigged)", attach=attach,
-                   rigged=True, joints=len(names), stats=info, animations=clips)
+        label = "re-skinned" if reskin else "rigged"
+        ctx.output(glb, "mesh", seed=seed, name=f"{(inp.get('name') or 'mesh')[:50]} ({label})", attach=attach,
+                   rigged=True, joints=len(names), stats=info, animations=clips, **({"reskin": True} if reskin else {}))
         return {"meta": {"timings": t, "joints": len(names)}}
+
+    # ------------------------------------------------------------------ reskin: the skeleton comes from the input GLB
+    def _write_given_skeleton(self, work: Path, glb_path, dv, df, center, scale, ctx):
+        """Write `predict_skeleton.npz` for the skin stage from the skeleton of `glb_path` -> (parents, names) in the file's joint order.
+
+        Same record the skeleton stage leaves: vertices / faces of the (decimated) mesh and the joints in UniRig's normalised
+        frame ((Blender-frame position - center) / scale, bbox +-1), bone tails as UniRig's decoder makes them, parents[k] < k."""
+        import trimesh
+        try:
+            sk = rig_edit.skeleton_arrays(glb_path)
+        except rig_edit.RigAnimError as e:
+            raise InputError(str(e)) from None
+        perm = rig_edit.unirig_order(sk["parents"])
+        inv = {o: n for n, o in enumerate(perm)}
+        names = [sk["names"][o] for o in perm]
+        parents = [None if sk["parents"][o] is None else inv[sk["parents"][o]] for o in perm]
+        joints_n = (_to_blender(sk["positions"][perm]) - center) / scale
+        tails_n = rig_edit.unirig_tails(joints_n, parents)
+        nv = (dv - center) / scale
+        m = trimesh.Trimesh(nv, df, process=False)
+        d = work / "dataset_inference_clean" / "job"
+        d.mkdir(parents=True, exist_ok=True)
+        np.savez(d / "predict_skeleton.npz", vertices=nv.astype(np.float32), vertex_normals=np.asarray(m.vertex_normals, dtype=np.float32),
+                 faces=np.asarray(df, dtype=np.int64), face_normals=np.asarray(m.face_normals, dtype=np.float32),
+                 joints=joints_n.astype(np.float32), tails=tails_n.astype(np.float32), skin=None, no_skin=None,
+                 parents=np.array(parents, dtype=object), names=np.array(names), matrix_local=None, path=None, cls=None)
+        ctx.log(f"reskin: {len(names)} joints from the input GLB, mesh {len(nv)} vertices / {len(df)} faces; "
+                f"joints span {np.abs(joints_n).max():.3f} of the unit box (>1 = a bone sticks out of the mesh)")
+        return parents, names
 
     # ------------------------------------------------------------------ UniRig subprocess
     def _stage(self, work: Path, key: str, seed: int, ctx):

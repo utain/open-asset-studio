@@ -20,6 +20,9 @@ const TASKS = [
   { id: 'rig', label: 'Rig', result: 'mesh', prompt: false, receives: ['rig'],
     inputs: [{ key: 'mesh', label: 'Mesh to rig', types: ['mesh'], role: 'mesh', required: true,
       hint: 'A character or creature in a neutral pose (A- or T-pose) works best. Result: a GLB with a skeleton, skin weights and two preview animations (flex test, wiggle).' }] },
+  { id: 'reskin', label: 'Re-skin', result: 'mesh', prompt: false, receives: ['reskin'],
+    inputs: [{ key: 'mesh', label: 'Rigged mesh (edited skeleton)', types: ['mesh'], role: 'mesh', required: true,
+      hint: 'A rigged GLB whose skeleton you edited (Edit rig in the viewer, or tool rig.edit). The skeleton is kept as it is; only the skin weights are recomputed, so new bones move the mesh.' }] },
   { id: 'motion', label: 'Motion', result: 'mesh', prompt: true, receives: ['motion'],
     placeholder: 'a person walks forward and waves…  (English, describe the body: walk, run, jump, wave the right hand, kick, dance, turn around)',
     inputs: [{ key: 'mesh', label: 'Rigged character', types: ['mesh'], role: 'mesh', required: true,
@@ -35,6 +38,7 @@ export default S.defineStudio({
     { action: 'retexture', label: 'Retexture', icon: 'palette', types: ['mesh'] },
     { action: 'export', label: 'Export mesh', icon: 'package', types: ['mesh'] },
     { action: 'rig', label: 'Auto-rig', icon: 'bot', types: ['mesh'] },
+    { action: 'reskin', label: 'Re-skin (keep the skeleton)', icon: 'bot', types: ['mesh'] },
     { action: 'motion', label: 'Animate (text to motion)', icon: 'wand-sparkles', types: ['mesh'] },
     { action: 'multiview', label: 'Other views', icon: 'grid-2x2', types: ['image'] },
   ],
@@ -45,12 +49,13 @@ export default S.defineStudio({
       btn('Retexture', { size: 'sm', icon: 'palette', onClick: () => receive({ action: 'retexture', assets: [a] }) }),
       btn('Rig', { size: 'sm', icon: 'bot', onClick: () => receive({ action: 'rig', assets: [a] }) }),
       isRigged(a) ? btn('Motion', { size: 'sm', icon: 'wand-sparkles', title: 'Describe a movement in words and animate this rigged character (text to motion)', onClick: () => receive({ action: 'motion', assets: [a] }) }) : null,
+      needsReskin(a) ? btn('Re-skin', { size: 'sm', icon: 'bot', kind: 'primary', title: 'This rig has bones without skin weight (it was edited). Recompute the weights for its skeleton.', onClick: () => receive({ action: 'reskin', assets: [a] }) }) : null,
       needsClips(a) ? btn('Animate preview', { size: 'sm', icon: 'play', title: 'Add a flex test and a wiggle loop to this rigged mesh (a new asset) to see how the skin moves', onClick: e => animatePreview(a, e.currentTarget) }) : null,
       btn('Export', { size: 'sm', icon: 'package', onClick: () => receive({ action: 'export', assets: [a] }) }),
     ] });
     const kit = new S.TaskStudio({
       studio: '3d',
-      tasks: TASKS,
+      tasks: TASKS.filter(t => t.id !== 'reskin' || S.modelsFor('reskin').length),    // an older core has no task reskin: no tab
       extraPanel: (k, t) => extraPanel(k, t),
       beforeSubmit: (spec, k) => beforeSubmit(spec, k),
     });
@@ -86,6 +91,8 @@ export default S.defineStudio({
       if (p.action === 'retexture' && meshes[0]) { kit.setTask('texture'); await kit.slots.mesh.set([meshes[0].id]); if (img) await kit.slots.image.set([img.id]); viewer.set(meshes[0]); return; }
       if (p.action === 'multiview' && img) { kit.setTask('multiview'); await kit.slots.image.set([img.id]); S.toast('Image loaded: pick a model and press Generate.', { kind: 'info' }); return; }
       if (p.action === 'rig' && meshes[0]) { kit.setTask('rig'); await kit.slots.mesh.set([meshes[0].id]); viewer.set(meshes[0]); return; }
+      if (p.action === 'reskin' && meshes[0]) { if (!kit.tasks.find(t => t.id === 'reskin')) { S.toast('Re-skin needs the newest core: restart Open Asset Studio.', { kind: 'warn' }); return; }
+        kit.setTask('reskin'); await kit.slots.mesh.set([meshes[0].id]); viewer.set(meshes[0]); S.toast('Press Generate to recompute the skin weights for this skeleton.', { kind: 'info' }); return; }
       if (p.action === 'motion' && meshes[0]) { kit.setTask('motion'); await kit.slots.mesh.set([meshes[0].id]); viewer.set(meshes[0]); S.toast('Character loaded: describe the movement and press Generate.', { kind: 'info' }); return; }
       if (p.action === 'export' && meshes.length) { kit.setTask('mesh_export'); await kit.slots.mesh.set(meshes.map(a => a.id)); viewer.set(meshes[0]); return; }
       return kit.receive(p);
@@ -97,6 +104,7 @@ export default S.defineStudio({
 // Rigged meshes made before the preview clips existed (or imported ones) get them from the CPU tool tool:mesh.flex_preview.
 const isRigged = a => !!(a?.worker?.rigged || a?.info?.rigged);
 const clipsOf = a => [...(a?.worker?.animations || []), ...(a?.info?.animations || [])];
+const needsReskin = a => !!a?.info?.needs_reskin;
 const needsClips = a => isRigged(a) && !clipsOf(a).length;
 async function animatePreview(a, button) {
   if (button) button.disabled = true;
@@ -129,6 +137,9 @@ function extraPanel(kit, t) {
   }
   if (t.id === 'rig') {
     return h('div.field-help', ic('info', 13), ' The rigged GLB keeps the mesh and adds a skeleton with skin weights. Bones have generic names (bone_0, bone_1, …); there is no skeleton template or Mixamo / VRM retargeting. The result also plays two preview animations in the viewer: “flex” bends every joint in turn so you can check the skinning, “wiggle” moves all joints a little. “rigged_plain.glb” is the same file without them. Open it in Blender, Godot or Unity.');
+  }
+  if (t.id === 'reskin') {
+    return h('div.field-help', ic('info', 13), ' Keeps the skeleton of the input GLB exactly as it is (names, hierarchy, positions) and only recomputes the skin weights with UniRig, so bones you added or moved start to move the mesh. About half a minute on the GPU. The result is a new asset with the flex / wiggle preview clips; the input is not changed. Edit the skeleton first: “Edit rig” in the viewer (Bones on), or the Assistant.');
   }
   if (t.id === 'motion') {
     return h('div.field-help', ic('info', 13), ' HY-Motion writes up to 12 s of human motion from the text and retargets it onto the skeleton of the rigged character (the original asset is not changed; the result plays in the viewer). The character must be a two-legged, two-armed humanoid standing upright; other skeletons are refused with a reason. Prompts in English work best (“a person …”). “Root motion: in place” keeps the character on the spot. Commercial use: Tencent’s licence excludes the EU, UK and South Korea.');

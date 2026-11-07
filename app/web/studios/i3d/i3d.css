@@ -104,3 +104,42 @@ section.page[data-studio="image"] .studio-panel, section.page[data-studio="3d"] 
 
 /* Bones toggle (only for a GLB with a skeleton): .btn sets display, which would override the hidden attribute */
 .i3d-vbar [hidden] { display: none !important; }
+
+/* rig editor (rigedit.js): joint dots + lines over the model-viewer, and the panel below the viewer bar */
+.i3d-viewer { position: relative; }
+.rige-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.rige-lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.rige-lines line { stroke: var(--warn); stroke-width: 1.5; opacity: .55; }
+.rige-lines line.new { stroke: var(--ok); opacity: .9; }
+.rige-lines line.sel { stroke-width: 2.5; opacity: 1; }
+.rige-dot { position: absolute; left: 0; top: 0; width: 28px; height: 28px; margin: -14px 0 0 -14px; padding: 0; border: 0; background: transparent;
+  pointer-events: auto; cursor: grab; touch-action: none; will-change: transform; }
+.rige-dot::after { content: ''; position: absolute; left: 50%; top: 50%; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%;
+  background: var(--warn); border: 1.5px solid var(--panel); box-shadow: 0 0 0 1px var(--text-3); }
+.rige-dot.new::after { background: var(--ok); }
+.rige-dot.sel::after { width: 16px; height: 16px; margin: -8px 0 0 -8px; background: var(--accent); box-shadow: 0 0 0 2px var(--text); }
+.rige-dot:hover::after, .rige-dot:focus-visible::after { box-shadow: 0 0 0 2px var(--accent); }
+.rige-dot:active { cursor: grabbing; }
+.rige-dot[hidden] { display: none; }
+
+.rige-host { min-width: 0; }
+.rige-host[hidden] { display: none; }
+.rige { border: 1px solid var(--line-soft); border-radius: 12px; background: var(--panel); padding: 10px 12px; display: flex; flex-direction: column; gap: 9px; min-width: 0; }
+.rige-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.rige-asset { min-width: 0; font-size: 12.5px; }
+.rige-body { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
+.rige-help { margin: 0; font-size: 12.5px; }
+.rige-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.rige-row .input { flex: 1 1 140px; min-width: 0; height: 30px; }
+.rige-nudge .rige-step { width: auto; height: 30px; padding: 0 24px 0 9px; font-size: 12.5px; }
+.rige-pick { width: 100%; height: 32px; font-size: 13px; }
+.rige-sel { font-size: 13px; line-height: 1.5; min-width: 0; overflow-wrap: anywhere; }
+.rige-tag { margin-left: 6px; padding: 1px 7px; border-radius: 99px; background: var(--ok-soft); color: var(--ok); font-size: 11.5px; }
+.rige-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-2); }
+.rige-log { margin: 0; padding-left: 20px; font-size: 12.5px; color: var(--text-2); max-height: 120px; overflow: auto; }
+.rige-log:empty { display: none; }
+.rige-status { font-size: 12.5px; min-height: 0; }
+.rige-status:empty { display: none; }
+.rige-err { margin: 0; color: var(--warn); font-size: 13px; display: flex; gap: 6px; align-items: flex-start; }
+@media (max-width: 760px) { .rige { padding: 9px 10px; } .rige-log { max-height: 84px; } }
+.rige-head b { white-space: nowrap; }
