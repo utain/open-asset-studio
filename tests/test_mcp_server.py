@@ -389,3 +389,16 @@ def test_assistant_mcp_stays_read_propose_only(monkeypatch):
     monkeypatch.setattr(assistant, "CORE", Core())
     d = assistant.tool_get_asset("default", {"id": "r1"})
     assert d["mesh3d"] == {"rigged": True, "joints": 34, "animations": ["flex", "wiggle"], "textured": None}
+
+
+def test_proxied_callers_are_not_local():
+    """`tailscale serve` / nginx connect from 127.0.0.1 but forward other machines: they must not get import_file."""
+    from starlette.requests import Request
+
+    from app.plugins import mcp as plugin
+
+    def req(headers):
+        return Request({"type": "http", "client": ("127.0.0.1", 5), "headers": [(k.encode(), v.encode()) for k, v in headers.items()]})
+    assert plugin._is_local(req({}))
+    assert not plugin._is_local(req({"x-forwarded-for": "203.0.113.7"}))
+    assert not plugin._is_local(req({"tailscale-user-login": "someone@example.com"}))

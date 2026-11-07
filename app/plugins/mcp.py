@@ -48,7 +48,14 @@ def _origin_ok(request: Request) -> bool:
     return o.hostname in LOCAL_HOSTS or (bool(host) and o.hostname == host)
 
 
+_PROXY_HEADERS = ("x-forwarded-for", "forwarded", "x-real-ip", "tailscale-user-login")
+
+
 def _is_local(request: Request) -> bool:
+    """Same machine only. A local reverse proxy (`tailscale serve`, nginx, ...) connects from 127.0.0.1 but forwards
+    other machines, so any proxy header makes the caller remote."""
+    if any(h in request.headers for h in _PROXY_HEADERS):
+        return False
     return bool(request.client) and request.client.host in ("127.0.0.1", "::1", "localhost")
 
 
