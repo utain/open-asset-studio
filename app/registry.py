@@ -384,9 +384,12 @@ class Registry:
         out.sort(key=lambda m: (m.get("test", False), order.get(m["status"]["status"], 9), m.get("order", 50), m["name"]))
         return out
 
-    def default_for(self, task: str) -> str | None:
-        if self.settings:
-            d = (self.settings.get("defaults") or {}).get(task)
+    def default_for(self, task: str, settings=None) -> str | None:
+        """Default model of a task: the Models-page choice in `settings` (a project's SettingsView, or the system
+        settings when None), else the first ready model flagged `default_for`, else any ready one."""
+        s = settings or self.settings
+        if s:
+            d = (s.get("defaults") or {}).get(task)
             if d in self.models and task in self.models[d]["tasks"]:
                 return d
         cands = [m for m in self.models.values() if task in m["tasks"] and not m.get("test")]

@@ -129,12 +129,18 @@ def _studio_modules() -> list[str]:
     return sorted(p.name for p in d.glob("*.js")) if d.is_dir() else []
 
 
+def _settings_payload(c: Core, view) -> dict:
+    """What the browser needs of the effective settings (system, or system + one project's overrides)."""
+    return {"ui": view.get("ui"), "profile": view.get("profile"), "license": view.get("license"), "export": view.get("export"),
+            "prompt": view.get("prompt"), "defaults": {t: c.registry.default_for(t, settings=view) for t in c.registry.tasks},
+            "overridden": sorted(config.flatten(getattr(view, "overrides", None) or {}))}
+
+
 @app.get("/api/bootstrap")
-def bootstrap():
+def bootstrap(project: str | None = None):
     c = C()
     return {"version": c.version, "projects": c.assets.projects(), "tasks": c.registry.tasks,
-            "settings": {"ui": c.settings.get("ui"), "profile": c.settings.get("profile"), "license": c.settings.get("license"),
-                         "export": c.settings.get("export"), "defaults": {t: c.registry.default_for(t) for t in c.registry.tasks}},
+            "settings": _settings_payload(c, c.settings_for(project)),
             "modules": _studio_modules(), "llm": c.llm.status(), "jobs": c.jobs.counts(),
             "memory": c.memory.snapshot(), "plugins": sorted(c.plugins), "plugin_errors": c.plugin_errors,
             "tools": {k[5:]: v["label"] for k, v in HANDLERS.items() if k.startswith("tool:")},
@@ -217,12 +223,14 @@ def selftest(req: SelfTestReq):
 
 # ------------------------------------------------------------------ models / settings / presets
 @app.get("/api/models")
-def models(task: str | None = None, modality: str | None = None, include_test: bool | None = None):
+def models(task: str | None = None, modality: str | None = None, include_test: bool | None = None,
+           project: str | None = None):
     c = C()
+    view = c.settings_for(project)      # a project's default models; the system ones for no / an unknown project
     if include_test is None:
-        include_test = bool(c.settings.get("ui", "show_test_models", default=False))
+        include_test = bool(view.get("ui", "show_test_models", default=False))
     return {"models": c.registry.list(task, modality, include_test), "tasks": c.registry.tasks,
-            "defaults": {t: c.registry.default_for(t) for t in c.registry.tasks}, "errors": c.registry.errors,
+            "defaults": {t: c.registry.default_for(t, settings=view) for t in c.registry.tasks}, "errors": c.registry.errors,
             "backends": [c.registry.backend_public(b) for b in c.registry.backends.values()]}
 
 
@@ -284,25 +292,78 @@ def settings_get():
     return C().settings.data
 
 
+@app.get("/api/settings/schema")
+def settings_schema_get():
+    """Every setting with its type, range, scope and apply level; the Settings page is generated from it."""
+    from . import settings_schema
+
+    return settings_schema.build(C())
+
+
+def _publish_settings(c: Core, project: str | None, patch: dict):
+    """SSE `settings` event after a change of the system settings (project=None) or of one project's overrides. Clients
+    must refetch their effective settings; a system event can carry values the current project overrides."""
+    view = c.settings_for(project)
+    if {"profile", "license", "export", "ui", "prompt", "textgen", "defaults"} & set(patch):
+        c.bus.publish("settings", {"scope": "project" if project else "system", "project": project,
+                                   "profile": view.get("profile"), "license": view.get("license"),
+                                   "export": view.get("export"), "ui": view.get("ui")})
+    if "defaults" in patch or ("ui" in patch and "show_test_models" in (patch.get("ui") or {})):
+        c.bus.publish("models", {"defaults": True, **({"project": project} if project else {})})
+
+
 @app.patch("/api/settings")
 def settings_patch(patch: dict):
-    allowed = {"defaults", "ui", "memory", "workers", "jobs", "llm", "textgen", "profile", "license", "export"}
-    bad = set(patch) - allowed
-    if bad:
-        raise HTTPException(400, f"Unknown settings: {', '.join(sorted(bad))}")
+    from . import settings_schema
+
+    c = C()
+    patch = settings_schema.validate_patch(patch, "system", c)
+    out = c.settings.update(patch)
+    _publish_settings(c, None, patch)
+    return out
+
+
+def _project_settings_body(c: Core, project: str) -> dict:
+    """Effective settings of a project: its overrides, which keys they are, the merged values and what they resolve to."""
+    if not c.assets.project_dir(project).is_dir():
+        raise HTTPException(404, f"No such project '{project}'.")
+    view = c.settings_for(project)
+    tg = {p: c.textgen.default_for(p, settings=view) for p in ("improve", "write", "assistant")}
     from . import profiles
 
-    if "profile" in patch and patch["profile"] not in profiles.PROFILES:
-        raise HTTPException(400, f"Unknown profile '{patch['profile']}' (one of {', '.join(profiles.PROFILE_IDS)}).")
-    if isinstance(patch.get("export"), dict) and patch["export"].get("preset") not in (None, *profiles.EXPORT_PRESETS):
-        raise HTTPException(400, f"Unknown export preset '{patch['export']['preset']}'.")
-    if "license" in patch and not isinstance(patch["license"], dict):
-        raise HTTPException(400, "license must be an object: {commercial_only, strict}.")
+    return {"project": project, "overrides": view.overrides, "overridden": sorted(config.flatten(view.overrides)),
+            "effective": {"profile": view.get("profile"), "license": view.get("license"), "export": view.get("export"),
+                          "defaults": view.get("defaults"), "textgen": {p: view.get("textgen", p) for p in tg},
+                          "prompt": view.get("prompt"), "ui": view.get("ui")},
+            "resolved": {"defaults": {t: c.registry.default_for(t, settings=view) for t in c.registry.tasks},
+                         "textgen": tg, "export_preset": profiles.default_export_preset(view)}}
+
+
+@app.get("/api/projects/{project}/settings")
+def project_settings_get(project: str):
+    return _project_settings_body(C(), project)
+
+
+@app.patch("/api/projects/{project}/settings")
+def project_settings_patch(project: str, patch: dict):
+    from . import settings_schema
+
     c = C()
-    out = c.settings.update(patch)
-    if {"profile", "license", "export"} & set(patch):
-        c.bus.publish("settings", {"profile": out.get("profile"), "license": out.get("license"), "export": out.get("export")})
-    return out
+    _project_settings_body(c, project)      # 404 for an unknown project
+    patch = settings_schema.validate_patch(patch, "project", c)
+    c.assets.update_project_settings(project, patch)
+    _publish_settings(c, project, patch)
+    return _project_settings_body(c, project)
+
+
+@app.delete("/api/projects/{project}/settings")
+def project_settings_reset(project: str):
+    """Drop every override of the project: it follows the system settings again."""
+    c = C()
+    old = _project_settings_body(c, project)["overrides"]
+    c.assets.update_project_settings(project, {}, replace=True)
+    _publish_settings(c, project, old)
+    return _project_settings_body(c, project)
 
 
 @app.get("/api/profiles")
@@ -316,6 +377,7 @@ def profiles_get():
 class DefaultReq(BaseModel):
     task: str
     model: str | None = None
+    project: str | None = None      # set: the default is stored as that project's override (null = inherit the system one)
 
 
 @app.put("/api/settings/defaults")
@@ -325,8 +387,15 @@ def set_default(req: DefaultReq):
         m = c.registry.get(req.model)
         if req.task not in m["tasks"]:
             raise HTTPException(400, f"{m['name']} does not support {req.task}")
+    if req.project:
+        if not c.assets.project_dir(req.project).is_dir():
+            raise HTTPException(404, f"No such project '{req.project}'.")
+        c.assets.update_project_settings(req.project, {"defaults": {req.task: req.model}})
+        _publish_settings(c, req.project, {"defaults": True})
+        return {"task": req.task, "model": c.registry.default_for(req.task, settings=c.settings_for(req.project)),
+                "project": req.project}
     c.settings.update({"defaults": {req.task: req.model}})
-    c.bus.publish("models", {"defaults": True})
+    _publish_settings(c, None, {"defaults": True})
     return {"task": req.task, "model": c.registry.default_for(req.task)}
 
 
@@ -620,6 +689,7 @@ class ImproveReq(BaseModel):
     context: str = ""
     chips: list[str] = Field(default_factory=list)
     backend: str | None = None      # textgen backend id ("local", "cli:claude", "api:openrouter/<model>"); None = settings
+    project: str | None = None      # None-valued backend / lang fall back to this project's settings
 
 
 @app.post("/api/improve")
@@ -634,8 +704,11 @@ def improve(req: ImproveReq):
     style = req.target_style
     if not style and req.model_id and req.model_id in c.registry.models:
         style = c.registry.prompt_style(req.model_id, req.task)
-    return c.improver.improve(req.text, target_style=style, model_id=req.model_id, lang=req.lang, n=req.n,
-                              image_path=image_path, context=req.context, chips=req.chips, backend=req.backend)
+    view = c.settings_for(req.project)
+    backend = req.backend or (c.textgen.default_for("improve", settings=view) if req.project else None)
+    lang = req.lang if req.lang in ("th", "en") else (view.get("prompt", "lang") if view.get("prompt", "lang") in ("th", "en") else None)
+    return c.improver.improve(req.text, target_style=style, model_id=req.model_id, lang=lang, n=req.n,
+                              image_path=image_path, context=req.context, chips=req.chips, backend=backend)
 
 
 @app.get("/api/improve/styles")
@@ -670,6 +743,7 @@ def main():
     ap.add_argument("--port", type=int, default=int(os.environ.get("STUDIO_PORT", "7860")))
     a = ap.parse_args()
     os.environ["STUDIO_PORT"] = str(a.port)   # the Assistant's MCP server calls back into this port
+    os.environ["STUDIO_HOST"] = a.host        # shown (read-only) on the Settings page
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     import uvicorn
 

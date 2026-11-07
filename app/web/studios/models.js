@@ -47,9 +47,10 @@ export default S.defineStudio({
     };
     const defStar = (m, t) => {
       const on = S.store.defaults[t] === m.id;
-      const b = h(`button.def-star${on ? '.on' : ''}`, { type: 'button', title: on ? `Default for ${t}` : `Make default for ${t}`, on: { click: async e => {
+      const proj = S.isOverridden(`defaults.${t}`);      // this project has its own default for the task: edit that one
+      const b = h(`button.def-star${on ? '.on' : ''}`, { type: 'button', title: (on ? `Default for ${t}` : `Make default for ${t}`) + (proj ? ' (set by this project)' : ''), on: { click: async e => {
         e.stopPropagation();
-        try { await S.api.setDefault(t, on ? null : m.id); await S.loadModels(); render(); S.toast(on ? `Default for ${t} reset` : `${m.name} is now the default for ${S.store.tasks[t]?.label || t}`, { kind: 'ok', timeout: 2200 }); } catch (err) { S.toastError(err); }
+        try { await S.api.setDefault(t, on ? null : m.id, proj ? S.store.project : null); await Promise.all([S.loadModels(), S.refreshEffective()]); render(); S.toast(on ? `Default for ${t} reset` : `${m.name} is now the default for ${S.store.tasks[t]?.label || t}`, { kind: 'ok', timeout: 2200 }); } catch (err) { S.toastError(err); }
       } } }, ic('star', 13));
       return b;
     };

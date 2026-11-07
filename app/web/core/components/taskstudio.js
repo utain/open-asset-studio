@@ -111,7 +111,7 @@ export class TaskStudio {
     return p || 'Describe what you want… (Thai or English)';
   }
   _onModel(m, fromBuild = false) {
-    if (!fromBuild && m) prefs.set(`model.${this.task}`, m.id);
+    // the pick itself is remembered by ModelPicker.set() (per project); silent re-resolves must not overwrite that memory
     this.form.setModel(m, this.task);
     this.prompt.setModel(m, this.task);
     this._eta();

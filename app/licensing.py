@@ -35,13 +35,14 @@ def blocked(model: dict | None, settings) -> bool:
     return st == NONCOMMERCIAL or (strict and st == CHECK)
 
 
-def refusal(model: dict) -> str:
+def refusal(model: dict, project: str | None = None) -> str:
     lic = model.get("license") or {}
     st = state(lic)
     name = lic.get("name") or "unknown licence"
     why = "is not licensed for commercial use" if st == NONCOMMERCIAL else "needs its licence verified before commercial use"
-    return (f"{model.get('name') or model.get('id')} {why} ({name}), and 'Commercial-safe models only' is on. "
-            "Pick a model with a commercial licence, or turn the setting off (Queue & System > Studio settings, "
+    where = f" (set by project '{project}')" if project else ""
+    return (f"{model.get('name') or model.get('id')} {why} ({name}), and 'Commercial-safe models only' is on{where}. "
+            "Pick a model with a commercial licence, or turn the setting off (Settings > General, "
             "or the shield button in the top bar).")
 
 
@@ -50,4 +51,7 @@ def check(model: dict, settings):
     if blocked(model, settings):
         from .jobs import JobError
 
-        raise JobError(refusal(model), "license", "Settings > license.commercial_only = false")
+        # name the project only when it is the project that switched the filter on (its own `license` override)
+        proj = getattr(settings, "project", None)
+        proj = proj if proj and (getattr(settings, "overrides", None) or {}).get("license") else None
+        raise JobError(refusal(model, proj), "license", "Settings > license.commercial_only = false")

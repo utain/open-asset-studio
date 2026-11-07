@@ -1,7 +1,7 @@
 // App shell: sidebar (bottom bar on phones), top bar (project switcher, search, queue indicator, memory meter,
 // theme), page containers per studio, routing and send-to delivery.
 import { api } from './api.js';
-import { store, bus, prefs, setProject, getProfile, setProfile, setCommercialOnly } from './store.js';
+import { store, bus, prefs, setProject, getProfile, setProfile, setCommercialOnly, isOverridden } from './store.js';
 import { h, ic, btn, menu, popover, promptDialog, toast, toastError, fmtAgo } from './ui.js';
 import { allStudios, getStudio, parseHash, takePayload, navigate, _setCurrent } from './studio.js';
 import { JobList } from './components/jobs.js';
@@ -70,8 +70,11 @@ export function buildShell(root) {
   bus.on('theme', drawTheme); drawTheme(document.documentElement.dataset.theme);
   // use-case profile (game | video | podcast | social | film | general) and the "Commercial-safe models only" switch
   const profBtn = h('button.pill-btn.prof-btn', { type: 'button', title: 'Use-case profile: style presets, aspect ratios and export defaults', on: { click: () => profileMenu(profBtn) } });
-  const drawProf = () => { const p = getProfile(); profBtn.replaceChildren(ic(p.icon || 'layers', 16), h('span.lbl.hide-sm', p.label || p.id), ic('chevron-down', 14)); };
-  bus.on('profile', drawProf); drawProf();
+  // a small dot marks a setting that the current project (not settings.json) decides
+  const projTitle = () => store.projects.find(x => x.id === store.project)?.title || store.project;
+  const overrideDot = key => (isOverridden(key) ? h('span.pill-dot', { title: `Set by project ${projTitle()}` }) : null);
+  const drawProf = () => { const p = getProfile(); profBtn.replaceChildren(ic(p.icon || 'layers', 16), h('span.lbl.hide-sm', p.label || p.id), overrideDot('profile'), ic('chevron-down', 14)); };
+  bus.on('profile', drawProf); bus.on('settings', drawProf); drawProf();
   const licBtn = h('button.pill-btn.lic-toggle', { type: 'button', on: { click: async () => {
     try { await setCommercialOnly(!store.license.commercial_only); toast(store.license.commercial_only ? 'Commercial-safe models only: non-commercial models are hidden and refused.' : 'All models are available again.', { kind: 'ok', timeout: 2600 }); } catch (e) { toastError(e); }
   } } });
@@ -80,9 +83,10 @@ export function buildShell(root) {
     licBtn.classList.toggle('on', on);
     licBtn.title = on ? 'Commercial-safe models only: ON. Non-commercial models are hidden in the pickers and refused by the API. Click to turn off.' : 'Commercial-safe models only: off. Click to hide / refuse non-commercial models.';
     licBtn.setAttribute('aria-pressed', String(on));
-    licBtn.replaceChildren(ic(on ? 'shield-check' : 'shield-off', 16), h('span.lbl.hide-sm', on ? 'Commercial-safe' : 'All models'));
+    licBtn.replaceChildren(ic(on ? 'shield-check' : 'shield-off', 16), h('span.lbl.hide-sm', on ? 'Commercial-safe' : 'All models'), overrideDot('license'));
+    if (isOverridden('license')) licBtn.title += ` (set by project ${projTitle()})`;
   };
-  bus.on('license', drawLic); drawLic();
+  bus.on('license', drawLic); bus.on('settings', drawLic); bus.on('project', () => { drawProf(); drawLic(); }); drawLic();
   const top = h('header.topbar', titleEl, projBtn, searchBox, h('span.spacer'), profBtn, licBtn, queueBtn, mem, themeTop);
 
   mainEl = h('main.main', { id: 'main' });

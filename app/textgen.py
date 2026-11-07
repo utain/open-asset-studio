@@ -424,10 +424,11 @@ class TextGen:
     def cfg(self) -> dict:
         return self.settings.get("textgen") or {} if self.settings else {}
 
-    def default_for(self, purpose: str) -> str:
-        """Settings `textgen.<purpose>` (improve | write | assistant). Improve defaults to local; the assistant to
-        claude when it is installed."""
-        v = self.cfg.get(purpose)
+    def default_for(self, purpose: str, settings=None) -> str:
+        """Settings `textgen.<purpose>` (improve | write | assistant), from `settings` (a project's SettingsView) when
+        given. Improve defaults to local; the assistant to claude when it is installed."""
+        cfg = (settings.get("textgen") or {}) if settings is not None else self.cfg
+        v = cfg.get(purpose)
         if v:
             return v
         if purpose == "assistant" and self._which("claude"):
@@ -606,8 +607,8 @@ class TextGen:
             return f"{CLI_INFO[spec['name']]['label']}{f' ({m})' if m else ''}"
         return f"{spec['model']} via {PROVIDER_LABEL.get(spec['provider']) or spec['provider'].split(':', 1)[-1]}"
 
-    def resolve(self, backend: str | None, purpose: str = "write") -> dict:
-        spec = parse_backend(backend or self.default_for(purpose))
+    def resolve(self, backend: str | None, purpose: str = "write", settings=None) -> dict:
+        spec = parse_backend(backend or self.default_for(purpose, settings))
         if spec["kind"] == "cli" and not spec.get("model"):
             spec["model"] = ((self.cfg.get("cli") or {}).get(spec["name"]) or {}).get("model") or CLI_INFO[spec["name"]]["default_model"] or None
         spec["label"] = self.label(spec)
@@ -624,7 +625,8 @@ class TextGen:
                  validate=None) -> dict:
         """messages: OpenAI-style (system + user/assistant turns; user content may hold image_url data URLs).
         validate(data) -> list[str] of extra content errors (optional; one retry on failure)."""
-        spec = backend if isinstance(backend, dict) else self.resolve(backend, purpose)
+        view = self.core.settings_for(project) if (project and hasattr(self.core, "settings_for")) else None
+        spec = backend if isinstance(backend, dict) else self.resolve(backend, purpose, view)   # project default when no backend
         timeout = float(timeout or self.cfg.get("timeout_s") or (300 if spec["kind"] == "cli" else 180))
         t0 = time.time()
         attempts, usd, last_err = 0, 0.0, ""

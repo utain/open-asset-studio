@@ -22,6 +22,7 @@ from typing import Callable
 
 from . import licensing
 from .assets import AssetError, AssetStore
+from .config import SettingsView
 from .memory import InsufficientMemory, MemoryManager
 from .registry import Registry
 from .workers import WorkerCancelled, WorkerError, WorkerPool
@@ -73,7 +74,9 @@ class JobContext:
         self.cancel_event = threading.Event()
         self.registry: Registry = mgr.registry
         self.assets: AssetStore = mgr.assets
-        self.settings = mgr.settings
+        # the effective settings the job was submitted with (system + its project's overrides); later edits do not
+        # change a job that is already queued or running
+        self.settings = job.get("_settings") or mgr.settings
         self.scratch = mgr.scratch_root / job["id"]
         self._outputs_lock = threading.Lock()
 
@@ -132,6 +135,8 @@ class JobContext:
         Returns the worker's result event ({files, meta, timings}); raises JobError / JobCancelled."""
         mid = model_id or self.job["model"]
         m = self.registry.get(mid)
+        if model_id and model_id != self.job.get("model"):
+            licensing.check(m, self.settings)        # chained sub-models obey the same licence filter as the job's model
         backend = m["backend"]
         key = f"{backend}:{mid}"
         lo, hi = frac_range
@@ -344,6 +349,7 @@ class JobManager:
             self.assets.project_dir(project)
         except AssetError as e:
             raise JobError(str(e), "input") from None
+        view = self._settings_for(project)       # system settings + this project's overrides, frozen for this job
         if tool:
             hname = f"tool:{tool}"
             if hname not in HANDLERS:
@@ -354,7 +360,7 @@ class JobManager:
                 raise JobError(f"Unknown model '{model_id}'.", "input")
         else:
             if not model_id:
-                model_id = self.registry.default_for(task) if task else None
+                model_id = self.registry.default_for(task, settings=view) if task else None
             if not model_id or model_id not in self.registry.models:
                 raise JobError(f"Unknown model '{model_id}'.", "input")
             m = self.registry.get(model_id)
@@ -362,7 +368,7 @@ class JobManager:
                 task = m["tasks"][0]
             if task not in m["tasks"]:
                 raise JobError(f"{m['name']} cannot do '{task}' (it supports {', '.join(m['tasks'])}).", "input")
-            licensing.check(m, self.settings)        # "Commercial-safe models only" (settings license.commercial_only)
+            licensing.check(m, view)        # "Commercial-safe models only" (settings license.commercial_only)
             st = self.registry.status.get(model_id, {})
             if st.get("status") != "ready" and not spec.get("force"):
                 raise JobError(f"{m['name']} is not ready: {st.get('reason')}", st.get("kind") or "env", st.get("fix", ""))
@@ -394,7 +400,8 @@ class JobManager:
                "params": params, "inputs": inputs, "project": project, "title": spec.get("title") or "",
                "meta": dict(spec.get("meta") or {}), "status": "queued", "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
                "progress": {"frac": 0.0, "stage": "queued", "msg": "Waiting", "step": 0, "total": 0, "interruptible": True},
-               "outputs": [], "log": [], "error": None, "timings": {}, "retry_of": spec.get("retry_of"), "_t_created": now}
+               "outputs": [], "log": [], "error": None, "timings": {}, "retry_of": spec.get("retry_of"), "_t_created": now,
+               "_settings": view}
         job.update({k: v for k, v in extra.items() if k not in job})
         if model_id and model_id in self.registry.models:
             job["model_name"] = self.registry.models[model_id]["name"]
@@ -410,6 +417,15 @@ class JobManager:
         if not gpu:
             self._pool(HANDLERS[hname].get("pool") or "cpu").submit(self._execute, jid)
         return self.public(job)
+
+    def _settings_for(self, project: str | None):
+        """Effective settings of a project: a read-only SettingsView (system + the project's overrides)."""
+        if not self.settings or not project:
+            return self.settings
+        try:
+            return SettingsView(self.settings, self.assets.project_settings(project), project)
+        except AssetError:
+            return self.settings
 
     def _pool(self, name: str) -> ThreadPoolExecutor:
         """Named executor for non-GPU jobs; created on first use with jobs.<name>_concurrency workers (default 4)."""

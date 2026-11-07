@@ -146,7 +146,7 @@ export class PromptBox {
     this._renderPanel(this.lastResult, 'busy');
     try {
       const body = { text: this.improved && text === this.improved.applied ? this.improved.original : text, target_style: this.style || undefined,
-        model_id: this.model?.id, task: this.task, n: this.n, chips: [...this.chips], context: [store.profiles[store.profile]?.context, this.o.context?.()].filter(Boolean).join(' '), image_asset: img || undefined, backend: this.backend || undefined };
+        model_id: this.model?.id, task: this.task, n: this.n, chips: [...this.chips], context: [store.profiles[store.profile]?.context, this.o.context?.()].filter(Boolean).join(' '), image_asset: img || undefined, backend: this.backend || undefined, project: store.project };
       const r = await api.improve(body);
       this.lastResult = r;
       this._renderPanel(r);

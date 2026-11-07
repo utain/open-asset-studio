@@ -4,7 +4,8 @@ import { licenseBlocked } from './license.js';
 
 const listeners = new Map();
 /** bus.on(type, fn) -> unsubscribe. Types: job, job:<id>, asset, assistant, models, system, llm, project, theme, route, sse,
- *  profile (profile object), license ({commercial_only, strict}), export (default export preset id) */
+ *  profile (profile object), license ({commercial_only, strict}), export (default export preset id),
+ *  settings (the effective settings of the current project were refetched: system + its overrides) */
 export const bus = {
   on(type, fn) { if (!listeners.has(type)) listeners.set(type, new Set()); listeners.get(type).add(fn); return () => listeners.get(type)?.delete(fn); },
   emit(type, data) { for (const fn of [...(listeners.get(type) || [])]) { try { fn(data); } catch (e) { console.error(`[bus] ${type} handler failed`, e); } } },
@@ -33,6 +34,9 @@ export const store = {
   exportPresets: {},     // id -> {label, summary, audio, image}
   license: { commercial_only: false, strict: false },
   exportDefault: 'original',
+  effective: {},         // effective settings of the current project (system + its overrides): profile, license, export, prompt, defaults, ...
+  effectiveProject: null, // the project whose effective settings are in `effective` / `overridden` / `defaults`
+  overridden: new Set(), // dotted keys the current project overrides ("license.commercial_only", "defaults.t2i", ...)
   tools: {},
   version: '',
   sse: 'connecting',
@@ -40,6 +44,8 @@ export const store = {
 
 export function setProject(id) {
   store.project = id; prefs.set('project', id); bus.emit('project', id);
+  refreshEffective().catch(() => {});      // the project's overrides decide profile, licence filter, export and default models
+  loadModels().catch(() => {});
 }
 
 // ------------------------------------------------------------------ profile + licence filter (settings.json)
@@ -56,8 +62,62 @@ export function defaultExportPreset() { return store.exportDefault || getProfile
 /** Is `model` refused under "Commercial-safe models only"? */
 export function isLicenseBlocked(model) { return licenseBlocked(model, store.license); }
 
+/** Effective value of a dotted setting key for the current project, e.g. getSetting('prompt.context.image'). */
+export function getSetting(key, dflt = undefined) {
+  let d = store.effective;
+  for (const k of String(key).split('.')) { if (d == null || typeof d !== 'object' || !(k in d)) return dflt; d = d[k]; }
+  return d == null ? dflt : d;
+}
+/** Does the current project override this setting (or, for a group such as 'license', any setting inside it)? */
+export function isOverridden(key) {
+  if (store.overridden.has(key)) return true;
+  const pre = key + '.';
+  for (const k of store.overridden) if (k.startsWith(pre)) return true;
+  return false;
+}
+function leaves(obj, prefix = '', out = {}) {
+  for (const [k, v] of Object.entries(obj || {})) {
+    if (v && typeof v === 'object' && !Array.isArray(v)) leaves(v, `${prefix}${k}.`, out); else out[`${prefix}${k}`] = v;
+  }
+  return out;
+}
+function nest(flat) {
+  const out = {};
+  for (const [k, v] of Object.entries(flat)) {
+    const parts = k.split('.'); let d = out;
+    for (const p of parts.slice(0, -1)) d = d[p] = d[p] || {};
+    d[parts.at(-1)] = v;
+  }
+  return out;
+}
+let effSeq = 0;
+/** Refetch the effective settings of the current project (system settings + its overrides) and apply them. The SSE
+ *  `settings` event only triggers this: a system event can carry values the current project overrides. */
+export async function refreshEffective() {
+  const seq = ++effSeq, project = store.project;
+  let r;
+  try { r = await api.projectSettings(project); } catch (e) {
+    if (e.status !== 404 && e.status !== 405) throw e;
+    r = { effective: await api.settings(), overridden: [], resolved: null };      // older core, or the project vanished: system settings
+  }
+  if (seq !== effSeq) return;                  // a newer refresh (or project switch) is in flight
+  store.overridden = new Set(r.overridden || []);
+  store.effective = r.effective || {};
+  store.effectiveProject = project;
+  const defs = r.resolved?.defaults, defsChanged = !!defs && JSON.stringify(defs) !== JSON.stringify(store.defaults);
+  if (defsChanged) store.defaults = defs;     // before applySettings: its profile / license events re-read the defaults
+  applySettings(r.effective);
+  if (defsChanged) bus.emit('models', store.models);
+  bus.emit('settings', { project, overridden: store.overridden });
+}
+
 function applySettings(s) {
   if (!s) return;
+  if (s.ui) {
+    const showTest = !!s.ui.show_test_models, was = !!store.ui?.show_test_models;
+    store.ui = { ...(store.ui || {}), ...s.ui };
+    if (showTest !== was) bus.emit('models', store.models);
+  }
   const prof = s.profile && store.profiles[s.profile] ? s.profile : (s.profile || store.profile);
   const profChanged = prof !== store.profile;
   const lic = { commercial_only: !!s.license?.commercial_only, strict: !!s.license?.strict };
@@ -75,20 +135,34 @@ export async function loadProfiles(settings) {
     const r = await api.profiles();
     store.profiles = Object.fromEntries(r.profiles.map(p => [p.id, p]));
     store.exportPresets = Object.fromEntries(r.export_presets.map(p => [p.id, p]));
-    applySettings({ profile: r.current, license: r.license, export: settings?.export });
+    // `settings` (bootstrap) is already the effective settings of the current project; /api/profiles is the system's
+    applySettings(settings?.profile ? settings : { profile: r.current, license: r.license, export: settings?.export });
+    if (settings) { store.effective = { ...store.effective, ...settings }; store.overridden = new Set(settings.overridden || []); store.effectiveProject = store.project; }
   } catch { /* older core: stay on the general profile */ }
 }
-/** Change settings.json keys the profile / licence UI owns: patchProfileSettings({profile?, license?, export?}). */
-export async function patchProfileSettings(patch) {
-  const s = await api.patchSettings(patch);
-  applySettings(s);
+/** Change settings the profile / licence UI owns: patchEffective({profile?, license?, export?, ...}). Each leaf goes to the
+ *  layer that is in effect: the project's overrides when the current project overrides that key, else settings.json. */
+export async function patchEffective(patch) {
+  const flat = leaves(patch), sys = {}, proj = {};
+  for (const [k, v] of Object.entries(flat)) (isOverridden(k) ? proj : sys)[k] = v;
+  let s = null;
+  if (Object.keys(sys).length) s = await api.patchSettings(nest(sys));
+  if (Object.keys(proj).length) await api.patchProjectSettings(store.project, nest(proj));
+  await refreshEffective();
   return s;
 }
-export const setProfile = id => patchProfileSettings({ profile: id });
-export const setCommercialOnly = (on, strict) => patchProfileSettings({ license: { commercial_only: !!on, ...(strict === undefined ? {} : { strict: !!strict }) } });
+export const patchProfileSettings = patchEffective;      // older name, same behaviour
+/** Set project overrides of the current project: setProjectSettings({prompt: {context: {image: 'cozy farm'}}}); null resets a key. */
+export async function setProjectSettings(patch) {
+  const r = await api.patchProjectSettings(store.project, patch);
+  await refreshEffective();
+  return r;
+}
+export const setProfile = id => patchEffective({ profile: id });
+export const setCommercialOnly = (on, strict) => patchEffective({ license: { commercial_only: !!on, ...(strict === undefined ? {} : { strict: !!strict }) } });
 
 export async function loadModels() {
-  const r = await api.models({ include_test: true });
+  const r = await api.models({ include_test: true, project: store.project });
   store.models = r.models; store.tasks = r.tasks; store.defaults = r.defaults;
   store.modelsById = new Map(r.models.map(m => [m.id, m]));
   bus.emit('models', store.models);
@@ -122,7 +196,10 @@ export function connectEvents() {
     bus.emit('job', j); bus.emit('job:' + j.id, j);
   });
   es.addEventListener('asset', e => bus.emit('asset', JSON.parse(e.data)));
-  es.addEventListener('settings', e => { try { applySettings(JSON.parse(e.data)); } catch { /* ignore */ } });
+  es.addEventListener('settings', e => {
+    try { const d = JSON.parse(e.data); if (d.scope === 'project' && d.project !== store.project) return; } catch { /* refetch anyway */ }
+    refreshEffective().catch(() => {});
+  });
   es.addEventListener('assistant', e => bus.emit('assistant', JSON.parse(e.data)));
   es.addEventListener('models', () => loadModels().catch(() => {}));
   es.addEventListener('providers', e => bus.emit('providers', JSON.parse(e.data)));   // keys / switch / limits changed

@@ -3,12 +3,13 @@
 //   writeHelper(kind, {onInsert, input, title, insertLabel})  -> modal: barks | sfx_events | asset_list | asset_meta
 // Backends come from GET /api/x/assistant/backends (app/plugins/assistant.py); writing via POST /api/x/assistant/write.
 import { api } from '../api.js';
-import { store, prefs } from '../store.js';
+import { store, prefs, bus } from '../store.js';
 import { h, ic, btn, modal, toast, toastError } from '../ui.js';
 
-let listP = null;
+let listP = null, listProj = null;
+/** Text backends + the default of each purpose. The defaults are the current project's (its overrides win over settings.json). */
 export function textBackends(force = false) {
-  if (force || !listP) listP = api.textBackends(true).catch(e => { listP = null; throw e; });
+  if (force || !listP || listProj !== store.project) { listProj = store.project; listP = api.textBackends(true, store.project).catch(e => { listP = null; throw e; }); }
   return listP;
 }
 
@@ -66,6 +67,9 @@ export function backendPicker({ purpose = 'write', value = '', onChange, allowDe
   fill(false);
   wrap.select = sel;
   wrap.refresh = () => fill(true);
+  // "Default (...)" names the current project's default: refetch when the project or its settings change (drop the listener once detached)
+  let seen = false;
+  const off = bus.on('settings', () => { if (wrap.isConnected) { seen = true; fill(true); } else if (seen) off(); });
   Object.defineProperty(wrap, 'value', { get: () => sel.value, set: v => { sel.value = v || ''; draw(); } });
   return wrap;
 }

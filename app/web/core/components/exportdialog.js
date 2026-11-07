@@ -2,7 +2,7 @@
 // and aspect / size / format for images, then download one converted file or a zip. Originals are never modified: the
 // server writes derived files (POST /api/assets/<id>/render, POST /api/export with `export`).
 import { api } from '../api.js';
-import { store, prefs, getProfile } from '../store.js';
+import { store, prefs, getProfile, isOverridden } from '../store.js';
 import { h, ic, btn, modal, seg, toast, toastError, fmtBytes } from '../ui.js';
 
 const SR = [['', 'Keep'], ['44100', '44.1 kHz'], ['48000', '48 kHz'], ['96000', '96 kHz']];
@@ -43,8 +43,11 @@ export async function exportDialog(ids, { title = 'Export' } = {}) {
   const otherN = metas.length - audioN - imageN;
   const prof = getProfile();
   const order = [...new Set([...(prof.export_presets || []), ...Object.keys(store.exportPresets)])].filter(id => store.exportPresets[id]);
-  let preset = prefs.get('export.preset', null);
-  if (!order.includes(preset)) preset = store.exportDefault || order[0] || 'original';
+  // 1. the preset picked before in this project, 2. the project's own export preset, 3. the old global pick, 4. the default
+  const mine = prefs.get(`export.preset.${store.project}`, null), legacy = prefs.get('export.preset', null);
+  let preset = order.includes(mine) ? mine : (isOverridden('export.preset') && order.includes(store.exportDefault)) ? store.exportDefault
+    : order.includes(legacy) ? legacy : null;
+  if (!preset) preset = store.exportDefault || order[0] || 'original';
   let st = fromPreset(store.exportPresets[preset]);
   const body = h('div.col', { style: { gap: '14px' } });
   const sum = h('div.dim', { style: { fontSize: '12.5px' } });
@@ -55,7 +58,7 @@ export async function exportDialog(ids, { title = 'Export' } = {}) {
     const a = st.audio, i = st.image;
     const parts = [];
     parts.push(h('label.field', h('span.field-label', 'Preset', h('span.dim', { style: { fontWeight: 400 } }, ` · ${prof.label} profile first`)),
-      h('select.select', { 'aria-label': 'Export preset', on: { change: e => { preset = e.target.value; prefs.set('export.preset', preset); st = fromPreset(store.exportPresets[preset]); draw(); } } },
+      h('select.select', { 'aria-label': 'Export preset', on: { change: e => { preset = e.target.value; prefs.set(`export.preset.${store.project}`, preset); st = fromPreset(store.exportPresets[preset]); draw(); } } },
         ...order.map(id => h('option', { value: id, selected: id === preset }, store.exportPresets[id].label + (id === (store.exportDefault || prof.export) ? '  (default)' : ''))))), sum);
     if (audioN) {
       const grid = h('div.export-grid',

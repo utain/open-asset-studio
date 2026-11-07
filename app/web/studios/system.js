@@ -108,7 +108,11 @@ export default S.defineStudio({
         ...presetIds.map(id => h('option', { value: id, selected: S.store.exportOverride === id }, S.store.exportPresets[id].label)));
       const comm = S.toggle(S.store.license.commercial_only, async v => { try { await S.setCommercialOnly(v); } catch (err) { S.toastError(err); comm.input.checked = !v; } }, 'Commercial-safe models only');
       const strict = S.toggle(S.store.license.strict, async v => { try { await S.setCommercialOnly(S.store.license.commercial_only, v); } catch (err) { S.toastError(err); strict.input.checked = !v; } }, 'Also refuse models whose licence must be checked');
+      const projTitle = S.store.projects.find(x => x.id === S.store.project)?.title || S.store.project;
+      const over = ['profile', 'license', 'export'].filter(k => S.isOverridden(k));
       settingsBox.replaceChildren(
+        over.length ? h('div.row.wrap', { style: { gap: '6px', fontSize: '12.5px' } }, ic('folder', 14), h('span.dim', `Project ${projTitle} overrides: ${over.join(', ')}. These controls change the project's value.`),
+          h('a', { href: '#/settings/general?scope=project' }, 'Project settings')) : null,
         h('div.set-grid',
           h('label.field', h('span.field-label', 'Profile'), profSel, h('span.field-help', prof.summary)),
           h('label.field', h('span.field-label', 'Default export'), expSel, h('span.field-help', 'Used by plain Export / Export zip. Originals are never modified; conversions are derived files.'))),
@@ -116,7 +120,7 @@ export default S.defineStudio({
           h('label.set-row', h('span', h('b', 'Commercial-safe models only'), h('div.dim', { style: { fontSize: '12.5px' } }, 'Hide non-commercial models in every picker and make the API refuse them (HTTP 403, kind “license”).')), comm),
           h('label.set-row', h('span', h('b', 'Strict'), h('div.dim', { style: { fontSize: '12.5px' } }, 'Also refuse models whose registry entry says the licence must be verified.')), strict)));
     };
-    for (const ev of ['profile', 'license', 'export']) S.bus.on(ev, drawSettings);
+    for (const ev of ['profile', 'license', 'export', 'settings']) S.bus.on(ev, drawSettings);
     drawSettings();
 
     el.append(h('div.page-pad.col', { style: { gap: '16px' } },
@@ -127,7 +131,7 @@ export default S.defineStudio({
           h('section.card.card-pad', h('div.section-head', h('h3', ic('download', 16), 'Downloads')), S.downloadsList()),
           logCard),
         h('div.col', { style: { gap: '16px' } },
-          h('section.card.card-pad', h('div.section-head', h('h3', ic('sliders-horizontal', 16), 'Studio settings')), settingsBox),
+          h('section.card.card-pad', h('div.section-head', h('h3', ic('sliders-horizontal', 16), 'Studio settings'), h('span.spacer'), btn('All settings', { size: 'sm', kind: 'ghost', icon: 'settings-2', onClick: () => S.navigate('settings') })), settingsBox),
           h('section.card.card-pad', h('div.section-head', h('h3', ic('memory-stick', 16), 'Memory'), h('span.spacer'),
             btn('Unload all', { size: 'sm', kind: 'ghost', icon: 'download', onClick: async () => { try { await S.api.unload({ all: true }); S.toast('Idle models unloaded', { kind: 'ok', timeout: 2000 }); refresh(); } catch (e) { S.toastError(e); } } })), memBox),
           h('section.card.card-pad', h('div.section-head', h('h3', ic('sparkles', 16), 'Prompt improver LLM')), llmBox),

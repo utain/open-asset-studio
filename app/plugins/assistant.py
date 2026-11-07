@@ -110,16 +110,17 @@ def _is_cloud(m: dict) -> bool:
     return bool((m.get("features") or {}).get("remote") and m.get("backend") != "comfyui") or bool(m.get("provider")) or m.get("backend") in ("cloud",)
 
 
-def tool_list_models(args: dict) -> dict:
+def tool_list_models(args: dict, project: str | None = None) -> dict:
     c = _core()
     reg = c.registry
+    eff = c.settings_for(project)          # system settings + the project's overrides (licence filter, default models)
     task, modality = args.get("task"), args.get("modality")
     ready_only = args.get("ready_only", False)
     out = []
     for m in reg.list(task or None, modality or None, include_test=_show_test()):
         if m.get("modality") == "text" or "improve" in m["tasks"]:
             continue
-        if licensing.blocked(m, c.settings):     # "Commercial-safe models only": the planner must not propose them
+        if licensing.blocked(m, eff):     # "Commercial-safe models only": the planner must not propose them
             continue
         st = m["status"]
         if ready_only and st["status"] != "ready":
@@ -132,7 +133,7 @@ def tool_list_models(args: dict) -> dict:
                     "status": "ready", "summary": (m.get("summary") or "")[:160],
                     "license": {"name": (m.get("license") or {}).get("name"), "commercial": bool((m.get("license") or {}).get("commercial"))},
                     "cloud": _is_cloud(m), "est_s_per_take": est_s, "est_usd_per_take": usd,
-                    "default_for": [t for t in m["tasks"] if reg.default_for(t) == m["id"]],
+                    "default_for": [t for t in m["tasks"] if reg.default_for(t, settings=eff) == m["id"]],
                     "params": [_param_public(p) for p in m.get("params") or [] if p.get("type") not in ("asset", "assets")]})
     return {"models": out, "tasks": {k: v.get("label") for k, v in reg.tasks.items() if k not in ("improve", "test")},
             "tools": {k[5:]: v["label"] for k, v in HANDLERS.items() if k.startswith("tool:") and k[5:] in TOOL_PARAMS},
@@ -173,7 +174,12 @@ def tool_get_asset(project: str, args: dict) -> dict:
         return {"error": "asset not in this project"}
     keep = ("id", "type", "name", "task", "model", "model_name", "prompt", "improved_prompt", "final_prompt", "negative", "params",
             "seed", "parents", "tags", "rating", "favorite", "notes", "info", "license", "created")
-    return {k: a.get(k) for k in keep}
+    out = {k: a.get(k) for k in keep}
+    if a.get("type") == "mesh":   # rig / motion results: is it rigged, how many joints, which animation clips
+        w, info = a.get("worker") or {}, a.get("info") or {}
+        out["mesh3d"] = {"rigged": bool(w.get("rigged") or info.get("rigged")), "joints": w.get("joints") or info.get("joints"),
+                         "animations": w.get("animations") or info.get("animations") or [], "textured": w.get("textured")}
+    return out
 
 
 # ===================================================================== plan validation
@@ -183,6 +189,7 @@ def validate_plan(plan: dict, project: str, *, registry=None, assets=None, inclu
     reg = registry or _core().registry
     store = assets if assets is not None else (_core().assets if CORE else None)
     include_test = _show_test() if include_test is None else include_test
+    eff_settings = _core().settings_for(project) if CORE else None     # project default models
     errors: dict[str, list[str]] = {}
     warnings: list[str] = []
 
@@ -246,7 +253,7 @@ def validate_plan(plan: dict, project: str, *, registry=None, assets=None, inclu
                 err(sid, f"Unknown model '{mid}'.")
                 mid = None
             elif not mid and task in reg.tasks:
-                mid = reg.default_for(task)
+                mid = reg.default_for(task, settings=eff_settings)
                 if not mid:
                     err(sid, f"No model can do '{task}'.")
             if mid:
@@ -359,7 +366,7 @@ def execute_tool(run: dict, name: str, args: dict) -> dict:
         run["on_tool"](name)
     try:
         if name == "list_models":
-            return tool_list_models(args)
+            return tool_list_models(args, run.get("project"))
         if name == "search_assets":
             return tool_search_assets(run["project"], args)
         if name == "get_asset":
@@ -431,7 +438,8 @@ Rules:
   "inputs", never in params. batch = takes / variations per step (keep 1-4).
 - Chain steps with inputs: {"step": "<earlier step id>", "use": "first"|"all"|"each"} ("each" = one job per output of that
   step, e.g. turn every concept image into a 3D shape). Existing assets: {"asset": "<id>"}.
-- Typical chains: concept image (t2i or rgba) -> shape -> texture for 3D props; sfx / ambience with 3 takes;
+- Typical chains: concept image (t2i or rgba) -> shape -> texture for 3D props (-> rig for a skeleton; for a humanoid, -> motion
+  with an English prompt such as "walks forward", whose input is the rigged mesh); sfx / ambience with 3 takes;
   ambience then tool audio.loop; voice_design then tts; thumbnail or b-roll stills (t2i at 16:9 or 9:16); podcast or video
   intro stings and music beds (music, short); asset.export to deliver loudness-normalised audio or platform-sized images. Write prompts in English, in the target model's style
   (Stable Audio: comma-separated sound tags; images: concrete visual description, plain background for 3D).
@@ -463,7 +471,7 @@ def _history_text(chat: dict, limit: int = 12) -> list[dict]:
 
 
 def _catalog_text(project: str) -> str:
-    d = tool_list_models({"ready_only": True})
+    d = tool_list_models({"ready_only": True}, project)
     lines = []
     for m in d["models"]:
         ps = ", ".join(m["params"][:14])
@@ -473,11 +481,12 @@ def _catalog_text(project: str) -> str:
     al = [f"- {a['id']} {a['type']} '{a['name']}'" for a in assets]
     tools = ", ".join(d["tools"])
     c = _core()
-    pid = profiles.profile_id(c.settings)
+    eff = c.settings_for(project)
+    pid = profiles.profile_id(eff)
     prof = profiles.PROFILES[pid]
     use = (f"USE CASE: {prof['label']}. {prof['summary']} Default aspect ratio: {prof['aspect'] or 'model default'}.\n"
            if pid != "general" else "")
-    if licensing.settings_of(c.settings)[0]:
+    if licensing.settings_of(eff)[0]:
         use += "COMMERCIAL-SAFE MODE IS ON: only commercial-licence models are listed; never propose a non-commercial model.\n"
     return (use + "READY MODELS:\n" + "\n".join(lines) + f"\nCPU TOOLS (step 'tool'): {tools}\nRECENT ASSETS:\n" + ("\n".join(al) or "- none"))
 
@@ -534,7 +543,7 @@ def run_turn(project: str, cid: str, text: str, backend: str | None, cancel: thr
     t0 = time.time()
     msg = {"id": _mid(chat), "role": "assistant", "text": "", "pending": True, "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "tools": []}
     try:
-        spec = tg.resolve(backend or chat.get("backend"), "assistant")
+        spec = tg.resolve(backend or chat.get("backend"), "assistant", c.settings_for(project))
     except TextGenError as e:
         spec = None
         msg.update(text="", error={"message": str(e), "kind": e.kind, "fix": e.fix})
@@ -908,10 +917,12 @@ def write(req: WriteReq):
 
 # ===================================================================== routes: backends / settings
 @router.get("/backends")
-def backends(check_auth: bool = True):
-    tg = _core().textgen
+def backends(check_auth: bool = True, project: str | None = None):
+    c = _core()
+    tg = c.textgen
+    eff = c.settings_for(project) if project else None      # a project's text-backend defaults
     return {"backends": tg.backends(check_auth=check_auth),
-            "defaults": {p: tg.default_for(p) for p in ("improve", "write", "assistant")},
+            "defaults": {p: tg.default_for(p, eff) for p in ("improve", "write", "assistant")},
             "settings": tg.cfg, "tos": TOS_NOTE, "cli": {k: {"tested": v["tested"], "models": v["models"]} for k, v in CLI_INFO.items()}}
 
 

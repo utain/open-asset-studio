@@ -148,6 +148,7 @@ a:hover { text-decoration: underline; }
 }
 .pill-btn:hover { color: var(--text); border-color: var(--text-3); }
 .pill-btn .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); }
+.pill-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; box-shadow: 0 0 0 3px var(--accent-soft); }
 .pill-btn .dot.live { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); animation: pulse 1.6s infinite; }
 @keyframes pulse { 50% { box-shadow: 0 0 0 6px transparent; } }
 

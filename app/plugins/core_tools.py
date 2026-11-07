@@ -58,7 +58,7 @@ def asset_export(ctx: JobContext):
     if not inputs:
         raise JobError("Pick at least one audio or image asset to export.", "input")
     try:
-        spec = profiles.resolve_export({k: p[k] for k in ("preset", "audio", "image") if k in p}, ctx.mgr.settings)
+        spec = profiles.resolve_export({k: p[k] for k in ("preset", "audio", "image") if k in p}, ctx.settings)
     except ValueError as e:
         raise JobError(str(e), "input") from None
     ctx.scratch.mkdir(parents=True, exist_ok=True)

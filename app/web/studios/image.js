@@ -54,7 +54,7 @@ export default S.defineStudio({
     kit = new S.TaskStudio({
       studio: 'image',
       tasks: TASKS,
-      context: () => S.prefs.get('image.context', ''),
+      context: () => S.getSetting('prompt.context.image') || S.prefs.get('image.context', ''),
       centerHeader: () => headTools,
       extraPanel: (k, t) => extraPanel(k, t),
       beforeSubmit: (spec, k) => beforeSubmit(spec, k),
@@ -99,8 +99,11 @@ function extraPanel(kit, t) {
     return h('div.img-tip', ic('cuboid', 13), ' Result: square PNG, object centred with a margin. Then send it to 3D › Image → 3D (remove background is skipped automatically for transparent images).');
   }
   if (t.id === 't2i') {
-    const ctxIn = h('input.input.input-sm', { placeholder: 'Project art direction for ✨ Improve, e.g. "cozy low-poly farming game" or "warm 35mm documentary look"', value: S.prefs.get('image.context', ''),
-      on: { change: e => S.prefs.set('image.context', e.target.value) } });
+    const ctxIn = h('input.input.input-sm', { placeholder: 'Project art direction for ✨ Improve, e.g. "cozy low-poly farming game" or "warm 35mm documentary look"', value: S.getSetting('prompt.context.image') || S.prefs.get('image.context', ''),
+      on: { change: async e => {      // saved with the project (Settings > Prompts & text); the old browser-only value is dropped
+        try { await S.setProjectSettings({ prompt: { context: { image: e.target.value.trim() || null } } }); S.prefs.set('image.context', ''); } catch (err) { S.toastError(err); }
+      } } });
+    S.bus.on('settings', () => { if (ctxIn.isConnected && document.activeElement !== ctxIn) ctxIn.value = S.getSetting('prompt.context.image') || S.prefs.get('image.context', ''); });
     return h('label.field', h('span.field-label', ic('palette', 14), 'Art direction (optional)'), ctxIn,
       h('span.field-help', 'Sent to the prompt improver as context, so every prompt keeps the same style.'));
   }

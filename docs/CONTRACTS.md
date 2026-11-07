@@ -14,9 +14,9 @@ This is the stable interface of the studio core. The Image + 3D studio and the S
 If you need a core change, prefer a small, backwards-compatible hook (a new optional field or callback) and note
 it at the end of this file under "Changelog".
 
-Core files (owned by the core): `app/{config,registry,workers,procs,memory,jobs,events,assets,media,improver,textgen,core,main}.py`,
+Core files (owned by the core): `app/{config,registry,workers,procs,memory,jobs,events,assets,media,improver,textgen,core,main,settings_schema}.py`,
 `app/plugins/core_tools.py`, `workers/studio_worker.py`, `workers/echo_worker.py`, `web/index.html`, `web/main.js`,
-`web/app.css`, `web/core/**`, `web/studios/{home,library,models,system,selftest}.js`, `prompts/core.yaml`.
+`web/app.css`, `web/core/**`, `web/studios/{home,library,models,system,selftest,settings}.js`, `prompts/core.yaml`.
 
 Run the core: `./run_studio.sh` (port 7860) or `STUDIO_PORT=7861 ./run_studio.sh`. Tests: `envs/core/bin/python -m pytest`.
 
@@ -350,7 +350,7 @@ Raise `JobError(message, kind, fix)` for clean failures. Reference: `app/plugins
 ## 4. Projects and assets
 
 ```
-data/projects/<project>/project.json                {id, title, description, created}
+data/projects/<project>/project.json                {id, title, description, created, settings?}   (settings: the project's overrides, section 10)
 data/projects/<project>/assets/<asset_id>/           files + meta.json (written last)
 data/projects/<project>/.trash/<asset_id>/           deleted assets
 ```
@@ -384,7 +384,9 @@ siblings}` · `POST /api/assets/{id}/thumb` (multipart image, e.g. a model-viewe
 `POST /api/upload` (multipart `file`, `project`, `name`, `tags`, `type=voice`; validated by content: images by PIL,
 audio by libsndfile, GLB by its header, video (mp4 / mov / webm / mkv) by magic bytes plus ffprobe; limits 60/300/500 MB, video 500 MB) · `POST /api/export {ids, naming: name|id,
 include_meta, include_attachments}` -> `{url, name, bytes}` (zip: `images/`, `audio/`, `voices/`, `models/` +
-`manifest.json`) · `GET /api/projects`, `POST /api/projects {id, title}`, `PATCH /api/projects/{id}`.
+`manifest.json`) · `GET /api/projects`, `POST /api/projects {id, title}`, `PATCH /api/projects/{id}`. `GET /api/projects` also returns
+`overrides` (the number of setting overrides of each project); `PATCH /api/projects/{id}` keeps the `settings` key it does
+not edit. Per-project settings: `GET|PATCH|DELETE /api/projects/{id}/settings` (section 10).
 
 Files: `GET /files/<project>/<asset_id>/<name>[?download=1]`. Only names listed in the asset's `files` or `preview`
 are served, from inside `data/projects`, after `resolve()` (symlinks out of the store are refused). No API takes a
@@ -855,6 +857,90 @@ Settings `license.commercial_only` (bool) and `license.strict` (bool), set with 
 
 Existing assets are never hidden or deleted by the filter; the licence of the model stays on every asset.
 
+**The settings may come from the project.** `profile`, `license.*`, `export.preset` and `defaults.<task>` can be overridden
+per project (section 10), so everything above that reads them reads the *effective* settings: `profiles.profile_id(settings)`,
+`profiles.resolve_export(spec, settings)`, `licensing.check(model, settings)` and `Registry.default_for(task, settings=)` all take
+any object with `.get()` (`Settings` or a `SettingsView`). `JobManager.submit` resolves them once per job for the job's project
+(`JobContext.settings`); `GET /api/profiles` and the `settings` SSE event keep describing the system settings only.
+
+## 10. Settings (system and per project) (`app/settings_schema.py`, `app/config.py`, `web/studios/settings.js`)
+
+One schema describes every user-visible setting; the Settings page (`#/settings`) is generated from it. Two layers:
+
+* **system**: `settings.json` (merged over `config.DEFAULT_SETTINGS`; only the user's overrides are stored).
+* **project**: `project.json` -> `"settings": {...}`, the same nested shape holding only the overrides. The effective value is
+  `config.SettingsView(system, overrides, project)` = the system data merged with the overrides, per leaf. A `null` leaf in a
+  PATCH removes an override (the key inherits the system value again; in the system layer it goes back to the default).
+  A project may be stricter *or looser* than the system licence filter (the page warns: "less strict than system").
+
+Project scope covers `profile`, `license.commercial_only|strict`, `export.preset`, `defaults.<task>`, `textgen.improve|write|assistant`,
+`prompt.lang`, `prompt.context.image|video|sound`. Memory, workers, queue, prompt LLM, text timeouts / CLI models and cloud are
+system-only (one shared GPU, memory pool and queue).
+
+### 10.1 Core API (Python)
+
+| call | meaning |
+|---|---|
+| `config.apply_patch(dst, src)` | the deep merge both layers use (`None` removes a key, empty dicts vanish) |
+| `config.SettingsView(base, overrides, project)` | read-only effective settings; `.get()`, `.data`, `.project`, `.overrides`; `update()` raises |
+| `AssetStore.project_settings(p)` / `update_project_settings(p, patch, replace=False)` | read / patch the overrides (atomic, under a lock) |
+| `Core.settings_for(project)` | the view for a project (system `Settings` for none / an unknown project) |
+| `Registry.default_for(task, settings=None)`, `TextGen.default_for(purpose, settings=None)` | defaults of a project |
+| `JobContext.settings` | the effective settings the job was **submitted** with; later edits never change a running job (a retry re-resolves) |
+| `settings_schema.build(core)`, `validate_patch(patch, scope, core)` | the schema document; validation (raises `ValueError` -> HTTP 400) |
+
+Handlers must read settings from `ctx.settings`, not `ctx.mgr.settings`, wherever the value can be project-scoped.
+
+### 10.2 API
+
+| method + path | body / query | response |
+|---|---|---|
+| `GET /api/settings/schema` | | `{version: 1, groups: [{id, label, icon, scopes, help}], fields: [Field], env: [{key, value, label, help}], files: {settings_json, data, logs, project_json_template}}` |
+| `GET /api/settings` | | the merged system settings (unchanged; the MCP `studio_status` reads it) |
+| `PATCH /api/settings` | nested patch, `null` resets | the merged system settings; validated with scope `system`; SSE `settings` |
+| `GET /api/projects/{id}/settings` | | `{project, overrides, overridden: ["license.commercial_only", ...], effective: {profile, license, export, defaults, textgen, prompt, ui}, resolved: {defaults: {task: model id}, textgen: {improve, write, assistant}, export_preset}}`; 404 for an unknown project |
+| `PATCH /api/projects/{id}/settings` | nested patch, `null` resets one key | same shape; validated with scope `project`; SSE `settings` |
+| `DELETE /api/projects/{id}/settings` | | removes every override; same shape |
+| `PUT /api/settings/defaults` | `{task, model, project?}` | with `project` the default is stored as that project's override |
+| `GET /api/bootstrap?project=`, `GET /api/models?project=` | | effective settings / defaults of that project (`bootstrap.settings` adds `overridden`, `prompt`) |
+| `POST /api/improve` | `+ project?` | `backend` and `lang` fall back to the project's `textgen.improve` / `prompt.lang` |
+| `GET /api/x/assistant/backends?project=` | | text-backend defaults of a project |
+
+**Field**: `{key, type, label, help, group, scope: ["system"|"project"], apply, default, nullable, editable, unit?, min?, max?, step?,
+maxlen?, pattern?, choices?, choices_from?, task?, subgroup?, file?, gui?}`. `type` is `bool | int | float | string | text | choice |
+model | backend | list_str | json`; `choices_from` is `profiles | export_presets | prompt_lang` (resolved into `choices`); a `model`
+field carries its `task` (the schema expands `defaults.<task>` for every registry task). `apply` says when a change takes effect:
+`live` (next read), `new_worker` (workers started later), `llm_start` (next prompt-LLM start), `restart` (next studio restart; there
+is no restart API). `editable: false` marks **file-only** keys (`llm.server|host|port|args`, `textgen.cli.<name>.binary`): they are
+executed or shared, so PATCH refuses them (HTTP 400, "file-only: edit settings.json"); the page shows them read-only.
+`textgen.api_models` / `textgen.endpoints` stay `json` passthrough (`gui: false`; managed in the Assistant dialog).
+
+**Validation** (`validate_patch`): every leaf must be a known field (unknown names -> 400), allowed in the scope, editable, and of the
+right type and range (`bool` must be a real bool, `int` rejects `1.5`, `model` must exist and support the field's task, `backend`
+goes through `textgen.parse_backend`, `choice` must be listed, strings are length-capped). `null` always passes.
+
+### 10.3 Events and the web store
+
+PATCH publishes SSE `settings` `{scope: "system"|"project", project, profile, license, export, ui}` (only when one of profile / license /
+export / ui / prompt / textgen / defaults changed) and, when defaults change, `models {defaults: true, project?}`. Clients must **not**
+apply the payload: a system event can carry values the current project overrides. `store.js` ignores `scope: "project"` events of other
+projects and calls `refreshEffective()` (`GET /api/projects/{store.project}/settings`), which updates `store.effective`,
+`store.overridden` (a `Set` of dotted keys), `store.defaults`, then emits the existing `profile` / `license` / `export` / `models`
+events and a new bus event `settings`. New `sdk.js` exports: `getSetting('prompt.context.image')`, `isOverridden(key)`,
+`patchEffective(patch)` (each leaf goes to the project when the project overrides it, else to settings.json; `patchProfileSettings`
+is an alias), `setProjectSettings(patch)`, `refreshEffective()`. `setProject(id)` refreshes the effective settings and the model list
+(`api.models({project})`). Pickers: `ModelPicker` resolves per-project pick (`prefs model.<project>.<task>`) > project default >
+old per-task pick > effective default; the export dialog likewise with `prefs export.preset.<project>`.
+
+### 10.4 Page
+
+`web/studios/settings.js` (`#/settings/<group>?scope=project`): groups General, Default models, Prompts & text, Cloud (custom, system
+only: allow switch, limits and spend through `/api/x/providers`; no key fields), Memory, Workers & queue, Prompt LLM, Environment
+(read-only: `env` + file paths; never secrets). A scope switch System / Project (the project is the one in the top bar), search,
+"changed only", per-field reset, "Reset all project overrides". If `/api/settings/schema` is missing the page shows an error state.
+
+---
+
 ## Changelog
 - 0.1.0: initial core.
 - 0.1.1 (image/3D studio): `app/main.py` keeps the catch-all static mount last after `load_plugins()`, so plugin routers
@@ -902,3 +988,23 @@ Existing assets are never hidden or deleted by the filter; the licence of the mo
   non-humanoids with `NotHumanoidError`, retarget with foot lock); new public `rig_anim.append_clip(src, name, tracks, ...)`. Web: Motion tab and a
   "Motion" button for rigged meshes in `app/web/studios/3d.js` (`receives` action `motion`). Research: `docs/research/motion.md`. Tests: `tests/test_motion.py`.
 - Public MCP server, full studio surface (no core change; `scripts/mcp_server.py` is a drop-in, restart the core to reload the HTTP transport): new tools `retry_job`, `delete_asset` (soft delete; needs `confirm: true`), `improve_prompt` (`POST /api/improve`, `GET /api/improve/styles`; off-machine text backends need `confirm_upload`), `save_preset` (`/api/presets/{model}`), `export_assets` (`/api/export`, `/api/assets/{id}/render`, `/api/x/sound/export`), `studio_info` (read-only plugin / system info: profiles + export presets, voices, video formats, dub options, pipelines capabilities + flows, cloud overview, llm, comfyui, downloads, logs). `list_tools` now describes each CPU tool's inputs and params from a static table (a test checks it against the registered `tool:*` handlers); `get_asset` adds `mesh3d` (rigged, joints, animation clips, attachments) and optional `lineage`; `create_project` has `update`. The Assistant's `workers/studio_mcp.py` keeps its 4 read / propose tools; its task hints mention `rig` / `motion`, and `get_asset` includes `mesh3d`.
+- settings page (section 10): new core file `app/settings_schema.py`; `config.apply_patch`, `config.SettingsView`, `config.flatten`,
+  `count_leaves`; `DEFAULT_SETTINGS` gains `jobs.cloud_concurrency` (4, was hard-coded), `textgen` and `prompt`;
+  `AssetStore.project_settings` / `update_project_settings` (+ a lock around `project.json` writes; `update_project` keeps the
+  `settings` key; `projects()` adds `overrides`); `Core.settings_for`; `Registry.default_for(task, settings=)`,
+  `TextGen.default_for(purpose, settings=)` / `resolve(..., settings)` (`generate(project=)` uses the project's backend default);
+  `JobManager._settings_for` + `submit` freezes the effective settings in `job["_settings"]` -> `JobContext.settings` (race fix: a
+  running job no longer sees later edits) and applies the project's licence filter / default model; `licensing.refusal(model, project)`
+  (message now says "Settings > General" and names the project that switched the filter on); `tool:asset.export` and
+  `media.dub` read `ctx.settings`; `JobContext.run_worker(model_id=...)` now applies the licence filter to chained sub-models
+  (behaviour change: a chained non-commercial sub-model is refused when `license.commercial_only` is on); assistant catalog /
+  `list_models` / plan validation / `GET /backends` use the project's settings. `app/main.py`: `PATCH /api/settings` is validated by
+  `settings_schema.validate_patch` (**tightening**: `llm.server|host|port|args` and `textgen.cli.*.binary` are refused as file-only,
+  unknown nested keys are refused, values are type- and range-checked), `GET /api/settings/schema`,
+  `GET|PATCH|DELETE /api/projects/{id}/settings`, `?project=` on `/api/bootstrap` and `/api/models`, `project` on
+  `PUT /api/settings/defaults` and `POST /api/improve`, `STUDIO_HOST` exported for the Environment panel; SSE `settings` now
+  carries `scope`, `project` and `ui`. Web: `core/store.js` (`refreshEffective`, `patchEffective`, `getSetting`, `isOverridden`,
+  SSE filter), `api.js`, `components/modelpicker.js` + `exportdialog.js` lookup orders, `promptbox.js` sends `project`,
+  image / video / sound art-direction context stored per project, `models.js` star writes the project default, `shell.js` override
+  dot, `system.js` quick card links to the page, new `studios/settings.js`. Not done: per-project cloud budget, `assets.tags`,
+  seed policy. No new Python dependencies.

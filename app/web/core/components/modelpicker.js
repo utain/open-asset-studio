@@ -1,6 +1,6 @@
 // Model picker: models that can do the current task, with feature / license / status badges. Not-ready models are
 // shown greyed out with the reason and the fix command (and cannot be picked).
-import { store, bus, modelsFor, prefs, isLicenseBlocked } from '../store.js';
+import { store, bus, modelsFor, prefs, isLicenseBlocked, isOverridden } from '../store.js';
 import { h, ic, btn, popover, closePopover, statusBadge, licenseBadge, copyText, MOD_ICON } from '../ui.js';
 import { cloudBadge, priceBadge, priceLabel, isCloud } from '../cost.js';
 import { navigate } from '../studio.js';
@@ -45,20 +45,33 @@ export class ModelPicker {
     this._render();
     this._off = bus.on('models', () => { if (!this.model) this.value = this._initial(); this._render(); });
     // "Commercial-safe models only" switched on while a non-commercial model is selected: move to the next usable one
+    // another project became current: its overrides / remembered picks decide the model (not the one of the previous project)
+    this._offSet = bus.on('settings', () => {
+      if (this._eff === store.effectiveProject) return;     // nothing about the project changed (or the pick already saw it)
+      const before = this.value;
+      this.value = this._initial(); this._render();
+      if (this.value !== before) this.onChange?.(this.model, true);
+    });
     this._offLic = bus.on('license', () => {
       if (this.model && isLicenseBlocked(this.model)) { this.value = this._initial(); this._render(); this.onChange?.(this.model, true); } else this._render();
     });
   }
   _initial() {
-    const remembered = prefs.get(`model.${this.task}`);
+    this._eff = store.effectiveProject;      // whose default models / overrides this pick was resolved against
     const list = modelsFor(this.task, { includeTest: this.includeTest });
     const ok = id => list.find(m => m.id === id && m.status.status === 'ready');
-    return (ok(remembered) && remembered) || (ok(store.defaults[this.task]) && store.defaults[this.task])
-      || list.find(m => m.status.status === 'ready')?.id || store.defaults[this.task] || list[0]?.id || null;
+    const def = store.defaults[this.task];
+    // 1. the pick remembered for this project, 2. a project default (Settings > Default models), 3. the old per-task pick, 4. the default
+    const mine = prefs.get(`model.${store.project}.${this.task}`);
+    if (ok(mine)) return mine;
+    if (isOverridden(`defaults.${this.task}`) && ok(def)) return def;
+    const remembered = prefs.get(`model.${this.task}`);
+    return (ok(remembered) && remembered) || (ok(def) && def)
+      || list.find(m => m.status.status === 'ready')?.id || def || list[0]?.id || null;
   }
   get model() { return store.modelsById.get(this.value) || null; }
   setTask(task) { this.task = task; const cur = this.model; if (!cur || !cur.tasks.includes(task)) this.value = this._initial(); this._render(); this.onChange?.(this.model, true); }
-  set(id, silent = false) { this.value = id; prefs.set(`model.${this.task}`, id); this._render(); if (!silent) this.onChange?.(this.model); }
+  set(id, silent = false) { this.value = id; prefs.set(`model.${store.project}.${this.task}`, id); prefs.set(`model.${this.task}`, id); this._render(); if (!silent) this.onChange?.(this.model); }
   _render() {
     const m = this.model;
     this.btnEl.replaceChildren();
@@ -97,5 +110,5 @@ export class ModelPicker {
     if (!list.length) box.append(h('div.empty', 'No model supports this task yet.'));
     popover(this.btnEl, box, { width: 'min(460px, calc(100vw - 16px))' });
   }
-  destroy() { this._off(); this._offLic(); }
+  destroy() { this._off(); this._offLic(); this._offSet(); }
 }

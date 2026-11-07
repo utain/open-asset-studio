@@ -128,6 +128,10 @@ Sound / Pipelines** (studios), **Library** (filters, search, rate, tag, compare,
 cloud switch (off by default), budget + confirm threshold, spend, prices, your OpenAI-compatible endpoints,
 subscription CLIs; docs/CONTRACTS.md section 8), **Diagnostics** (a full studio page on the CPU test
 models: the reference for new studios).
+**Settings** (SYSTEM group) holds every configurable value in one place, studio-wide (`settings.json`) and per project
+(`project.json`): profile, commercial-safe filter, export preset, default model per task, prompt backends and art direction,
+memory, workers, the prompt LLM and cloud limits. A project's overrides win over the system values, and the page marks
+each setting as inherited or overridden (docs/CONTRACTS.md section 10).
 
 ## Profiles, export presets and the commercial-safe filter
 

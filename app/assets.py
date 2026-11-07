@@ -21,7 +21,7 @@ import zipfile
 from pathlib import Path
 from typing import Callable
 
-from . import media
+from . import config, media
 
 PROJECT_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,47}$")
 ASSET_RE = re.compile(r"^[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$")
@@ -82,6 +82,7 @@ class AssetStore:
         self.root.mkdir(parents=True, exist_ok=True)
         self.on_change = on_change or (lambda action, meta: None)
         self._lock = threading.RLock()
+        self._proj_lock = threading.Lock()      # serialises project.json read-modify-write (title edits, settings)
         self.index: dict[str, dict] = {}
         self.scan()
         if not self.projects():
@@ -126,7 +127,8 @@ class AssetStore:
                     info = {}
                 n = sum(1 for m in self.index.values() if m["project"] == d.name)
                 out.append({"id": d.name, "title": info.get("title") or d.name, "created": info.get("created"),
-                            "description": info.get("description", ""), "assets": n})
+                            "description": info.get("description", ""), "assets": n,
+                            "overrides": config.count_leaves(info.get("settings") or {})})
         return out
 
     def create_project(self, name: str, title: str = "", description: str = "") -> dict:
@@ -139,19 +141,49 @@ class AssetStore:
         _write_json(d / "project.json", info)
         return info
 
-    def update_project(self, name: str, patch: dict) -> dict:
+    def _read_project(self, name: str) -> tuple[Path, dict]:
         d = self.project_dir(name)
         if not d.is_dir():
             raise AssetError("No such project.", 404)
         try:
             info = json.loads((d / "project.json").read_text())
+            if not isinstance(info, dict):
+                raise ValueError
         except (OSError, ValueError):
             info = {"id": name}
-        for k in ("title", "description"):
-            if k in patch:
-                info[k] = str(patch[k])[:200]
-        _write_json(d / "project.json", info)
-        return info
+        return d, info
+
+    def update_project(self, name: str, patch: dict) -> dict:
+        with self._proj_lock:
+            d, info = self._read_project(name)      # keeps every key it does not edit, including `settings`
+            for k in ("title", "description"):
+                if k in patch:
+                    info[k] = str(patch[k])[:200]
+            _write_json(d / "project.json", info)
+            return info
+
+    def project_settings(self, name: str) -> dict:
+        """The project's setting overrides (same nested shape as settings.json). {} when there are none."""
+        d = self.project_dir(name)
+        try:
+            s = json.loads((d / "project.json").read_text()).get("settings")
+        except (OSError, ValueError, AttributeError):
+            return {}
+        return s if isinstance(s, dict) else {}
+
+    def update_project_settings(self, name: str, patch: dict | None, *, replace: bool = False) -> dict:
+        """Deep-apply `patch` to the project's overrides (None removes a key; `replace=True` with an empty patch
+        resets them all). Returns the new overrides."""
+        with self._proj_lock:
+            d, info = self._read_project(name)
+            cur = info.get("settings") if isinstance(info.get("settings"), dict) and not replace else {}
+            config.apply_patch(cur, patch or {})
+            if cur:
+                info["settings"] = cur
+            else:
+                info.pop("settings", None)
+            _write_json(d / "project.json", info)
+            return cur
 
     # ------------------------------------------------------------- index
     def scan(self):

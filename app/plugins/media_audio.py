@@ -309,7 +309,7 @@ def dub(ctx: JobContext):
     is_video = src["type"] == "video"
     src_dur = float((src["meta"].get("info") or {}).get("duration") or 0)
     stage = P.get("stage") or "all"
-    tts_id = (P.get("tts_model") or "").strip() or ctx.registry.default_for("voice_clone")
+    tts_id = (P.get("tts_model") or "").strip() or ctx.registry.default_for("voice_clone", settings=ctx.settings)
     tts = _ready(ctx, tts_id, "voice_clone", "voice-clone")
     tgt = C.norm_lang(P.get("target_language"))
     if not tgt:
@@ -318,8 +318,8 @@ def dub(ctx: JobContext):
     if langs and tgt not in langs and stage != "draft":
         raise JobError(f"{tts['name']} cannot speak '{tgt}'. It speaks: {', '.join(langs)}. Pick another voice model.", "input")
     src_lang = C.norm_lang(P.get("source_language"))
-    sep_id = (P.get("separate_model") or "").strip() or ctx.registry.default_for("separate")
-    asr_id = ctx.registry.default_for("subtitles")
+    sep_id = (P.get("separate_model") or "").strip() or ctx.registry.default_for("separate", settings=ctx.settings)
+    asr_id = ctx.registry.default_for("subtitles", settings=ctx.settings)
     ctx.scratch.mkdir(parents=True, exist_ok=True)
     work = ctx.scratch / "dub"
     work.mkdir(parents=True, exist_ok=True)

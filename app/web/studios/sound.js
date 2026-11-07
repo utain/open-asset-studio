@@ -563,7 +563,7 @@ class SoundStudio {
     this.picker = new S.ModelPicker({ task: this.task(), onChange: m => this._onModel(m) });
     this.form = new S.ParamForm({ memoryKey: 'sound', onChange: () => this._eta(), renderers: RENDERERS });
     this.prompt = new S.PromptBox({ memoryKey: 'sound', label: 'Prompt', onSubmit: () => this.generate(), onApply: (x, r) => this._onApply(x, r),
-      context: () => prefs.get('sound.context', '') });
+      context: () => S.getSetting('prompt.context.sound') || prefs.get('sound.context', '') });
     this.prompt.ta?.addEventListener('input', () => { clearTimeout(this._etaT); this._etaT = setTimeout(() => this._eta(), 350); });
     this.sheets = new Sheets(this);
     bus.on('asset', ev => this._onAssetEvent(ev));
@@ -1396,11 +1396,11 @@ class Sheets {
     try {
       if (sh.kind === 'sfx') {
         const m = store.modelsById.get(sh.model);
-        const res = await api.improve({ text: r.original || r.prompt || r.event, model_id: m?.id, task: sh.task || 'sfx', n: 0, chips: prefs.get('chips.sound', []) });
+        const res = await api.improve({ text: r.original || r.prompt || r.event, model_id: m?.id, task: sh.task || 'sfx', n: 0, chips: prefs.get('chips.sound', []), project: S.store.project });
         if (!r.original) r.original = r.prompt || r.event;
         r.prompt = res.prompt; if (res.negative) r.negative = res.negative;
       } else {
-        const res = await api.improve({ text: `${r.character ? r.character + ': ' : ''}${r.line}${r.emotion ? ` (${r.emotion})` : ''}`, target_style: 'qwen_tts', n: 0 });
+        const res = await api.improve({ text: `${r.character ? r.character + ': ' : ''}${r.line}${r.emotion ? ` (${r.emotion})` : ''}`, target_style: 'qwen_tts', n: 0, project: S.store.project });
         if (res.line) r.line = res.line;
         if (res.prompt && !r.emotion) r.emotion = res.prompt;
       }

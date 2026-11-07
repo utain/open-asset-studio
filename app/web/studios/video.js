@@ -63,7 +63,7 @@ export default S.defineStudio({
     kit = new S.TaskStudio({
       studio: 'video',
       tasks: TASKS,
-      context: () => S.prefs.get('video.context', ''),
+      context: () => S.getSetting('prompt.context.video') || S.prefs.get('video.context', ''),
       extraPanel: (k, t) => extraPanel(k, t),
       beforeSubmit: (spec, k) => beforeSubmit(spec, k),
     });
@@ -183,8 +183,12 @@ export default S.defineStudio({
       if (t.id === 'interpolate') return h('div.vid-note', ic('info', 13), 'Runs in a few seconds. Needs a clip from the Library (any mp4 / webm / mov).');
       const note = h('div.vid-note');
       const chips = h('div.vid-chips', ...ASPECT_CHIPS.map(([a, lab]) => h('button.chip', { type: 'button', title: `Set the aspect ratio to ${a}`, on: { click: () => k.form.setValues({ aspect: a }) } }, lab)));
-      const ctxIn = t.id === 't2v' ? h('label.field', h('span.field-label', ic('palette', 14), 'Look / art direction (optional)'),
-        h('input.input.input-sm', { placeholder: 'Project style for ✨ Improve, e.g. "warm 35mm documentary look"', value: S.prefs.get('video.context', ''), on: { change: e => S.prefs.set('video.context', e.target.value) } }),
+      const ctxField = h('input.input.input-sm', { placeholder: 'Project style for ✨ Improve, e.g. "warm 35mm documentary look"', value: S.getSetting('prompt.context.video') || S.prefs.get('video.context', ''),
+        on: { change: async e => {      // saved with the project (Settings > Prompts & text); the old browser-only value is dropped
+          try { await S.setProjectSettings({ prompt: { context: { video: e.target.value.trim() || null } } }); S.prefs.set('video.context', ''); } catch (err) { S.toastError(err); }
+        } } });
+      S.bus.on('settings', () => { if (ctxField.isConnected && document.activeElement !== ctxField) ctxField.value = S.getSetting('prompt.context.video') || S.prefs.get('video.context', ''); });
+      const ctxIn = t.id === 't2v' ? h('label.field', h('span.field-label', ic('palette', 14), 'Look / art direction (optional)'), ctxField,
         h('span.field-help', 'Sent to the prompt improver as context, so every shot keeps the same look.')) : null;
       const update = m => {
         const f = m?.features || {};

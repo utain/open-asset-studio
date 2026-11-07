@@ -47,7 +47,7 @@ export const api = {
   get: (u, q) => req('GET', u + qs(q)), post: (u, b) => req('POST', u, b ?? {}), put: (u, b) => req('PUT', u, b),
   patch: (u, b) => req('PATCH', u, b), del: (u) => req('DELETE', u),
 
-  bootstrap: () => req('GET', '/api/bootstrap'),
+  bootstrap: (q) => req('GET', '/api/bootstrap' + qs(q)),
   // models / settings
   models: (q) => req('GET', '/api/models' + qs(q)),
   model: (id) => req('GET', `/api/models/${encodeURIComponent(id)}`),
@@ -57,9 +57,14 @@ export const api = {
   downloadStart: (id, accept_license) => req('POST', `/api/models/${encodeURIComponent(id)}/download`, { accept_license }),
   downloadCancel: (id) => req('POST', `/api/models/${encodeURIComponent(id)}/download/cancel`),
   probe: (backend) => req('POST', '/api/models/probe', { backend }),
-  setDefault: (task, model) => req('PUT', '/api/settings/defaults', { task, model }),
+  setDefault: (task, model, project) => req('PUT', '/api/settings/defaults', { task, model, ...(project ? { project } : {}) }),
   settings: () => req('GET', '/api/settings'),
   patchSettings: (p) => req('PATCH', '/api/settings', p),
+  settingsSchema: () => req('GET', '/api/settings/schema'),
+  // per-project overrides (project.json "settings"): {project, overrides, overridden: [dotted keys], effective, resolved}
+  projectSettings: (p) => req('GET', `/api/projects/${encodeURIComponent(p)}/settings`),
+  patchProjectSettings: (p, patch) => req('PATCH', `/api/projects/${encodeURIComponent(p)}/settings`, patch),
+  resetProjectSettings: (p) => req('DELETE', `/api/projects/${encodeURIComponent(p)}/settings`),
   profiles: () => req('GET', '/api/profiles'),
   presets: (model) => req('GET', `/api/presets/${encodeURIComponent(model)}`),
   savePreset: (model, name, params) => req('PUT', `/api/presets/${encodeURIComponent(model)}`, { name, params }),
@@ -99,7 +104,7 @@ export const api = {
   llmRelease: () => req('POST', '/api/improve/release'),
   llmWarmup: () => req('POST', '/api/improve/warmup'),
   // text backends + writing tools (app/plugins/assistant.py)
-  textBackends: (check_auth = true) => req('GET', '/api/x/assistant/backends' + qs({ check_auth })),
+  textBackends: (check_auth = true, project) => req('GET', '/api/x/assistant/backends' + qs({ check_auth, project })),
   setTextBackends: (p) => req('PUT', '/api/x/assistant/settings', p),
   write: (body) => req('POST', '/api/x/assistant/write', body),
   // system

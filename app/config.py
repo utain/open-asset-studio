@@ -36,7 +36,7 @@ DEFAULT_SETTINGS: dict = {
         "exit_idle_s": 900,         # ... and exits when it holds no model for this long
         "cancel_grace_s": 20,       # running job ignores cancel this long -> worker is killed (if the backend allows)
     },
-    "jobs": {"cpu_concurrency": 3, "history_keep": 2000},
+    "jobs": {"cpu_concurrency": 3, "cloud_concurrency": 4, "history_keep": 2000},
     "llm": {
         "server": os.environ.get("LLAMA_SERVER") or shutil.which("llama-server") or str(Path.home() / "llama.cpp/build/bin/llama-server"),
         "host": "127.0.0.1",
@@ -70,6 +70,11 @@ DEFAULT_SETTINGS: dict = {
     "license": {"commercial_only": False, "strict": False},
     # Export overrides: {"preset": "<export preset id>"} replaces the profile's default export preset.
     "export": {},
+    # Text backends per purpose ("local" | "cli:<name>[@model]" | "api:<provider>/<model>"), CLI model overrides, API model
+    # lists and timeouts. All keys are optional; TextGen falls back to local / claude when unset.
+    "textgen": {},
+    # Prompt-box defaults: language for /api/improve when the request has none, and per-studio art direction text.
+    "prompt": {"lang": "auto", "context": {}},
 }
 
 
@@ -80,6 +85,43 @@ def _merge(base: dict, over: dict) -> dict:
             out[k] = _merge(out[k], v)
         else:
             out[k] = v
+    return out
+
+
+def apply_patch(dst: dict, src: dict) -> dict:
+    """Deep-apply `src` onto `dst` in place: a None value removes the key, dicts merge (and vanish when they end up
+    empty, so a reset leaves no `{}` husks and no stored nulls), anything else replaces."""
+    for k, v in src.items():
+        if v is None:
+            dst.pop(k, None)
+        elif isinstance(v, dict):
+            sub = dst.get(k) if isinstance(dst.get(k), dict) else {}
+            apply_patch(sub, v)
+            if sub:
+                dst[k] = sub
+            else:
+                dst.pop(k, None)
+        else:
+            dst[k] = copy.deepcopy(v)
+    return dst
+
+
+def count_leaves(d) -> int:
+    """Number of non-dict leaves of a nested override dict (a list or None counts as one leaf)."""
+    if not isinstance(d, dict):
+        return 1
+    return sum(count_leaves(v) for v in d.values())
+
+
+def flatten(d: dict, prefix: str = "") -> dict:
+    """{'a': {'b': 1}} -> {'a.b': 1}. Empty dicts are dropped (they carry no override)."""
+    out: dict = {}
+    for k, v in (d or {}).items():
+        key = f"{prefix}{k}"
+        if isinstance(v, dict):
+            out.update(flatten(v, key + "."))
+        else:
+            out[key] = v
     return out
 
 
@@ -110,20 +152,27 @@ class Settings:
     def update(self, patch: dict) -> dict:
         """Deep-merge `patch` into the stored overrides (a None value removes a key)."""
         with self._lock:
-            def apply(dst: dict, src: dict):
-                for k, v in src.items():
-                    if v is None:
-                        dst.pop(k, None)
-                    elif isinstance(v, dict) and isinstance(dst.get(k), dict):
-                        apply(dst[k], v)
-                    else:
-                        dst[k] = copy.deepcopy(v)
-            apply(self._user, patch)
+            apply_patch(self._user, patch)
             tmp = self.path.with_suffix(".json.tmp")
             tmp.write_text(json.dumps(self._user, indent=2, ensure_ascii=False) + "\n")
             os.replace(tmp, self.path)
             self.data = _merge(DEFAULT_SETTINGS, self._user)
             return self.data
+
+
+class SettingsView:
+    """Read-only snapshot: the system settings merged with one project's overrides. Same `.get()` / `.data` as Settings,
+    so it can be passed anywhere a settings object is read (licensing, profiles, registry.default_for, textgen)."""
+
+    def __init__(self, base: "Settings", overrides: dict | None, project: str | None = None):
+        self.project = project
+        self.overrides = copy.deepcopy(overrides or {})
+        self.data = _merge(base.data, self.overrides)
+
+    get = Settings.get
+
+    def update(self, _patch):
+        raise TypeError("SettingsView is read-only")
 
 
 def resolve_model_file(spec: str | None) -> Path | None:

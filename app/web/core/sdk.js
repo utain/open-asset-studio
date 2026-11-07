@@ -2,7 +2,8 @@
 // (docs/CONTRACTS.md section 6 lists what each export does.)
 export { api, ApiError, fileUrl, thumbUrl, waveform } from './api.js';
 export { store, bus, prefs, setProject, loadModels, modelsFor, promptStyleOf, waitJob,
-  getProfile, profileAspect, defaultExportPreset, isLicenseBlocked, setProfile, setCommercialOnly, patchProfileSettings } from './store.js';
+  getProfile, profileAspect, defaultExportPreset, isLicenseBlocked, setProfile, setCommercialOnly, patchProfileSettings, patchEffective, setProjectSettings, refreshEffective,
+  getSetting, isOverridden } from './store.js';
 export { licenseState, licenseBlocked, LICENSE_LABEL } from './license.js';
 export * as ui from './ui.js';
 export { h, ic, btn, toast, toastError, modal, confirmDialog, promptDialog, menu, popover, closePopover, seg, toggle, stars,

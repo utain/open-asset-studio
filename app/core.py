@@ -77,6 +77,16 @@ class Core:
         self.plugins: dict[str, object] = {}
         self.plugin_errors: dict[str, str] = {}
 
+    def settings_for(self, project: str | None):
+        """Effective settings for a project (system settings + the project's overrides); the system settings for
+        no / an unknown project. Read-only snapshot: re-resolve after the project's settings change."""
+        if not project:
+            return self.settings
+        try:
+            return config.SettingsView(self.settings, self.assets.project_settings(project), project)
+        except Exception:  # noqa: BLE001  unknown / invalid project id
+            return self.settings
+
     def load_plugins(self, app=None):
         """Import app/plugins/*.py. A plugin may define `setup(core)` and/or `router` (mounted at /api/x/<name>)."""
         from . import plugins as pkg
