@@ -354,7 +354,7 @@ models:
     default_for: [rig]
     order: 10
     tags: [rig, mit, skeleton, skin]
-    summary: "VAST-AI UniRig: predicts a skeleton and skin weights for any mesh (humanoids, quadrupeds, creatures, props) and writes a rigged GLB (glTF skin, 4 influences per vertex). Runs without Blender; bone names are generic (bone_0 ...), no Mixamo / VRM retargeting. Mesh is decimated to max_faces for the prediction only, the weights are transferred to every original vertex."
+    summary: "VAST-AI UniRig: predicts a skeleton and skin weights for any mesh (humanoids, quadrupeds, creatures, props) and writes a rigged GLB (glTF skin, 4 influences per vertex) that also carries a flex-test and a wiggle preview animation (rigged_plain.glb = without). Runs without Blender; bone names are generic (bone_0 ...), no Mixamo / VRM retargeting. Mesh is decimated to max_faces for the prediction only, the weights are transferred to every original vertex."
     features: {input: mesh, export: [glb], rig: true}
     input_slots:
       - {role: mesh, label: Mesh to rig, types: [mesh], required: true, hint: "A GLB from the Shape tab or Texture tab. Works best in a neutral pose (T / A pose for characters)."}

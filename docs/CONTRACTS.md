@@ -895,3 +895,9 @@ Existing assets are never hidden or deleted by the filter; the licence of the mo
   Plugin `app/plugins/video.py`: `GET /api/x/video/formats` and tools `video.frame|trim|loop|speed|reframe|convert|concat|mux`.
   Web: `app/web/studios/video.js` (`receives` i2v / continue / interpolate / tools; "Add sound" = `S.sendTo('sound', id, {action:'v2a'})`).
   Prompt styles `video_wan|ltx|kandinsky|hunyuan` (`prompts/video.yaml`). Research: `docs/research/video.md`. Tests: `tests/test_video.py`.
+- 3D rig preview (no core change): CPU tool `tool:mesh.flex_preview` (`app/plugins/mesh.py`; input one skinned GLB, output a new mesh asset with the animation clips `flex` / `wiggle`, `JobError(input)` when there is no skin), clip builder `workers/rig_anim.py` (numpy + stdlib; also used by the rig worker, which now returns the animated `rigged.glb` plus `rigged_plain.glb`, meta `worker.animations`). The shared mesh viewer `web/studios/i3d/common.js` autoplays a GLB's first clip and adds play / pause + clip picker (`autoplay`, `availableAnimations`); the 3D studio adds an "Animate preview" action for rigged meshes without clips. Tests: `tests/test_rig_anim.py`.
+- 3D text to motion (no core change): task `motion` (3D studio; input role `mesh` = a rigged GLB, prompt, output a new `mesh` asset `animated.glb`
+  with ONE clip `motion` plus attachments `motion.npz` and `retarget.json`), backend `motion_hy` (`workers/motion_hy_worker.py`, env `motion_hy`),
+  model `hy-motion-lite` (`models.d/motion.yaml`). Pure helpers in `workers/motion_common.py` (SMPL-H FK, geometric humanoid detection that refuses
+  non-humanoids with `NotHumanoidError`, retarget with foot lock); new public `rig_anim.append_clip(src, name, tracks, ...)`. Web: Motion tab and a
+  "Motion" button for rigged meshes in `app/web/studios/3d.js` (`receives` action `motion`). Research: `docs/research/motion.md`. Tests: `tests/test_motion.py`.

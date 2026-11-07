@@ -37,6 +37,7 @@ Upstream source code that the workers import, cloned at the pinned commit from `
 | `vendor/generative-models` | [Stability-AI/generative-models](https://github.com/Stability-AI/generative-models) | `e8cd657656fa` | MIT (code; the SV3D weights are under the Stability AI Community License) |
 | `vendor/GLM-4-Voice` | [zai-org/GLM-4-Voice](https://github.com/zai-org/GLM-4-Voice) | `eb00ce9142e8` | Apache-2.0 (code; model licence separate) |
 | `vendor/heartlib` | [HeartMuLa/heartlib](https://github.com/HeartMuLa/heartlib) | `5858ca8f1ffe` | Apache-2.0 |
+| `vendor/HY-Motion-1.0` | [Tencent-Hunyuan/HY-Motion-1.0](https://github.com/Tencent-Hunyuan/HY-Motion-1.0) | `4e426f5a1021` | Tencent HY-Motion 1.0 Community License (not licensed in the EU, UK and South Korea; more than 1 million monthly active users needs a separate licence). Used by `workers/motion_hy_worker.py`; text encoders Qwen3-8B (Apache-2.0) and CLIP ViT-L/14 (MIT) |
 | `vendor/Hunyuan3D-2` | [Tencent-Hunyuan/Hunyuan3D-2](https://github.com/Tencent-Hunyuan/Hunyuan3D-2) | `f8db63096c82` | Tencent Hunyuan 3D 2.0 Community License (not valid in the EU, UK and South Korea) |
 | `vendor/HunyuanVideo-Foley` | [Tencent-Hunyuan/HunyuanVideo-Foley](https://github.com/Tencent-Hunyuan/HunyuanVideo-Foley) | `df7b005b5023` | Tencent Hunyuan Community License (not valid in the EU, UK and South Korea) |
 | `vendor/index-tts` | [index-tts/index-tts](https://github.com/index-tts/index-tts) | `d9e41aac89fd` | bilibili Model Use License Agreement |

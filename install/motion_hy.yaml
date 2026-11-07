@@ -1,0 +1,22 @@
+backend: motion_hy
+env: motion_hy
+python: "3.12"
+torch:
+  - torch==2.9.0
+lock: motion_hy
+lock_flags: []
+vendor: [HY-Motion-1.0]
+# HY-Motion's requirements.txt pins torch 2.5.1 / transformers 4.53.3 / diffusers / bitsandbytes / fbxsdkpy; none of that is needed:
+# the worker builds the pipeline from hymotion.pipeline (no T2MRuntime, no prompt rewriter, no FBX export, diffusers is not imported).
+# vendor/HY-Motion-1.0 is not pip-installable: workers/motion_hy_worker.py puts it on sys.path.
+# The body-model bins (WoodenMesh) and stats/Mean.npy / Std.npy are git-lfs objects; fetch_vendor.sh clones with blob:none and
+# does not pull them, so fetch them here (code assets, not model weights). Needs the git-lfs binary.
+steps:
+  - "git -C vendor/HY-Motion-1.0 lfs pull"
+check: "import torch, transformers, torchdiffeq, einops, scipy, yaml; assert transformers.__version__ == '4.57.1'"
+manual:
+  - "Weights: ./install.sh model hy-motion-lite (tencent/HY-Motion-1.0 HY-Motion-1.0-Lite, Qwen/Qwen3-8B, openai/clip-vit-large-patch14)."
+  - "Do not download tencent/Text2MotionPrompter (61 GB prompt rewriter): the worker never uses it."
+tested: [linux-aarch64]
+size_gb: 6
+shares_env_with: null

@@ -1,7 +1,9 @@
 """Auto-rigging backend (envs/rig): UniRig (VAST-AI-Research/UniRig, MIT), mesh -> skeleton + skin weights -> rigged GLB.
 
   task rig   input role `mesh` (a mesh asset, GLB)  ->  mesh asset `rigged.glb` (the original geometry / materials plus a glTF
-                                                         skeleton, `skin` with JOINTS_0 / WEIGHTS_0) + `skeleton.json`
+                                                         skeleton, `skin` with JOINTS_0 / WEIGHTS_0, and the animation clips
+                                                         `flex` / `wiggle` of rig_anim.py so the studio can show the skinning
+                                                         moving) + `rigged_plain.glb` (the same without clips) + `skeleton.json`
 
 UniRig's own pipeline needs Blender (bpy) to read meshes and write FBX, and CUDA extensions (spconv, flash-attn, torch-scatter,
 torch-cluster) plus an OpenGL context for voxelisation. None exists here, so:
@@ -30,6 +32,7 @@ from pathlib import Path
 import numpy as np
 
 import m3d_common as C
+import rig_anim
 from studio_worker import Backend, Cancelled, InputError, serve
 
 STUDIO = Path(os.environ.get("STUDIO_ROOT") or Path(__file__).resolve().parent.parent)
@@ -139,12 +142,14 @@ class RigBackend(Backend):
         (out / "skeleton.json").write_text(json.dumps({
             "joints": [{"name": n, "parent": q, "position": [round(float(x), 5) for x in j]}
                        for n, q, j in zip(names, parents, joints_g)]}, indent=1))
-        t["export_s"] = round(time.time() - t3, 2)
         info = C.mesh_info(glb)
+        attach = ["skeleton.json"]
+        glb, clips = _with_clips(glb, ctx, attach)
+        t["export_s"] = round(time.time() - t3, 2)
         ctx.log(f"timings {t}, {len(names)} joints, {info}")
         shutil.rmtree(work, ignore_errors=True)
-        ctx.output(glb, "mesh", seed=seed, name=f"{(inp.get('name') or 'mesh')[:50]} (rigged)", attach=["skeleton.json"],
-                   rigged=True, joints=len(names), stats=info)
+        ctx.output(glb, "mesh", seed=seed, name=f"{(inp.get('name') or 'mesh')[:50]} (rigged)", attach=attach,
+                   rigged=True, joints=len(names), stats=info, animations=clips)
         return {"meta": {"timings": t, "joints": len(names)}}
 
     # ------------------------------------------------------------------ UniRig subprocess
@@ -169,6 +174,29 @@ class RigBackend(Backend):
         if proc.returncode != 0:
             ctx.log(tail)
             raise RuntimeError(f"UniRig {key.split('_')[0]} stage failed: {tail.strip().splitlines()[-1][:300] if tail.strip() else proc.returncode}")
+
+
+def _with_clips(glb: Path, ctx, attach: list) -> tuple[Path, list]:
+    """Add the flex / wiggle clips (workers/rig_anim.py) so the studio can show how the skin moves.
+
+    On success the animated file becomes `rigged.glb` (the main file) and the clip-free one is kept as `rigged_plain.glb`
+    (added to `attach`). Any failure is logged and the plain `rigged.glb` stays the output: the rig job never fails here."""
+    anim = glb.with_name("rigged_anim.glb")
+    plain = glb.with_name("rigged_plain.glb")
+    try:
+        info = rig_anim.animate_file(glb, anim)
+        shutil.copy2(glb, plain)
+        anim.replace(glb)
+        attach.append(plain.name)
+        ctx.log("animation clips: " + ", ".join(f"{c['name']} {c['duration']} s" for c in info["clips"])
+                + f" ({info['bytes_before']} -> {info['bytes_after']} bytes)")
+        return glb, [c["name"] for c in info["clips"]]
+    except Exception as e:  # noqa: BLE001
+        ctx.log(f"animation preview skipped: {type(e).__name__}: {e}")
+        anim.unlink(missing_ok=True)
+        if glb.is_file():
+            plain.unlink(missing_ok=True)
+        return glb, []
 
 
 # ------------------------------------------------------------------------------------------------------ geometry helpers

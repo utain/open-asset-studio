@@ -52,3 +52,4 @@ vendor/Step1X-3D https://github.com/stepfun-ai/Step1X-3D cb5ac944709c6c913109070
 vendor/UniRig https://github.com/VAST-AI-Research/UniRig 6793c6640ff01c8fb389f3993434124bb43d2933
 vendor/dinov2 https://github.com/facebookresearch/dinov2 7764ea0f912e53c92e82eb78a2a1631e92725fc8
 vendor/FlexiCubes https://github.com/MaxtirError/FlexiCubes.git 815e075a2a400d06c48d94c347674344ed6ae5c5
+vendor/HY-Motion-1.0 https://github.com/Tencent-Hunyuan/HY-Motion-1.0.git 4e426f5a1021cbcf7f375458c37b840ee7225229

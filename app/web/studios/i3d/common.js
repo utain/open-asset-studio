@@ -134,17 +134,40 @@ export function meshViewer({ height = 420, empty: emptyText = 'Generate or pick 
   const stats = h('div.i3d-vstats.dim');
   const el = h('div.i3d-viewer-wrap', box, bar, stats);
   let cur = null, mode = 'textured', rotate = S.prefs.get('i3d.rotate', true), light = S.prefs.get('i3d.light', 'neutral');
+  let playing = true, clip = null;       // animation state: kept while the element is re-created (mode / light changes)
   const hasWhite = a => (a?.files || []).some(f => f.name === 'white_mesh.glb');
   const geo = () => mode !== 'textured';   // shape, edges and wireframe all show the untextured mesh when there is one
   const srcOf = a => (geo() && hasWhite(a) ? S.fileUrl(a, 'white_mesh.glb') : S.fileUrl(a, a.files?.find(f => f.name.endsWith('_preview.glb'))?.name || a.main));
+  /** Play / pause + clip picker for a GLB with animations (e.g. the flex / wiggle clips of a rigged mesh); hidden otherwise. */
+  const animControls = (mv, box) => {
+    const names = [...(mv.availableAnimations || [])];
+    if (!names.length) { box.hidden = true; return; }
+    if (!names.includes(clip)) clip = names[0];
+    mv.animationName = clip;
+    if (playing) mv.play(); else { mv.pause(); mv.currentTime = 0; }
+    const pp = btn('', { size: 'sm', icon: playing ? 'pause' : 'play', title: playing ? 'Pause animation' : 'Play animation', onClick: () => {
+      playing = !playing; if (playing) mv.play(); else mv.pause();
+      pp.replaceChildren(ic(playing ? 'pause' : 'play', 15)); pp.title = playing ? 'Pause animation' : 'Play animation'; pp.setAttribute('aria-label', pp.title);
+    } });
+    const pick = names.length > 1 ? h('select.select.i3d-animsel', { title: 'Animation clip', 'aria-label': 'Animation clip',
+      on: { change: e => { clip = e.target.value; mv.animationName = clip; mv.currentTime = 0; if (playing) mv.play(); } } },
+      names.map(n => h('option', { value: n, selected: n === clip }, n))) : h('span.dim.i3d-animname', clip);
+    box.replaceChildren(pp, pick);
+    box.hidden = false;
+  };
   const render = () => {
     const a = cur;
     if (!a) { box.replaceChildren(S.empty('cuboid', 'No mesh yet', emptyText)); bar.replaceChildren(); stats.replaceChildren(); return; }
+    const animBox = h('span.i3d-anim', { hidden: true });
     box.replaceChildren(h('div.empty', ic('loader', 22, 'spin'), h('p', 'Loading the 3D viewer…')));
     S.loadModelViewer().then(() => {
       if (cur !== a) return;
       const mv = h('model-viewer', { src: srcOf(a), 'camera-controls': true, 'auto-rotate': rotate || null, 'shadow-intensity': '0.8',
-        exposure: light === 'bright' ? '1.4' : light === 'dark' ? '0.7' : '1', 'environment-image': 'neutral', 'interaction-prompt': 'none', alt: a.name || '3D model', 'touch-action': 'pan-y' });
+        exposure: light === 'bright' ? '1.4' : light === 'dark' ? '0.7' : '1', 'environment-image': 'neutral', 'interaction-prompt': 'none', alt: a.name || '3D model', 'touch-action': 'pan-y',
+        autoplay: true });           // a GLB with animation clips plays the first one; static meshes are unaffected
+      const t0a = Date.now();      // poll like the wireframe overlay below: the 'load' event is unreliable for a re-created element
+      const tickAnim = () => { if (cur !== a || !mv.isConnected || Date.now() - t0a > 120000) return; if (mv.loaded) animControls(mv, animBox); else setTimeout(tickAnim, 150); };
+      setTimeout(tickAnim, 150);
       if (mode === 'edges' || mode === 'wire') {   // poll: model-viewer's 'load' event is not reliable for a re-created element
         const view = mode, t0 = Date.now();
         const tick = () => { if (cur !== a || !mv.isConnected || Date.now() - t0 > 120000) return;
@@ -155,7 +178,13 @@ export function meshViewer({ height = 420, empty: emptyText = 'Generate or pick 
         if (mode === 'edges' || mode === 'wire') return;   // don't save a wireframe as the thumbnail
         if (a.preview?.thumb || thumbSeen.has(a.id) || cur !== a) return;
         thumbSeen.add(a.id);
-        try { await S.api.setThumb(a.id, await mv.toBlob({ mimeType: 'image/webp', qualityArgument: 0.9 })); } catch { thumbSeen.delete(a.id); autoThumb(a); }
+        try {
+          const anim = mv.availableAnimations?.length > 0;
+          if (anim) { mv.pause(); mv.currentTime = 0; await new Promise(r => setTimeout(r, 150)); }   // the thumbnail shows the rest pose
+          const blob = await mv.toBlob({ mimeType: 'image/webp', qualityArgument: 0.9 });
+          if (anim && playing) mv.play();
+          await S.api.setThumb(a.id, blob);
+        } catch { thumbSeen.delete(a.id); autoThumb(a); }
       }, 700), { once: true });
       box.replaceChildren(mv);
       el._mv = mv;
@@ -169,6 +198,7 @@ export function meshViewer({ height = 420, empty: emptyText = 'Generate or pick 
         { value: 'edges', label: 'Edges' }, { value: 'wire', label: 'Wireframe' }].filter(Boolean), mode, v => { mode = v; render(); }),
       btn('', { size: 'sm', icon: rotate ? 'pause' : 'refresh-cw', title: rotate ? 'Stop rotating' : 'Auto-rotate', onClick: () => { rotate = !rotate; S.prefs.set('i3d.rotate', rotate); render(); } }),
       btn('', { size: 'sm', icon: 'sun', title: `Light: ${light}`, onClick: () => { light = { neutral: 'bright', bright: 'dark', dark: 'neutral' }[light]; S.prefs.set('i3d.light', light); render(); } }),
+      animBox,
       h('span.spacer'),
       btn('', { size: 'sm', icon: 'image', title: 'Use this view as the thumbnail', onClick: async () => {
         try { const blob = await el._mv.toBlob({ mimeType: 'image/webp', qualityArgument: 0.9 }); await S.api.setThumb(a.id, blob); S.toast('Thumbnail updated', { kind: 'ok' }); } catch (e) { S.toastError(e); }

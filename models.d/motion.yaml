@@ -1,0 +1,56 @@
+# Text to motion for rigged characters (3D studio, Motion tab): Tencent HY-Motion 1.0-Lite. The generated SMPL-H motion is retargeted
+# onto the character's own UniRig skeleton (workers/motion_common.py) and written as an animation clip into a new mesh asset.
+# Research, retargeting design and measurements: docs/research/motion.md. Kimodo (NVIDIA) is a separate, later entry.
+
+tasks:
+  motion: {label: Text to motion, modality: mesh, studio: 3d}
+
+backends:
+  motion_hy:
+    label: envs/motion_hy (HY-Motion 1.0-Lite text to motion)
+    python: envs/motion_hy/bin/python
+    script: workers/motion_hy_worker.py
+    device: gpu
+    lock: motion_hy
+    fix: "./install.sh backend motion_hy (recipe install/motion_hy.yaml; needs git-lfs for the body-model files)"
+    model_idle_s: 300
+    env:
+      USE_HF_MODELS: "1"
+
+models:
+  - id: hy-motion-lite
+    name: HY-Motion 1.0-Lite (text to motion)
+    modality: mesh
+    tasks: [motion]
+    default_for: [motion]
+    order: 10
+    tags: [motion, tencent, humanoid]
+    summary: "Tencent HY-Motion 1.0-Lite (0.46 B flow-matching DiT, Qwen3-8B + CLIP text encoders): a text prompt becomes up to 12 s of 30 fps human motion, retargeted onto your rigged humanoid (Rig tab result) as an animation clip. Needs a two-legged, two-armed character in a T- or A-pose; English prompts. Not licensed in the EU, UK and South Korea."
+    features: {input: mesh, export: [glb], rig: true, max_seconds: 12, languages: [en]}
+    input_slots:
+      - {role: mesh, label: Rigged character, types: [mesh], required: true, hint: "A rigged humanoid from the Rig tab (T- or A-pose). The animation is added as a new asset; the original is untouched."}
+    backend: motion_hy
+    weights:
+      - {hf: tencent/HY-Motion-1.0, files: ["HY-Motion-1.0-Lite/latest.ckpt", "HY-Motion-1.0-Lite/config.yml"]}
+      - {hf: Qwen/Qwen3-8B, files: ["*.json", "merges.txt", "model-*.safetensors"]}
+      - {hf: openai/clip-vit-large-patch14, files: ["*.json", "merges.txt", "model.safetensors"]}
+    license:
+      name: Tencent HY-Motion 1.0 Community License
+      commercial: true
+      verify: true
+      note: "Not licensed in the European Union, the United Kingdom and South Korea. More than 1 million monthly active users needs a separate licence from Tencent. Outputs may not be used to improve other AI models; Tencent claims no rights in outputs. Qwen3-8B is Apache-2.0, CLIP ViT-L/14 is MIT."
+    memory_gb: 24
+    speed: "load ~2 min (16 GB Qwen3-8B text encoder to the GPU), then ~4 s for 4 s of motion at 50 steps; retarget <0.1 s"
+    est: {load_s: 120, run_s: 6}
+    params:
+      - {name: seconds, label: Duration, type: float, min: 1, max: 12, step: 0.5, default: 5, unit: s, group: basic, help: "Length of the motion (HY-Motion supports up to 12 s)."}
+      - {name: root_motion, label: Root motion, type: choice, choices: [root, in_place], default: root, group: basic, help: "root = the character travels; in_place = it stays on the spot (walk cycles)."}
+      - {name: foot_lock, label: Foot lock, type: bool, default: true, group: basic, help: "Pin the feet while they touch the ground (two-bone IK)."}
+      - {name: steps, label: Sampling steps, type: int, min: 10, max: 100, default: 50, group: advanced}
+      - {name: guidance, label: Guidance, type: float, min: 1, max: 10, step: 0.5, default: 5.0, group: advanced, help: "Text guidance scale (HY-Motion default 5)."}
+      - {name: fps, label: Frame rate, type: choice, choices: [30, 24, 60], default: 30, group: advanced}
+      - {name: facing, label: Character faces, type: choice, choices: [auto, "+Z", "-Z", "+X", "-X"], default: auto, group: advanced, help: "auto = decided from the feet; the studio's front is +Z."}
+      - {name: arm_offset, label: Arm offset, type: float, min: 0, max: 30, step: 1, default: 0, unit: deg, group: advanced, help: "Spread both arms away from the body (wide characters whose arms cut into the torso)."}
+      - {name: keep_clips, label: Keep test clips, type: bool, default: false, group: advanced, help: "Keep the flex / wiggle clips of the Rig result next to the new clip."}
+      - {name: seed, type: seed, default: -1}
+    presets: {fast: {steps: 25}, balanced: {}, quality: {steps: 80}}

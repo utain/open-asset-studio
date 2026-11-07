@@ -12,12 +12,12 @@ sm_121, torch 2.9.0+cu130, **no nvcc**). Registry: `models.d/3d_more.yaml`. Test
 | `stab3d` | TripoSR, Stable Fast 3D (SF3D), Stable Point-Aware 3D (SPAR3D), Zero123++ v1.2, SV3D-u, SV3D-p | shape, multiview | `workers/stab3d_worker.py`, `stab3d_multiview.py` |
 | `shape3d` | TripoSG, Hunyuan3D-2mini (+ turbo), Step1X-3D geometry | shape | `workers/shape3d_worker.py`, `shape3d_step1x.py` |
 | `trellis` | TRELLIS image-large | shape | `workers/trellis_worker.py`, `trellis_shims.py` |
-| `rig` | UniRig (skeleton + skin) | rig | `workers/rig_worker.py`, `rig_runner.py`, `rig_shims.py` |
+| `rig` | UniRig (skeleton + skin) | rig | `workers/rig_worker.py`, `rig_runner.py`, `rig_shims.py`, `rig_anim.py` |
 
 Output meshes are GLB, +Y up, front +Z, with `input.png` attached and the metadata flags `textured` / `vertex_colors`
 (same convention as the hy3d worker). `max_faces` (default 300 000) decimates dense results (TripoSG / Hunyuan3D / TRELLIS
 produce 1-2 M faces) and removes floating fragments. `multiview` writes `sheet.png` + `view_NN.png` (SV3D also an orbit
-video); `rig` writes `rigged.glb` (original mesh + glTF skeleton + skin, JOINTS_0 / WEIGHTS_0) and `skeleton.json`.
+video); `rig` writes `rigged.glb` (original mesh + glTF skeleton + skin, JOINTS_0 / WEIGHTS_0, plus the preview clips `flex` / `wiggle`), `rigged_plain.glb` (the same without clips) and `skeleton.json`.
 
 Shared code edits (small, additive): `app/registry.py` (`Registry.SLOT_TYPES` now also accepts `image` and `mesh` input slots),
 `docs/CONTRACTS.md` (same), `app/web/core/shell.js` (nothing new needed), `README.md`, `docs/SETUP.md` section 3,
@@ -93,6 +93,30 @@ No upstream file in `vendor/` is edited: everything is a stand-in installed befo
 Checked on `tira.glb` (52 joints) and on a generated bust (16 joints): the skeleton overlay sits inside the mesh in front and side
 view, and vertices are mostly weighted to nearby joints (median distance to the dominant joint 0.10 for a 1.28 m character).
 Limitations: the skeleton predictor does not rig tails or loose accessories; it works best on a character in an A- or T-pose.
+
+### Animated preview (flex test)
+
+A rigged GLB has no animation, so you cannot see whether the skin is good. `workers/rig_anim.py` (numpy + stdlib, no new
+dependency; imported by the rig worker and by a core plugin) appends two glTF clips without touching the mesh, skin or any
+existing byte of the binary chunk (new bufferViews / accessors at the end, 4-byte aligned, GLB lengths rewritten):
+
+- `flex` (about 10 s for 50 joints): the hierarchy is walked level by level from the root; every joint swings once, +-30 deg
+  (root 15 deg) as one sine back-and-forth, about an axis perpendicular to its bone (bone x world +Z, tilted towards the other
+  perpendicular so the swing shows from the front and the side; for a bone pointing along Z, bone x +Y). Joints of one level
+  move together, siblings with opposite sign. Slot 1.0 s (shallow rigs) down to 0.6 s, then several levels share a slot, so the
+  clip stays near 18 s at most (a 120-deep chain included). It starts and ends at the rest pose, nothing is translated.
+- `wiggle` (4 s loop): all joints at once, 3 deg of bend plus 60 % sideways, phase-shifted by depth so a wave runs down each chain.
+
+Rotations are `rest * delta` (normalised quaternions, LINEAR samplers), so rigs with rest rotations work; a node with a `matrix`
+is rewritten as the same TRS (glTF forbids animating it). Tests: `tests/test_rig_anim.py`.
+
+Where it runs: the **rig worker** adds the clips after writing the skin; the asset's main `rigged.glb` then carries them and the
+clip-free file stays as the attachment `rigged_plain.glb` (the metadata has `worker.animations`). A failure of that step is only
+logged: the job still returns the plain `rigged.glb`. For rigged meshes made earlier (or uploaded) the 3D viewer shows an
+**Animate preview** button that runs the CPU tool `tool:mesh.flex_preview` (`app/plugins/mesh.py`): input one skinned GLB, output a
+new derived mesh asset (parents = the input, `info.animations`), refused with an `input` error when the GLB has no skin or already has
+both clips. The viewer (`meshViewer` in `app/web/studios/i3d/common.js`) autoplays the first clip of any GLB that has animations and shows
+a play / pause button plus a clip picker next to the view toggles; static meshes are unchanged.
 
 ## Install
 

@@ -3,7 +3,7 @@
 // every engine knob is in the form (shape knobs on the Image → 3D tab, texture knobs on the Texture tab; a textured
 // Image → 3D job uses the Texture tab's settings). Big model-viewer preview, automatic mesh thumbnails.
 import * as S from '../core/sdk.js';
-import { css, meshViewer, autoThumb } from './i3d/common.js';
+import { css, meshViewer, autoThumb, runJob } from './i3d/common.js';
 const { h, ic, btn } = S;
 
 const TASKS = [
@@ -19,7 +19,11 @@ const TASKS = [
       hint: 'One object, fully visible, plain or transparent background. Result: the same object from other sides (sheet + one image per view; SV3D also attaches an orbit video).' }] },
   { id: 'rig', label: 'Rig', result: 'mesh', prompt: false, receives: ['rig'],
     inputs: [{ key: 'mesh', label: 'Mesh to rig', types: ['mesh'], role: 'mesh', required: true,
-      hint: 'A character or creature in a neutral pose (A- or T-pose) works best. Result: a GLB with a skeleton and skin weights.' }] },
+      hint: 'A character or creature in a neutral pose (A- or T-pose) works best. Result: a GLB with a skeleton, skin weights and two preview animations (flex test, wiggle).' }] },
+  { id: 'motion', label: 'Motion', result: 'mesh', prompt: true, receives: ['motion'],
+    placeholder: 'a person walks forward and waves…  (English, describe the body: walk, run, jump, wave the right hand, kick, dance, turn around)',
+    inputs: [{ key: 'mesh', label: 'Rigged character', types: ['mesh'], role: 'mesh', required: true,
+      hint: 'A rigged humanoid from the Rig tab, in a T- or A-pose (two legs, two arms). Result: a new mesh asset with the animation clip “motion”, retargeted onto its skeleton.' }] },
   { id: 'mesh_export', label: 'Export', result: 'mesh', prompt: false, receives: ['export'],
     inputs: [{ key: 'mesh', label: 'Meshes', types: ['mesh'], role: 'mesh', multiple: true, max: 12, required: true }] },
 ];
@@ -31,6 +35,7 @@ export default S.defineStudio({
     { action: 'retexture', label: 'Retexture', icon: 'palette', types: ['mesh'] },
     { action: 'export', label: 'Export mesh', icon: 'package', types: ['mesh'] },
     { action: 'rig', label: 'Auto-rig', icon: 'bot', types: ['mesh'] },
+    { action: 'motion', label: 'Animate (text to motion)', icon: 'wand-sparkles', types: ['mesh'] },
     { action: 'multiview', label: 'Other views', icon: 'grid-2x2', types: ['image'] },
   ],
   mount(el) {
@@ -39,6 +44,8 @@ export default S.defineStudio({
     const viewer = meshViewer({ height: 440, actions: a => [
       btn('Retexture', { size: 'sm', icon: 'palette', onClick: () => receive({ action: 'retexture', assets: [a] }) }),
       btn('Rig', { size: 'sm', icon: 'bot', onClick: () => receive({ action: 'rig', assets: [a] }) }),
+      isRigged(a) ? btn('Motion', { size: 'sm', icon: 'wand-sparkles', title: 'Describe a movement in words and animate this rigged character (text to motion)', onClick: () => receive({ action: 'motion', assets: [a] }) }) : null,
+      needsClips(a) ? btn('Animate preview', { size: 'sm', icon: 'play', title: 'Add a flex test and a wiggle loop to this rigged mesh (a new asset) to see how the skin moves', onClick: e => animatePreview(a, e.currentTarget) }) : null,
       btn('Export', { size: 'sm', icon: 'package', onClick: () => receive({ action: 'export', assets: [a] }) }),
     ] });
     const kit = new S.TaskStudio({
@@ -79,12 +86,26 @@ export default S.defineStudio({
       if (p.action === 'retexture' && meshes[0]) { kit.setTask('texture'); await kit.slots.mesh.set([meshes[0].id]); if (img) await kit.slots.image.set([img.id]); viewer.set(meshes[0]); return; }
       if (p.action === 'multiview' && img) { kit.setTask('multiview'); await kit.slots.image.set([img.id]); S.toast('Image loaded: pick a model and press Generate.', { kind: 'info' }); return; }
       if (p.action === 'rig' && meshes[0]) { kit.setTask('rig'); await kit.slots.mesh.set([meshes[0].id]); viewer.set(meshes[0]); return; }
+      if (p.action === 'motion' && meshes[0]) { kit.setTask('motion'); await kit.slots.mesh.set([meshes[0].id]); viewer.set(meshes[0]); S.toast('Character loaded: describe the movement and press Generate.', { kind: 'info' }); return; }
       if (p.action === 'export' && meshes.length) { kit.setTask('mesh_export'); await kit.slots.mesh.set(meshes.map(a => a.id)); viewer.set(meshes[0]); return; }
       return kit.receive(p);
     }
     return { route: r => { kit.route(r); syncViewer(); }, receive: async p => { const r = await receive(p); syncViewer(); return r; }, show: () => { showLatest(); syncViewer(); } };
   },
 });
+
+// Rigged meshes made before the preview clips existed (or imported ones) get them from the CPU tool tool:mesh.flex_preview.
+const isRigged = a => !!(a?.worker?.rigged || a?.info?.rigged);
+const clipsOf = a => [...(a?.worker?.animations || []), ...(a?.info?.animations || [])];
+const needsClips = a => isRigged(a) && !clipsOf(a).length;
+async function animatePreview(a, button) {
+  if (button) button.disabled = true;
+  try {
+    S.toast('Adding the animation preview…', { kind: 'info', timeout: 2500 });
+    await runJob({ tool: 'mesh.flex_preview', inputs: [{ asset: a.id, role: 'mesh' }], project: S.store.project, title: `Animate ${a.name || 'mesh'}`.slice(0, 60), meta: { studio: '3d' } });
+    S.toast('Animated copy ready: it plays in the viewer (clip picker next to the play button).', { kind: 'ok' });
+  } catch (e) { S.toastError(e); } finally { if (button) button.disabled = false; }
+}
 
 function extraPanel(kit, t) {
   if (t.id === 'shape') {
@@ -107,7 +128,10 @@ function extraPanel(kit, t) {
     return h('div.field-help', ic('info', 13), ' Open an image result and use “Make 3D” on a view, or feed several views to a multi-view shape model. Orbit models (SV3D) attach an orbit.mp4 to the sheet.');
   }
   if (t.id === 'rig') {
-    return h('div.field-help', ic('info', 13), ' The rigged GLB keeps the mesh and adds a skeleton with skin weights (bone names follow the chosen skeleton template). Open it in Blender, Godot, Unity or Mixamo-compatible tools.');
+    return h('div.field-help', ic('info', 13), ' The rigged GLB keeps the mesh and adds a skeleton with skin weights. Bones have generic names (bone_0, bone_1, …); there is no skeleton template or Mixamo / VRM retargeting. The result also plays two preview animations in the viewer: “flex” bends every joint in turn so you can check the skinning, “wiggle” moves all joints a little. “rigged_plain.glb” is the same file without them. Open it in Blender, Godot or Unity.');
+  }
+  if (t.id === 'motion') {
+    return h('div.field-help', ic('info', 13), ' HY-Motion writes up to 12 s of human motion from the text and retargets it onto the skeleton of the rigged character (the original asset is not changed; the result plays in the viewer). The character must be a two-legged, two-armed humanoid standing upright; other skeletons are refused with a reason. Prompts in English work best (“a person …”). “Root motion: in place” keeps the character on the spot. Commercial use: Tencent’s licence excludes the EU, UK and South Korea.');
   }
   if (t.id === 'mesh_export') {
     return h('div.field-help', ic('info', 13), ' Presets: “mobile” 5k faces, “pc” 30k faces (untextured shape, then retexture), “textured_glb” keeps the PBR texture. OBJ exports a zip with .mtl and texture maps.');

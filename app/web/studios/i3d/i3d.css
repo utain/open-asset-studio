@@ -95,3 +95,9 @@ section.page[data-studio="image"] .studio-panel, section.page[data-studio="3d"] 
   .i3d-viewer model-viewer, .i3d-viewer > .empty { height: min(var(--vh, 420px), 360px); }
   .pl-prev { max-width: 100%; }
 }
+
+/* animation controls of the mesh viewer (play / pause + clip picker, only for GLBs with animation clips) */
+.i3d-anim { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.i3d-anim[hidden] { display: none; }
+.i3d-animsel { height: 28px; width: auto; max-width: 132px; padding: 0 24px 0 9px; font-size: 12.5px; border-radius: 7px; }
+.i3d-animname { font-size: 12.5px; }
