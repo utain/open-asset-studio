@@ -97,6 +97,14 @@ async function pumpThumbs() {
 }
 
 // ------------------------------------------------------------------ edges / wireframe overlay
+/** The app theme is `data-theme` on <html> (dark unless set to light). */
+const isDark = () => document.documentElement.dataset.theme !== 'light';
+/** The scene of a <model-viewer> (internal symbol) and its model root, or null while they are not ready. */
+function mvScene(mv) {
+  const sym = Object.getOwnPropertySymbols(mv).find(k => k.description === 'scene');
+  const scene = sym && mv[sym], root = scene && (scene.model || scene._model);
+  return root ? { scene, root } : null;
+}
 /** Draw the mesh's triangle edges on a loaded <model-viewer>. view: 'edges' (over the surface) | 'wire' (lines only, see-through).
  *  model-viewer has no wireframe option, so this reaches into its three.js scene (internal symbol); returns false if unavailable. */
 function applyWire(mv, view) {
@@ -105,8 +113,7 @@ function applyWire(mv, view) {
   if (!root) return false;
   const meshes = [];
   root.traverse(o => { if (o.isMesh && o.geometry && !o.userData.i3dWire) meshes.push(o); });
-  const dark = document.documentElement.classList.contains('dark') || document.body.classList.contains('dark') ||
-    (!document.documentElement.classList.contains('light') && matchMedia('(prefers-color-scheme: dark)').matches);
+  const dark = isDark();
   const line = view === 'wire' ? (dark ? 0xd8dbe2 : 0x2b2f36) : 0x1f2328;
   for (const m of meshes) {
     for (const mat of [].concat(m.material)) { mat.visible = view !== 'wire'; mat.polygonOffset = true; mat.polygonOffsetFactor = 1; mat.polygonOffsetUnits = 1; }
@@ -126,6 +133,77 @@ function applyWire(mv, view) {
   return true;
 }
 
+// ------------------------------------------------------------------ bones overlay
+/** Skeleton of the loaded GLB: {bones, links:[[parent, child]]} (empty when the model has no skin), or null while the scene is not ready. */
+function findSkeleton(mv) {
+  const sc = mvScene(mv); if (!sc) return null;
+  const set = new Set();
+  sc.root.traverse(o => { if (o.isSkinnedMesh && o.skeleton) for (const b of o.skeleton.bones) set.add(b); });
+  const bones = [...set], links = [];
+  for (const b of bones) if (b.parent && set.has(b.parent)) links.push([b.parent, b]);
+  return { ...sc, bones, links };
+}
+
+/** Draw the skeleton of a loaded <model-viewer> on top of the mesh (depth test off) and make the surface semi-transparent.
+ *  One line object (a bone = a thin octahedron from the parent joint to the child joint, a joint = a small cross) whose
+ *  vertices are recomputed from the live bone matrices in onBeforeRender, so it follows any playing animation.
+ *  three.js classes come from existing scene objects (no direct import). Returns false if unavailable. */
+function applyBones(mv, sk) {
+  const { scene, root, bones, links } = sk;
+  if (!bones.length || root.userData.i3dBones) return !!root.userData.i3dBones;
+  const proto = bones[0], V3 = proto.position.constructor, M4 = proto.matrixWorld.constructor;
+  let tmpl = null;
+  root.traverse(o => { if (!tmpl && o.isMesh && o.material && !o.userData.i3dWire) tmpl = o; });
+  if (!tmpl) return false;
+  const Geo = tmpl.geometry.constructor, Attr = tmpl.geometry.attributes.position.constructor;
+  const nSeg = links.length * 12 + bones.length * 3;      // octahedron = 12 edges, cross = 3 edges
+  const pos = new Float32Array(nSeg * 9);                            // every segment is a triangle (a, b, b): wireframe draws just the line a-b
+  const geo = new Geo(); const attr = new Attr(pos, 3); attr.setUsage?.(35048); geo.setAttribute('position', attr);
+  const mat = [].concat(tmpl.material)[0].clone();
+  for (const k of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap', 'alphaMap', 'bumpMap']) if (k in mat) mat[k] = null;
+  Object.assign(mat, { wireframe: true, transparent: true, opacity: 1, depthTest: false, depthWrite: false, visible: true, side: 2 });
+  if (mat.metalness !== undefined) { mat.metalness = 0; mat.roughness = 1; }
+  mat.color?.set(0x000000); mat.emissive?.set(isDark() ? 0xffc247 : 0xc2410c); mat.envMapIntensity = 0; mat.toneMapped = false;
+  mat.polygonOffset = false; mat.needsUpdate = true;
+  let P = Object.getPrototypeOf(tmpl);                               // the template is usually a SkinnedMesh (flag set per instance): its parent class is Mesh
+  if (tmpl.isSkinnedMesh || tmpl.isInstancedMesh) P = Object.getPrototypeOf(P);
+  const ov = new (P.constructor)(geo, mat);
+  ov.isSkinnedMesh = ov.isInstancedMesh = false;                     // belt and braces: the renderer must treat it as a plain mesh
+  ov.frustumCulled = false; ov.renderOrder = 1000; ov.castShadow = ov.receiveShadow = false; ov.userData.i3dBones = true; ov.userData.i3dWire = true;
+  const inv = new M4(), a = new V3(), b = new V3(), d = new V3(), u = new V3(), v = new V3(), q = new V3(), r = new V3(), w = new V3();
+  let k = 0, avg = 0;
+  const seg = (p, c) => { pos[k++] = p.x; pos[k++] = p.y; pos[k++] = p.z; pos[k++] = c.x; pos[k++] = c.y; pos[k++] = c.z; pos[k++] = c.x; pos[k++] = c.y; pos[k++] = c.z; };
+  const at = (o, bone) => { o.set(bone.matrixWorld.elements[12], bone.matrixWorld.elements[13], bone.matrixWorld.elements[14]).applyMatrix4(inv); return o; };
+  ov.onBeforeRender = () => {
+    inv.copy(root.matrixWorld).invert(); k = 0;
+    if (!avg) {                                       // joint size from the mean bone length, measured on the first drawn frame
+      let s = 0; for (const [p, c] of links) s += at(a, p).distanceTo(at(b, c));
+      avg = (s / Math.max(1, links.length)) || 0.05;
+    }
+    for (const [p, c] of links) {
+      at(a, p); at(b, c); d.copy(b).sub(a); const L = d.length() || 1e-6; d.multiplyScalar(1 / L);
+      u.set(Math.abs(d.x) < 0.8 ? 1 : 0, Math.abs(d.x) < 0.8 ? 0 : 1, 0).cross(d).normalize().multiplyScalar(L * 0.12);
+      v.copy(d).cross(u).normalize().multiplyScalar(L * 0.12);
+      q.copy(a).addScaledVector(d, L * 0.15);        // the widest ring sits near the parent joint, like a bone in a DCC tool
+      for (const [s, t] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { r.copy(q).addScaledVector(u, s).addScaledVector(v, t); seg(a, r); seg(r, b); }
+      for (const [x, y] of [[[1, 0], [0, 1]], [[0, 1], [-1, 0]], [[-1, 0], [0, -1]], [[0, -1], [1, 0]]]) {
+        r.copy(q).addScaledVector(u, x[0]).addScaledVector(v, x[1]); w.copy(q).addScaledVector(u, y[0]).addScaledVector(v, y[1]); seg(r, w);
+      }
+    }
+    const j = avg * 0.1;
+    for (const bone of bones) {
+      at(a, bone);
+      for (let i = 0; i < 3; i++) { b.copy(a); w.copy(a); b.setComponent(i, a.getComponent(i) - j); w.setComponent(i, a.getComponent(i) + j); seg(b, w); }
+    }
+    attr.needsUpdate = true;
+  };
+  root.add(ov); root.userData.i3dBones = ov;
+  // ghost the surface so the skeleton reads through it (restored by re-creating the element: toggles re-render)
+  root.traverse(o => { if (o.isMesh && !o.userData.i3dWire) for (const m of [].concat(o.material)) { if (!m.visible) continue; m.transparent = true; m.opacity = Math.min(m.opacity ?? 1, 0.38); m.needsUpdate = true; } });
+  scene.queueRender?.();
+  return true;
+}
+
 // ------------------------------------------------------------------ mesh viewer
 /** Big model-viewer with view toggles: textured / white shape / edges / wireframe, auto-rotate, light, stats, downloads. */
 export function meshViewer({ height = 420, empty: emptyText = 'Generate or pick a mesh to preview it here.', actions } = {}) {
@@ -135,6 +213,7 @@ export function meshViewer({ height = 420, empty: emptyText = 'Generate or pick 
   const el = h('div.i3d-viewer-wrap', box, bar, stats);
   let cur = null, mode = 'textured', rotate = S.prefs.get('i3d.rotate', true), light = S.prefs.get('i3d.light', 'neutral');
   let playing = true, clip = null;       // animation state: kept while the element is re-created (mode / light changes)
+  let bones = S.prefs.get('i3d.bones', false);   // skeleton overlay on / off (a pref; the button only shows for a GLB that has a skeleton)
   const hasWhite = a => (a?.files || []).some(f => f.name === 'white_mesh.glb');
   const geo = () => mode !== 'textured';   // shape, edges and wireframe all show the untextured mesh when there is one
   const srcOf = a => (geo() && hasWhite(a) ? S.fileUrl(a, 'white_mesh.glb') : S.fileUrl(a, a.files?.find(f => f.name.endsWith('_preview.glb'))?.name || a.main));
@@ -159,6 +238,8 @@ export function meshViewer({ height = 420, empty: emptyText = 'Generate or pick 
     const a = cur;
     if (!a) { box.replaceChildren(S.empty('cuboid', 'No mesh yet', emptyText)); bar.replaceChildren(); stats.replaceChildren(); return; }
     const animBox = h('span.i3d-anim', { hidden: true });
+    const boneBtn = btn('Bones', { size: 'sm', kind: bones ? 'primary' : '', title: 'Show the skeleton (follows the animation)', onClick: () => { bones = !bones; S.prefs.set('i3d.bones', bones); render(); } });
+    boneBtn.hidden = true; boneBtn.setAttribute('aria-pressed', String(bones));
     box.replaceChildren(h('div.empty', ic('loader', 22, 'spin'), h('p', 'Loading the 3D viewer…')));
     S.loadModelViewer().then(() => {
       if (cur !== a) return;
@@ -168,6 +249,14 @@ export function meshViewer({ height = 420, empty: emptyText = 'Generate or pick 
       const t0a = Date.now();      // poll like the wireframe overlay below: the 'load' event is unreliable for a re-created element
       const tickAnim = () => { if (cur !== a || !mv.isConnected || Date.now() - t0a > 120000) return; if (mv.loaded) animControls(mv, animBox); else setTimeout(tickAnim, 150); };
       setTimeout(tickAnim, 150);
+      let skel = false;
+      const tb0 = Date.now();      // skeleton: show the Bones button when the GLB has one, draw the overlay when it is on
+      const tickBones = () => { if (cur !== a || !mv.isConnected || Date.now() - tb0 > 120000) return;
+        const sk = mv.loaded && findSkeleton(mv); if (!sk) return setTimeout(tickBones, 150);
+        if (!sk.bones.length) return;
+        boneBtn.hidden = false; skel = true;
+        if (bones && !applyBones(mv, sk)) setTimeout(tickBones, 150); };
+      setTimeout(tickBones, 150);
       if (mode === 'edges' || mode === 'wire') {   // poll: model-viewer's 'load' event is not reliable for a re-created element
         const view = mode, t0 = Date.now();
         const tick = () => { if (cur !== a || !mv.isConnected || Date.now() - t0 > 120000) return;
@@ -175,7 +264,7 @@ export function meshViewer({ height = 420, empty: emptyText = 'Generate or pick 
         setTimeout(tick, 150);
       }
       mv.addEventListener('load', () => setTimeout(async () => {   // the visible viewer doubles as the thumbnail camera
-        if (mode === 'edges' || mode === 'wire') return;   // don't save a wireframe as the thumbnail
+        if (mode === 'edges' || mode === 'wire' || (bones && skel)) return;   // don't save a wireframe / skeleton overlay as the thumbnail
         if (a.preview?.thumb || thumbSeen.has(a.id) || cur !== a) return;
         thumbSeen.add(a.id);
         try {
@@ -199,6 +288,7 @@ export function meshViewer({ height = 420, empty: emptyText = 'Generate or pick 
       btn('', { size: 'sm', icon: rotate ? 'pause' : 'refresh-cw', title: rotate ? 'Stop rotating' : 'Auto-rotate', onClick: () => { rotate = !rotate; S.prefs.set('i3d.rotate', rotate); render(); } }),
       btn('', { size: 'sm', icon: 'sun', title: `Light: ${light}`, onClick: () => { light = { neutral: 'bright', bright: 'dark', dark: 'neutral' }[light]; S.prefs.set('i3d.light', light); render(); } }),
       animBox,
+      boneBtn,
       h('span.spacer'),
       btn('', { size: 'sm', icon: 'image', title: 'Use this view as the thumbnail', onClick: async () => {
         try { const blob = await el._mv.toBlob({ mimeType: 'image/webp', qualityArgument: 0.9 }); await S.api.setThumb(a.id, blob); S.toast('Thumbnail updated', { kind: 'ok' }); } catch (e) { S.toastError(e); }

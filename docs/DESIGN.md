@@ -128,7 +128,7 @@ Each entry:
 Status is computed at startup and on demand: weights present in HF cache, venv exists, worker
 import probe ok -> `ready`; otherwise `missing_weights` / `missing_env` / `broken (reason)`.
 The UI shows not-ready models greyed out with the reason and the fix command.
-Defaults per task live in `settings.json` (editable on the Models page).
+Factory defaults per task come from `default_for` in the registry; `settings.json` (git-ignored, written by the Models page) holds only the user's overrides.
 
 ### 4.2 Jobs, GPU and memory
 - One global queue; one GPU job runs at a time (CPU-only tools may run alongside).

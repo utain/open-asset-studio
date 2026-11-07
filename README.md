@@ -88,7 +88,7 @@ run_studio.sh            start script (127.0.0.1:7860, logs/studio.log)
 models.yaml              model registry: tasks, backends (venvs), models (features, license, memory, params, presets)
 models.d/*.yaml          drop-in registry files (merged after models.yaml): sound, tts_light, tts_clone_a/b, music, sfx_more, foley, omni, vc_sing, image, cloud
                          (models may declare `input_slots`, the extra audio / voice / video inputs their worker reads)
-settings.json            user settings: profile, commercial-safe filter, default model per task, memory margin, idle timeouts, LLM config
+settings.json            user overrides, git-ignored (factory defaults: app/config.py + registry): profile, commercial-safe filter, default model per task, memory margin, idle timeouts, LLM config
 prompts/*.yaml           prompt-improver templates per prompt_style (core.yaml + studio files)
 app/                     FastAPI core (envs/core)
   main.py                REST + SSE API, static web UI
@@ -219,9 +219,18 @@ Jobs go through the same queue, memory checks and commercial-safe filter as the 
 upload inputs are refused unless the client passes `confirm_cost` / `confirm_upload` (the error carries the estimate,
 so the client can ask you first).
 
-Tools: `studio_status`, `list_models`, `get_model`, `list_tools`, `list_projects`, `create_project`,
-`search_assets`, `get_asset`, `submit_job` (waits up to `wait_s`, default 300 s, max 600), `get_job`, `list_jobs`,
-`cancel_job`, `import_file` (clients on the same machine only), `update_asset`.
+Tools (20):
+
+| Group | Tools |
+| --- | --- |
+| Look around | `studio_status`, `list_models` (tasks incl. `rig` and `motion`), `get_model` (params, presets, user presets, input slots), `list_tools` (each CPU tool with its inputs and params, e.g. `mesh.flex_preview` takes `{clips, angle}` on a rigged mesh), `studio_info` (topics: `profiles` / export presets, `voices`, `video_formats`, `dub_options`, `ready_tasks`, `flows`, `cloud`, `llm`, `comfyui`, `downloads`, `logs`) |
+| Make | `improve_prompt` (rough idea to a model-ready prompt, or `list_styles`), `submit_job` (waits up to `wait_s`, default 300 s, max 600), `get_job`, `list_jobs`, `cancel_job`, `retry_job` |
+| Library | `list_projects`, `create_project` (`update=true` edits one), `search_assets`, `get_asset` (meshes show `mesh3d`: rigged, joints, animation clip names, attachments such as `skeleton.json` / `rigged_plain.glb`; `lineage=true` adds ancestors and derived assets), `update_asset`, `import_file` (clients on the same machine only), `delete_asset` (needs `confirm: true`; moves it to the project's `.trash`) |
+| Deliver | `export_assets` (export preset, zip with meta and attachments, or an engine-ready sound folder), `save_preset` (user presets per model) |
+
+Left out on purpose: provider API keys, cloud on/off and budget, licence filter and profile settings, model downloads,
+unloading models, the Assistant chats and the Pipelines page's flow editing (read-only through `studio_info`). Change
+those in the web UI.
 
 ### Client configs
 

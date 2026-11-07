@@ -25,6 +25,7 @@ models:
     default_for: [motion]
     order: 10
     tags: [motion, tencent, humanoid]
+    prompt_style: motion
     summary: "Tencent HY-Motion 1.0-Lite (0.46 B flow-matching DiT, Qwen3-8B + CLIP text encoders): a text prompt becomes up to 12 s of 30 fps human motion, retargeted onto your rigged humanoid (Rig tab result) as an animation clip. Needs a two-legged, two-armed character in a T- or A-pose; English prompts. Not licensed in the EU, UK and South Korea."
     features: {input: mesh, export: [glb], rig: true, max_seconds: 12, languages: [en]}
     input_slots:

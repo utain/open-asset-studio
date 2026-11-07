@@ -98,6 +98,40 @@ def asset_view(a: dict, full: bool = False) -> dict:
         keys += ["params", "improved_prompt", "final_prompt", "negative", "parents", "job", "studio", "notes", "source", "worker"]
     out = {k: a[k] for k in keys if a.get(k) not in (None, "", [], {})}
     out["files"] = files
+    if a.get("type") == "mesh":
+        out["mesh3d"] = mesh_view(a, files, full)
+    return out
+
+
+# attachments the 3D tasks write next to mesh.glb, and what they are for
+MESH_ATTACHMENTS = {
+    "skeleton.json": "joint names / hierarchy of the rig (rig task)",
+    "rigged_plain.glb": "the same rigged mesh without the flex / wiggle test clips (rig task)",
+    "white_mesh.glb": "untextured mesh (shape / texture tasks)",
+    "motion.npz": "raw motion data (motion task)",
+    "retarget.json": "how the motion was mapped onto this skeleton (motion task)",
+}
+
+
+def mesh_view(a: dict, files: list, full: bool = False) -> dict:
+    """3D facts of a mesh asset: rigged, joints, animation clip names, textured, size, motion, attachment files."""
+    info, w = a.get("info") or {}, a.get("worker") or {}
+    anims = w.get("animations") or info.get("animations") or []
+    rigged = bool(w.get("rigged") or info.get("rigged"))
+    out = {"rigged": rigged, "joints": w.get("joints") or info.get("joints"), "animations": list(anims),
+           "textured": w.get("textured") if "textured" in w else None,
+           "vertices": info.get("vertices"), "faces": info.get("faces"), "motion": w.get("motion")}
+    out = {k: v for k, v in out.items() if v not in (None, [], {})}
+    out["rigged"], out["animations"] = rigged, list(anims)
+    att = [f["name"] for f in files if f.get("role") == "attachment"]
+    if att:
+        out["attachments"] = {n: MESH_ATTACHMENTS.get(n, "attachment") for n in att}
+    if not full:
+        return out
+    if rigged and not anims:
+        out["hint"] = "Rigged but no clips: run submit_job(tool='mesh.flex_preview') or task 'motion' on it."
+    elif not rigged:
+        out["hint"] = "Not rigged: run task 'rig' on it before 'motion' or tool 'mesh.flex_preview'."
     return out
 
 
@@ -129,6 +163,8 @@ def model_view(m: dict, detail: bool) -> dict:
                          for p in m.get("params") or []]
         if m.get("presets"):
             out["presets"] = m["presets"]
+        if m.get("user_presets"):
+            out["user_presets"] = m["user_presets"]
         if m.get("input_slots"):
             out["input_slots"] = m["input_slots"]
         if m.get("features"):
@@ -167,10 +203,40 @@ def t_get_model(a, _ctx):
     return model_view(http("GET", f"/api/models/{urllib.parse.quote(a['id'])}"), True)
 
 
+# Params of the CPU tools (handlers in app/plugins/*.py). `in` = the input assets the tool needs.
+AUDIO_OUT = {"format": "wav | ogg | mp3 | flac (default wav)", "bit_depth": "16 | 24 (default 16)", "quality": "0..1 for ogg / mp3 (default 0.6)"}
+TOOL_PARAMS = {
+    "image.convert": {"in": "1+ image assets", "params": {"format": "png | webp | jpg (default png)", "max_side": "16..8192, 0 = keep size", "square": "bool, pad to a transparent square"}},
+    "asset.export": {"in": "1+ audio / voice / image assets", "params": {"preset": "export preset id (studio_info topic=profiles)", "audio": "{format, sample_rate, bit_depth, lufs, channels, ...}", "image": "{format, width, height, aspect, fit, max_side, quality}"},
+                     "note": "Writes NEW derived assets (originals untouched). To download a converted copy instead use export_assets."},
+    "mesh.flex_preview": {"in": "1+ mesh assets (GLB) that are RIGGED (have a skin; make one with task 'rig')",
+                          "params": {"clips": "list of 'flex' (each joint swings in turn, a skinning test) and 'wiggle' (gentle loop); default both", "angle": "degrees, 5..80 (default 30)"},
+                          "note": "Writes a NEW mesh asset with those animation clips (get_asset -> mesh3d.animations). Fails with kind 'input' when the mesh has no skeleton."},
+    "audio.process": {"in": "1+ audio / voice assets", "params": {"ops": "{trim:{threshold_db,pad_ms}, fade:{in_ms,out_ms}, loop:{xfade_ms}, normalize:{lufs,ceiling_db}, sample_rate, channels:'mono'|'stereo'} (or the flat keys trim, fade, loop, normalize, lufs, sample_rate, channels)", **AUDIO_OUT}, "note": "A chain of the single audio tools in one pass."},
+    "audio.trim": {"in": "audio", "params": {"threshold_db": "default -50", "pad_ms": "default 30", **AUDIO_OUT}},
+    "audio.fade": {"in": "audio", "params": {"in_ms": "default 10", "out_ms": "default 200", **AUDIO_OUT}},
+    "audio.normalize": {"in": "audio", "params": {"lufs": "target loudness (default -16)", "ceiling_db": "true-peak ceiling (default -1)", **AUDIO_OUT}},
+    "audio.loop": {"in": "audio", "params": {"xfade_ms": "cross-fade length (default 500)", **AUDIO_OUT}},
+    "audio.convert": {"in": "audio", "params": dict(AUDIO_OUT)},
+    "audio.channels": {"in": "audio", "params": {"channels": "mono | stereo (required)", **AUDIO_OUT}},
+    "audio.resample": {"in": "audio", "params": {"sample_rate": "Hz (default 44100)", **AUDIO_OUT}},
+    "audio.make_voice": {"in": "1 audio asset", "params": {"name": "voice name", "ref_text": "transcript of the clip", "language": "language code", "design_prompt": "text", "character": "text"},
+                         "note": "Saves a trimmed, -20 LUFS mono copy (max 30 s) as a voice asset, the reference for task voice_clone."},
+    "video.frame": {"in": "1+ video assets", "params": {"at": "'last' (default) | 'first' | seconds"}, "note": "Writes an image asset (e.g. the start frame for i2v)."},
+    "video.trim": {"in": "video", "params": {"start": "seconds (default 0)", "end": "seconds, 0 = to the end"}},
+    "video.loop": {"in": "video", "params": {"mode": "pingpong (default, clips < 60 s) | repeat", "times": "2..8 (default 2)"}},
+    "video.speed": {"in": "video", "params": {"speed": "0.25..4 (default 1)"}},
+    "video.reframe": {"in": "video", "params": {"aspect": "16:9 | 9:16 | 1:1 | 4:5 | 4:3 | 3:4 (default 9:16)", "fit": "crop (default) | blur | pad", "short_side": "360..2160 (default 1080)"}},
+    "video.convert": {"in": "video", "params": {"format": "mp4 (default) | webm", "max_side": "0 = keep, up to 7680", "fps": "0 = keep", "crf": "10..40 (default 20, lower = better)"}},
+    "video.concat": {"in": "2+ video assets, joined in order", "params": {}, "note": "Output size / fps follow the first clip; clips without sound get silence."},
+    "video.mux": {"in": "one video + one audio / voice asset", "params": {"volume": "0..4 (default 1)", "keep_original": "bool, mix with the video's own sound", "fade_out": "seconds 0..10 (default 0.5)"}},
+}
+
+
 def t_list_tools(_a, _ctx):
     tools = http("GET", "/api/bootstrap").get("tools") or {}
-    return {"tools": tools, "hint": "Run one with submit_job(tool=<id>, params=..., inputs=[{asset: <id>}]). "
-                                    "Params per tool: docs/CONTRACTS.md and app/plugins/*.py."}
+    out = [{"id": k, "label": v, **TOOL_PARAMS.get(k, {"note": "params: see docs/CONTRACTS.md and app/plugins/*.py"})} for k, v in tools.items()]
+    return {"tools": out, "hint": "Run one with submit_job(tool=<id>, params=..., inputs=[{asset: <id>}]); the result is a new asset whose parents are the inputs."}
 
 
 def t_list_projects(_a, _ctx):
@@ -178,6 +244,9 @@ def t_list_projects(_a, _ctx):
 
 
 def t_create_project(a, _ctx):
+    if a.get("update"):
+        patch = {k: a[k] for k in ("title", "description") if k in a}
+        return http("PATCH", f"/api/projects/{urllib.parse.quote(a['id'])}", patch)
     return http("POST", "/api/projects", {"id": a["id"], "title": a.get("title") or a["id"], "description": a.get("description", "")})
 
 
@@ -190,7 +259,12 @@ def t_search_assets(a, _ctx):
 
 def t_get_asset(a, _ctx):
     asset = http("GET", f"/api/assets/{urllib.parse.quote(a['id'])}")
-    out = [{"type": "text", "text": json.dumps(asset_view(asset, True), ensure_ascii=False)}]
+    view = asset_view(asset, True)
+    if a.get("lineage"):
+        lin = http("GET", f"/api/assets/{urllib.parse.quote(a['id'])}/lineage")
+        brief = lambda m: {k: m[k] for k in ("id", "type", "name", "task", "model", "missing") if m.get(k)}  # noqa: E731
+        view["lineage"] = {k: [brief(m) for m in lin.get(k) or []] for k in ("ancestors", "children", "siblings")}
+    out = [{"type": "text", "text": json.dumps(view, ensure_ascii=False)}]
     if a.get("preview"):
         out += preview_blocks(asset)
     return out
@@ -296,35 +370,173 @@ def t_update_asset(a, _ctx):
     return asset_view(http("PATCH", f"/api/assets/{urllib.parse.quote(a['id'])}", patch), True)
 
 
+def t_retry_job(a, ctx):
+    j = http("POST", f"/api/jobs/{urllib.parse.quote(a['id'])}/retry",
+             {"confirm_cost": bool(a.get("confirm_cost")), "confirm_upload": bool(a.get("confirm_upload"))})
+    if a.get("wait_s", 300) > 0:
+        j = wait_job(j["id"], float(a.get("wait_s", 300)), ctx)
+    return finished(j, bool(a.get("preview", True)))
+
+
+def t_delete_asset(a, _ctx):
+    """Soft delete: the studio moves the folder to the project's .trash (recoverable by hand). Needs confirm=true."""
+    aid = urllib.parse.quote(a["id"])
+    meta = http("GET", f"/api/assets/{aid}")
+    if a.get("confirm") is not True:
+        kids = http("GET", f"/api/assets/{aid}/lineage").get("children") or []
+        raise StudioError(f"Deleting '{meta.get('name')}' ({meta.get('type')}, {a['id']}) removes it from the library"
+                          + (f"; {len(kids)} derived asset(s) keep their lineage but lose this parent" if kids else "") + ".",
+                          "confirm_delete", "Ask the user, then call delete_asset again with confirm: true.")
+    return http("DELETE", f"/api/assets/{aid}")
+
+
+def t_improve_prompt(a, _ctx):
+    if a.get("list_styles"):
+        d = http("GET", "/api/improve/styles")
+        return {"styles": [{"id": x.get("id"), "label": x.get("label"), "modality": x.get("modality"),
+                            "chips": [{"id": c.get("id"), "label": c.get("label")} for c in x.get("chips") or []]} for x in d.get("styles", [])],
+                "hint": "improve_prompt(text, model_id=<model>) picks the style of that model; pass target_style to force one."}
+    if not (a.get("text") or "").strip():
+        raise StudioError("Give the idea in `text` (Thai or English), or list_styles=true.", "input")
+    backend = a.get("backend")
+    if backend and backend != "local" and not a.get("confirm_upload"):
+        raise StudioError(f"Backend '{backend}' sends the text to a third party (CLI / API).", "consent",
+                          "Leave backend empty to use the local LLM, or ask the user and pass confirm_upload: true.")
+    body = {k: a[k] for k in ("text", "target_style", "model_id", "task", "lang", "n", "image_asset", "context", "chips", "backend") if a.get(k) not in (None, "")}
+    return http("POST", "/api/improve", body, timeout=300)
+
+
+def t_save_preset(a, _ctx):
+    mid = urllib.parse.quote(a["model"])
+    if a.get("delete"):
+        if a.get("confirm") is not True:
+            raise StudioError(f"Deleting the preset '{a['name']}' of {a['model']} cannot be undone.", "confirm_delete",
+                              "Ask the user, then call save_preset again with delete: true and confirm: true.")
+        return http("DELETE", f"/api/presets/{mid}/{urllib.parse.quote(a['name'], safe='')}")
+    if not isinstance(a.get("params"), dict) or not a["params"]:
+        raise StudioError("Give the param values to store in `params` (names as in get_model).", "input")
+    return http("PUT", f"/api/presets/{mid}", {"name": a["name"], "params": a["params"]})
+
+
+def _local_export_path(url: str) -> str | None:
+    """/api/export/<zip> | /api/x/sound/export/<zip> | /api/export/render/<token>/<name> -> the file under data/exports."""
+    parts = url.split("/")
+    p = DATA / "exports" / (f"render-{parts[-2]}/{parts[-1]}" if "/render/" in url else parts[-1])
+    return str(p) if p.is_file() else None
+
+
+def t_export_assets(a, _ctx):
+    ids = a.get("ids") or []
+    if not ids:
+        raise StudioError("Give the asset ids to export.", "input")
+    spec = {k: a[k] for k in ("preset", "audio", "image") if a.get(k)}
+    if a.get("game_audio") is not None:
+        g = dict(a["game_audio"] or {})
+        d = http("POST", "/api/x/sound/export", {"ids": ids, **g}, timeout=600)
+    elif len(ids) == 1 and spec and not a.get("zip"):
+        d = http("POST", f"/api/assets/{urllib.parse.quote(ids[0])}/render", {"export": spec}, timeout=600)
+    elif len(ids) == 1 and not spec and not a.get("zip"):
+        return asset_view(http("GET", f"/api/assets/{urllib.parse.quote(ids[0])}"), True)   # nothing to convert: the files as stored
+    else:
+        d = http("POST", "/api/export", {"ids": ids, "naming": a.get("naming", "name"), "include_meta": a.get("include_meta", True),
+                                         "include_attachments": a.get("include_attachments", True), **({"export": spec} if spec else {})}, timeout=600)
+    out = {k: v for k, v in d.items() if k != "url"}
+    out["url"] = API + d["url"]
+    path = _local_export_path(d["url"])
+    if path:
+        out["path"] = path
+    return out
+
+
+def _info_profiles(_a):
+    d = http("GET", "/api/profiles")
+    return {"current": d.get("current"), "default_export": d.get("default_export"), "license_filter": d.get("license"),
+            "profiles": [{k: p.get(k) for k in ("id", "label", "summary", "aspect", "aspects", "export", "export_presets")} for p in d.get("profiles", [])],
+            "export_presets": d.get("export_presets"),
+            "hint": "Use a preset id with export_assets(preset=...) or tool asset.export."}
+
+
+def _info_cloud(_a):
+    d = http("GET", "/api/x/providers")
+    return {"allow_cloud": d.get("allow_cloud"), "budget_usd": d.get("budget_usd"), "confirm_usd": d.get("confirm_usd"), "spend": d.get("spend"),
+            "providers": [{"id": p.get("id"), "label": p.get("label"), "key_set": bool((p.get("key") or {}).get("set")), "modalities": p.get("modalities"),
+                           "models": p.get("models")} for p in d.get("providers", [])],
+            "models": [{"id": m.get("id"), "name": m.get("name"), "tasks": m.get("tasks"), "status": status_of(m), "example_usd": m.get("example_usd")}
+                       for m in d.get("models", [])],
+            "hint": "Cloud models cost money and upload inputs: submit_job needs confirm_cost / confirm_upload after the user agreed."}
+
+
+def _info_flows(a):
+    if a.get("id"):
+        return http("GET", f"/api/x/pipelines/flows/{urllib.parse.quote(a['id'])}", query={"project": a.get("project", "default")})
+    return {"flows": http("GET", "/api/x/pipelines/flows", query={"project": a.get("project", "default"), "limit": 50}).get("flows"),
+            "ready_tasks": http("GET", "/api/x/pipelines/capabilities").get("tasks"),
+            "hint": "Flows are the Pipelines page's saved guided runs (Concept to 3D prop, Character kit); their steps are ordinary jobs and assets. "
+                    "To do the same from here, chain submit_job calls (see the 3D recipe in the server instructions)."}
+
+
+def _info_logs(a):
+    d = http("GET", "/api/system/logs", query={"name": a.get("name", "studio"), "lines": min(int(a.get("lines", 60)), 300)})
+    return {k: d.get(k) for k in ("name", "available", "lines")}
+
+
+# topic -> (what it is, function(args))
+INFO_TOPICS = {
+    "profiles": ("use-case profiles, export presets (loudness / format / size) and the licence filter", _info_profiles),
+    "voices": ("the project's voice library (voice assets usable as clone references)", lambda a: http("GET", "/api/x/sound/voices", query={"project": a.get("project", "default")})),
+    "video_formats": ("aspect ratios (px) and per-platform defaults for video reframing", lambda a: http("GET", "/api/x/video/formats")),
+    "dub_options": ("dubbing: voice-clone models with their languages, translation backends, ready tasks", lambda a: http("GET", "/api/x/media_audio/dub/options")),
+    "ready_tasks": ("which models are ready for each pipeline task (t2i, edit, rmbg, shape, texture, tts, ...)", lambda a: http("GET", "/api/x/pipelines/capabilities")),
+    "flows": ("saved Pipelines flows of a project (pass id for one flow)", _info_flows),
+    "cloud": ("cloud providers (keys set?, budget, spend) and cloud models with example prices", _info_cloud),
+    "llm": ("the local prompt-improver LLM: running or stopped, model", lambda a: http("GET", "/api/improve/status")),
+    "comfyui": ("whether the optional ComfyUI server is reachable", lambda a: http("GET", "/api/x/image/comfyui")),
+    "downloads": ("model weight downloads in progress", lambda a: http("GET", "/api/downloads")),
+    "logs": ("tail of a studio log (name: studio, worker-<backend>, ...; lines up to 300)", _info_logs),
+}
+
+
+def t_studio_info(a, _ctx):
+    topic = a.get("topic")
+    if topic not in INFO_TOPICS:
+        return {"topics": {k: v[0] for k, v in INFO_TOPICS.items()}}
+    return INFO_TOPICS[topic][1](a)
+
+
 S, I, B, O = {"type": "string"}, {"type": "integer"}, {"type": "boolean"}, {"type": "object"}
 PROJECT = {"type": "string", "description": "project id (default: default)"}
 INPUTS = {"type": "array", "description": "input assets, e.g. [{asset: '<id>', role: 'ref'}] (roles per model: get_model -> input_slots)",
           "items": {"type": "object", "properties": {"asset": S, "role": S}, "required": ["asset"]}}
 RO = {"readOnlyHint": True, "openWorldHint": False}
+TASKS_HELP = 'Tasks: image (t2i, edit, multi_ref, inpaint, rgba, extract, rmbg, upscale, recenter), 3D (multiview, text3d, shape, texture, rig = auto-rig a mesh, motion = text to motion for a rigged humanoid, mesh_export), audio (sfx, ambience, music, song, tts, voice_design, voice_clone, voice_convert, sing, s2s, v2a, separate, dub, qa_clap, qa_asr), text (transcribe, subtitles, audio_ask), video (t2v, i2v, flf2v, interpolate).'
 TOOLS = [
     {"name": "studio_status", "description": "Studio health, queue (running / queued jobs), free memory, loaded models, profile and licence filter.",
      "inputSchema": {"type": "object", "properties": {}}, "annotations": RO, "fn": t_status},
-    {"name": "list_models", "description": "Generation tasks (t2i, edit, rgba, shape, sfx, music, tts, voice_clone, ...) and the models for them, with status, licence and speed. Filter by task for params.",
+    {"name": "list_models", "description": "Generation tasks and the models for them, with status, licence and speed. Filter by task for params and input slots. " + TASKS_HELP,
      "inputSchema": {"type": "object", "properties": {"task": S, "modality": {"type": "string", "enum": ["image", "mesh", "audio", "video", "text"]},
                                                       "ready_only": {**B, "description": "default true"}, "commercial_only": B, "detail": B}},
      "annotations": RO, "fn": t_list_models},
     {"name": "get_model", "description": "One model: params (name, type, default, range, choices), presets, input slots, features, licence.",
      "inputSchema": {"type": "object", "properties": {"id": S}, "required": ["id"]}, "annotations": RO, "fn": t_get_model},
-    {"name": "list_tools", "description": "CPU tools (audio.normalize, audio.loop, image.convert, video.trim, ...) that post-process existing assets.",
+    {"name": "list_tools", "description": "CPU tools that post-process existing assets (audio.*, image.convert, video.*, asset.export, mesh.flex_preview), each with its input assets and params. Run with submit_job(tool=...).",
      "inputSchema": {"type": "object", "properties": {}}, "annotations": RO, "fn": t_list_tools},
     {"name": "list_projects", "description": "Projects (asset libraries).", "inputSchema": {"type": "object", "properties": {}}, "annotations": RO, "fn": t_list_projects},
-    {"name": "create_project", "description": "Create a project. id: lowercase letters, digits, - and _.",
-     "inputSchema": {"type": "object", "properties": {"id": S, "title": S, "description": S}, "required": ["id"]}, "fn": t_create_project},
+    {"name": "create_project", "description": "Create a project (id: lowercase letters, digits, - and _), or with update=true change the title / description of an existing one.",
+     "inputSchema": {"type": "object", "properties": {"id": S, "title": S, "description": S, "update": B}, "required": ["id"]}, "fn": t_create_project},
     {"name": "search_assets", "description": "Search a project's assets (newest first). Results include file URLs and local paths.",
      "inputSchema": {"type": "object", "properties": {"project": PROJECT, "q": S, "type": {"type": "string", "description": "image | audio | voice | mesh | video | text (comma list ok)"},
                                                       "tag": S, "model": S, "task": S, "sort": {"type": "string", "enum": ["new", "old", "rating", "name"]}, "limit": I}},
      "annotations": RO, "fn": t_search_assets},
-    {"name": "get_asset", "description": "One asset: prompt, model, params, seed, lineage, info (size / duration / LUFS ...), files with local paths. preview=true also returns the image.",
-     "inputSchema": {"type": "object", "properties": {"id": S, "preview": B}, "required": ["id"]}, "annotations": RO, "fn": t_get_asset},
+    {"name": "get_asset", "description": ("One asset: prompt, model, params, seed, info (size / duration / LUFS ...), files with local paths. Meshes add mesh3d: "
+                                                     "rigged, joints, animation clip names, textured, attachments (skeleton.json, rigged_plain.glb, motion.npz ...). "
+                                                     "lineage=true adds ancestors / derived assets / batch siblings. preview=true also returns the image."),
+     "inputSchema": {"type": "object", "properties": {"id": S, "preview": B, "lineage": B}, "required": ["id"]}, "annotations": RO, "fn": t_get_asset},
     {"name": "submit_job", "description": (
         "Generate assets: run a model on a task (or a CPU tool on existing assets) through the studio's queue. One GPU job runs at a time. "
         "Waits up to wait_s (default 300, max 600) and returns the new assets with local file paths (and image previews). "
-        "Use list_models / get_model first for valid params. seed=-1 is random; the real seed is in the asset. "
+        "Use list_models / get_model first for valid params and input slots (roles); list_tools for CPU tools. seed=-1 is random; the real seed is in the asset. "
+        "3D chain: t2i / rgba -> recenter -> shape -> texture -> rig (inputs=[{asset: mesh}]) -> motion (inputs=[{asset: rigged mesh, role: 'mesh'}], params.prompt); "
+        "or tool 'mesh.flex_preview' on a rigged mesh for test clips. "
         "Cloud models: only set confirm_cost / confirm_upload after the user agreed to the cost / to uploading the inputs."),
      "inputSchema": {"type": "object", "properties": {
          "task": S, "model": {**S, "description": "model id (omit = the task's default)"}, "tool": {**S, "description": "CPU tool id instead of task/model"},
@@ -345,6 +557,37 @@ TOOLS = [
     {"name": "update_asset", "description": "Rename, tag, rate (0-5), favourite or annotate an asset.",
      "inputSchema": {"type": "object", "properties": {"id": S, "name": S, "tags": {"type": "array", "items": S}, "rating": I, "notes": S, "favorite": B}, "required": ["id"]},
      "fn": t_update_asset},
+    {"name": "retry_job", "description": "Run a failed or cancelled job again with the same settings (new job, same queue). Cloud jobs need confirm_cost / confirm_upload again.",
+     "inputSchema": {"type": "object", "properties": {"id": S, "wait_s": I, "preview": B, "confirm_cost": B, "confirm_upload": B}, "required": ["id"]},
+     "annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False}, "fn": t_retry_job},
+    {"name": "delete_asset", "description": "Delete an asset (moved to the project's .trash). Without confirm=true it only explains what would be deleted: ask the user first.",
+     "inputSchema": {"type": "object", "properties": {"id": S, "confirm": {**B, "description": "must be true, after the user agreed"}}, "required": ["id"]},
+     "annotations": {"readOnlyHint": False, "destructiveHint": True, "openWorldHint": False}, "fn": t_delete_asset},
+    {"name": "improve_prompt", "description": (
+        "Turn a rough idea (Thai or English) into a model-ready prompt with variations, using the local prompt LLM (it may load for a few seconds). "
+        "Pass model_id (and task) so the style matches the model you will use, then give the result's `prompt` / `negative` to submit_job. "
+        "list_styles=true lists the prompt styles and their style chips instead."),
+     "inputSchema": {"type": "object", "properties": {"text": S, "model_id": S, "task": S, "target_style": S, "lang": {"type": "string", "enum": ["th", "en"]},
+                                                      "n": {**I, "description": "variations, 0..6 (default 3)"}, "chips": {"type": "array", "items": S},
+                                                      "context": S, "image_asset": {**S, "description": "image asset id to describe / base the prompt on"},
+                                                      "backend": {**S, "description": "default: the local LLM. cli:* / api:* backends send the text off-machine and need confirm_upload"},
+                                                      "confirm_upload": B, "list_styles": B}},
+     "annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False}, "fn": t_improve_prompt},
+    {"name": "save_preset", "description": "Save (or overwrite) a user preset of param values for a model, shown next to the built-in ones in get_model. delete=true + confirm=true removes one.",
+     "inputSchema": {"type": "object", "properties": {"model": S, "name": S, "params": O, "delete": B, "confirm": B}, "required": ["model", "name"]},
+     "annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False}, "fn": t_save_preset},
+    {"name": "export_assets", "description": (
+        "Package assets for delivery as DERIVED files (originals are never modified). One asset with an export preset gives one converted file; several give a zip "
+        "(files + meta.json + attachments such as skeleton.json). preset ids: studio_info(topic=profiles). game_audio={format, folder, sample_rate, channels, normalize_lufs, by_character} "
+        "instead builds an engine-ready sound folder zip with a manifest. Returns url (+ local path)."),
+     "inputSchema": {"type": "object", "properties": {"ids": {"type": "array", "items": S}, "preset": S, "audio": O, "image": O, "zip": {**B, "description": "force a zip for one asset"},
+                                                      "naming": {"type": "string", "enum": ["name", "id"]}, "include_meta": B, "include_attachments": B, "game_audio": O},
+                     "required": ["ids"]},
+     "annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False}, "fn": t_export_assets},
+    {"name": "studio_info", "description": "Studio reference data. topic: " + "; ".join(f"{k} ({v[0]})" for k, v in INFO_TOPICS.items()) + ". Omit topic to list them.",
+     "inputSchema": {"type": "object", "properties": {"topic": {"type": "string", "enum": list(INFO_TOPICS)}, "project": PROJECT, "id": {**S, "description": "flows: a flow id"},
+                                                      "name": {**S, "description": "logs: log name"}, "lines": I}},
+     "annotations": RO, "fn": t_studio_info},
 ]
 BY_NAME = {t["name"]: t for t in TOOLS}
 
@@ -396,8 +639,10 @@ def handle(msg: dict, emit=None, allow_paths=True) -> dict | None:
             "protocolVersion": (msg.get("params") or {}).get("protocolVersion") or PROTOCOL,
             "capabilities": {"tools": {"listChanged": False}}, "serverInfo": {"name": "open-asset-studio", "version": "1.0"},
             "instructions": ("Open Asset Studio makes images, 3D models, sound and video with local open-weight models. "
-                             "Typical flow: list_models(task=...) -> get_model(id) -> submit_job(...) -> use the returned file paths. "
-                             "Check each model's licence before commercial use; many are non-commercial.")}}
+                             "Typical flow: list_models(task=...) -> get_model(id) -> [improve_prompt] -> submit_job(...) -> use the returned file paths; "
+                             "export_assets packages results. 3D: shape -> texture -> rig -> motion (get_asset shows mesh3d: rigged, joints, animation clips). "
+                             "Check each model's licence before commercial use; many are non-commercial. "
+                             "Never delete, spend cloud money or upload files without the user's explicit OK.")}}
     if method == "ping":
         return {"jsonrpc": "2.0", "id": mid, "result": {}}
     if method == "tools/list":

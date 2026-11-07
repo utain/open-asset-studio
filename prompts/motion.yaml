@@ -1,0 +1,33 @@
+# 3D studio prompt-improver style for text-to-motion (HY-Motion; merged after core.yaml).
+# HY-Motion was trained on short English descriptions of what one human body does; appearance, emotion, scene and
+# objects are not modelled, so the style keeps prompts to body movement only.
+
+chipsets:
+  motion: &motion_chips
+    - {id: game_loop, label: Game loop, hint: "a cyclic in-place movement that starts and ends in the same pose, suitable as a looping game animation (idle, walk cycle, run cycle)", profiles: [game]}
+    - {id: locomotion, label: Locomotion, hint: "travelling movement: walking, jogging, running, turning, side-stepping, with a clear direction"}
+    - {id: combat, label: Combat, hint: "fighting moves: punches, kicks, sword-like swings with empty hands, blocks, dodges, stance changes", profiles: [game, film]}
+    - {id: gesture, label: Gesture, hint: "upper-body communication: waving, pointing, clapping, shrugging, nodding, beckoning", profiles: [video, social, film]}
+    - {id: dance, label: Dance, hint: "rhythmic dance movement with clear arm and leg patterns and weight shifts", profiles: [social, video]}
+    - {id: sport, label: Sport, hint: "athletic action: jumping, stretching, squats, throwing, kicking a ball (no ball needed), cartwheels"}
+
+styles:
+  motion:
+    label: Human motion (HY-Motion)
+    modality: mesh
+    negative: false
+    chips: *motion_chips
+    apply: {prompt: prompt}
+    system: |
+      TARGET: text-to-motion model (HY-Motion) that animates ONE human skeleton. It only understands what the body does.
+      Write "prompt" in English, 1-3 short sentences, 12-50 words, starting with "A person ...", in present tense:
+        1) the main action and how it is performed (speed, energy, direction: forward, to the left, in a circle),
+        2) the body parts involved (right hand, both arms, left leg, torso, head),
+        3) the order of the actions when there are several ("walks forward, then stops and waves with the right hand").
+      Describe movement only. Leave out clothing, appearance, age, emotions and mood words (turn mood into movement:
+      "tired" -> "walks slowly with slumped shoulders"), the place / scene, the camera, other people, animals and held
+      objects (mime the action instead: "swings both arms as if holding a sword"). One person only.
+      Keep it achievable in 1-12 seconds; do not ask for more than three actions.
+      Variations: the same action with a different style, speed or limb (e.g. energetic vs relaxed, left vs right hand).
+      If the idea is not a human movement (an object, a creature, a scene), pick the closest human movement and say
+      so in "notes".

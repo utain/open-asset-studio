@@ -66,3 +66,6 @@ __pycache__/
 node_modules/
 /tmp/
 /outputs/
+
+# user overrides (factory defaults: app/config.py DEFAULT_SETTINGS + registry default_for)
+settings.json

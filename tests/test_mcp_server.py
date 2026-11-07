@@ -148,3 +148,229 @@ def test_error_extra_fields_reach_the_client(mcp, monkeypatch):
     monkeypatch.setattr(mcp, "http", boom)
     res = mcp.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "submit_job", "arguments": {"tool": "x"}}})
     assert text(res)["estimate"] == {"usd": 0.4} and "confirm_cost" in text(res)["hint"]
+
+
+# ------------------------------------------------------------------ tools added for the full studio surface
+def call(mod, name, args=None, **kw):
+    res = mod.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": args or {}}}, **kw)["result"]
+    return res, json.loads(res["content"][0]["text"])
+
+
+def fake(mod, monkeypatch, routes):
+    """Replace mod.http with a router: routes maps (METHOD, path) -> value | callable(body, query); records every call."""
+    seen = []
+
+    def fake_http(method, path, body=None, *, query=None, raw=None, ctype="", timeout=60):
+        seen.append((method, path, body, query))
+        r = routes.get((method, path))
+        if r is None:
+            raise mod.StudioError(f"Not found: {method} {path}", status=404)
+        return r(body, query) if callable(r) else r
+
+    monkeypatch.setattr(mod, "http", fake_http)
+    return seen
+
+
+RIGGED = {"id": "r1", "project": "default", "type": "mesh", "name": "knight (rigged)", "main": "mesh.glb", "task": "rig",
+          "files": [{"name": "mesh.glb", "role": "main"}, {"name": "skeleton.json", "role": "attachment"}, {"name": "rigged_plain.glb", "role": "attachment"}],
+          "info": {"vertices": 2628, "faces": 3200}, "worker": {"rigged": True, "joints": 34, "animations": ["flex", "wiggle"]}}
+PLAIN = {"id": "m1", "project": "default", "type": "mesh", "name": "knight", "main": "mesh.glb", "files": [{"name": "mesh.glb", "role": "main"}],
+         "worker": {"textured": True}}
+
+
+def test_tool_count_stays_reasonable_and_names_unique(mcp):
+    names = [t["name"] for t in mcp.TOOLS]
+    assert len(names) == len(set(names)) <= 24
+    assert {"retry_job", "delete_asset", "improve_prompt", "save_preset", "export_assets", "studio_info"} <= set(names)
+    desc = {t["name"]: t["description"] for t in mcp.TOOLS}
+    assert "rig" in desc["list_models"] and "motion" in desc["list_models"] and "mesh.flex_preview" in desc["submit_job"]
+
+
+def test_get_asset_surfaces_3d_info_and_lineage(mcp, monkeypatch):
+    lin = {"ancestors": [{"id": "m1", "type": "mesh", "name": "knight", "task": "texture", "model": "x", "created": "t"}, {"id": "gone", "missing": True}],
+           "children": [], "siblings": []}
+    fake(mcp, monkeypatch, {("GET", "/api/assets/r1"): RIGGED, ("GET", "/api/assets/m1"): PLAIN, ("GET", "/api/assets/r1/lineage"): lin})
+    res, d = call(mcp, "get_asset", {"id": "r1", "lineage": True})
+    m = d["mesh3d"]
+    assert not res["isError"] and m["rigged"] is True and m["joints"] == 34 and m["animations"] == ["flex", "wiggle"]
+    assert set(m["attachments"]) == {"skeleton.json", "rigged_plain.glb"} and "hint" not in m
+    assert d["lineage"]["ancestors"][0] == {"id": "m1", "type": "mesh", "name": "knight", "task": "texture", "model": "x"}
+    assert d["lineage"]["ancestors"][1] == {"id": "gone", "missing": True} and d["lineage"]["children"] == []
+    _, d = call(mcp, "get_asset", {"id": "m1"})
+    assert d["mesh3d"]["rigged"] is False and d["mesh3d"]["textured"] is True and "rig" in d["mesh3d"]["hint"] and "lineage" not in d
+
+
+def test_search_assets_mesh_has_compact_3d_info(mcp, monkeypatch):
+    fake(mcp, monkeypatch, {("GET", "/api/assets"): {"total": 1, "items": [RIGGED]}})
+    _, d = call(mcp, "search_assets", {"type": "mesh"})
+    assert d["assets"][0]["mesh3d"]["animations"] == ["flex", "wiggle"] and "hint" not in d["assets"][0]["mesh3d"]
+
+
+def test_list_tools_describes_params(mcp, monkeypatch):
+    tools = {"mesh.flex_preview": "Animate preview", "audio.normalize": "Normalize", "future.tool": "New"}
+    fake(mcp, monkeypatch, {("GET", "/api/bootstrap"): {"tools": tools}})
+    _, d = call(mcp, "list_tools")
+    by = {t["id"]: t for t in d["tools"]}
+    assert set(by["mesh.flex_preview"]["params"]) == {"clips", "angle"} and "RIGGED" in by["mesh.flex_preview"]["in"]
+    assert "lufs" in by["audio.normalize"]["params"] and "note" in by["future.tool"]
+    for t in mcp.TOOL_PARAMS:                        # every documented tool must exist as a real handler id (checked below)
+        assert "params" in mcp.TOOL_PARAMS[t] and "in" in mcp.TOOL_PARAMS[t]
+
+
+def test_tool_params_table_matches_registered_handlers():
+    from app.jobs import HANDLERS
+    from app.plugins import core_tools, mesh, sound, video  # noqa: F401  (importing registers the handlers)
+
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("mcp_server3", config.STUDIO / "scripts" / "mcp_server.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    registered = {k[5:] for k in HANDLERS if k.startswith("tool:")}
+    assert set(mod.TOOL_PARAMS) == registered
+
+
+def test_delete_asset_needs_explicit_confirm(mcp, monkeypatch):
+    seen = fake(mcp, monkeypatch, {("GET", "/api/assets/m1"): PLAIN, ("GET", "/api/assets/m1/lineage"): {"children": [{"id": "r1"}]},
+                                   ("DELETE", "/api/assets/m1"): {"id": "m1", "deleted": True}})
+    for args in ({"id": "m1"}, {"id": "m1", "confirm": False}, {"id": "m1", "confirm": "yes"}):
+        res, d = call(mcp, "delete_asset", args)
+        assert res["isError"] and d["kind"] == "confirm_delete" and "confirm: true" in d["fix"] and "1 derived" in d["error"]
+    assert not [c for c in seen if c[0] == "DELETE"]
+    res, d = call(mcp, "delete_asset", {"id": "m1", "confirm": True})
+    assert not res["isError"] and d["deleted"] is True and [c for c in seen if c[0] == "DELETE"]
+
+
+def test_retry_job_passes_consent_and_waits(mcp, monkeypatch):
+    done = {"id": "j2", "status": "done", "project": "default", "outputs": ["a1"]}
+    seen = fake(mcp, monkeypatch, {("POST", "/api/jobs/j1/retry"): {"id": "j2", "status": "queued"}, ("GET", "/api/jobs/j2"): done,
+                                   ("GET", "/api/assets"): {"items": [PLAIN]}})
+    res, d = call(mcp, "retry_job", {"id": "j1", "confirm_cost": True})
+    assert not res["isError"] and d["status"] == "done" and d["assets"][0]["id"] == "m1"
+    assert seen[0][2] == {"confirm_cost": True, "confirm_upload": False}
+
+
+def test_improve_prompt(mcp, monkeypatch):
+    seen = fake(mcp, monkeypatch, {("POST", "/api/improve"): {"prompt": "a knight", "negative": "", "variations": []},
+                                   ("GET", "/api/improve/styles"): {"styles": [{"id": "qwen_image", "label": "Q", "modality": "image", "chips": [{"id": "lowpoly", "label": "Low-poly", "hint": "x"}]}]}})
+    _, d = call(mcp, "improve_prompt", {"list_styles": True})
+    assert d["styles"][0]["chips"] == [{"id": "lowpoly", "label": "Low-poly"}]
+    _, d = call(mcp, "improve_prompt", {"text": "knight", "model_id": "qwen-image-2.1", "task": "t2i", "chips": ["lowpoly"], "n": 2})
+    body = seen[-1][2]
+    assert d["prompt"] == "a knight" and body == {"text": "knight", "model_id": "qwen-image-2.1", "task": "t2i", "chips": ["lowpoly"], "n": 2}
+    res, d = call(mcp, "improve_prompt", {})
+    assert res["isError"] and d["kind"] == "input"
+    res, d = call(mcp, "improve_prompt", {"text": "knight", "backend": "api:openrouter/x"})      # off-machine backend: needs consent
+    assert res["isError"] and d["kind"] == "consent" and len(seen) == 2
+    res, _ = call(mcp, "improve_prompt", {"text": "knight", "backend": "api:openrouter/x", "confirm_upload": True})
+    assert not res["isError"] and seen[-1][2]["backend"] == "api:openrouter/x"
+
+
+def test_save_preset_and_confirmed_delete(mcp, monkeypatch):
+    seen = fake(mcp, monkeypatch, {("PUT", "/api/presets/m1"): {"builtin": {}, "user": {"mine": {"steps": 9}}},
+                                   ("DELETE", "/api/presets/m1/mine"): {"builtin": {}, "user": {}}})
+    _, d = call(mcp, "save_preset", {"model": "m1", "name": "mine", "params": {"steps": 9}})
+    assert d["user"]["mine"] == {"steps": 9} and seen[-1][2] == {"name": "mine", "params": {"steps": 9}}
+    assert call(mcp, "save_preset", {"model": "m1", "name": "mine"})[1]["kind"] == "input"
+    res, d = call(mcp, "save_preset", {"model": "m1", "name": "mine", "delete": True})
+    assert res["isError"] and d["kind"] == "confirm_delete" and seen[-1][0] == "PUT"
+    res, d = call(mcp, "save_preset", {"model": "m1", "name": "mine", "delete": True, "confirm": True})
+    assert not res["isError"] and seen[-1][0] == "DELETE"
+
+
+def test_get_model_shows_user_presets(mcp, monkeypatch):
+    fake(mcp, monkeypatch, {("GET", "/api/models/m1"): {"id": "m1", "name": "M1", "tasks": ["t2i"], "status": {"status": "ready"}, "license": {"name": "MIT", "commercial": True},
+                                                       "presets": {"fast": {"steps": 8}}, "user_presets": {"mine": {"steps": 9}}, "params": []}})
+    _, d = call(mcp, "get_model", {"id": "m1"})
+    assert d["presets"] == {"fast": {"steps": 8}} and d["user_presets"] == {"mine": {"steps": 9}}
+
+
+def test_export_assets_modes(mcp, monkeypatch, tmp_path):
+    (tmp_path / "exports").mkdir()
+    (tmp_path / "exports" / "export-20260101-000000-abcdef.zip").write_bytes(b"z")
+    (tmp_path / "exports" / "render-0123456789ab").mkdir()
+    (tmp_path / "exports" / "render-0123456789ab" / "boom.mp3").write_bytes(b"m")
+    seen = fake(mcp, monkeypatch, {
+        ("POST", "/api/export"): {"url": "/api/export/export-20260101-000000-abcdef.zip", "name": "export-20260101-000000-abcdef.zip", "bytes": 1, "count": 2},
+        ("POST", "/api/assets/a1/render"): {"url": "/api/export/render/0123456789ab/boom.mp3", "name": "boom.mp3", "bytes": 1, "report": {}, "asset": "a1"},
+        ("POST", "/api/x/sound/export"): {"url": "/api/x/sound/export/sound-export-20260101-000000-abcdef.zip", "name": "sound-export-20260101-000000-abcdef.zip", "count": 2},
+        ("GET", "/api/assets/m1"): PLAIN})
+    _, d = call(mcp, "export_assets", {"ids": ["a1", "a2"], "preset": "podcast"})
+    assert d["url"] == mcp.API + "/api/export/export-20260101-000000-abcdef.zip" and d["path"].endswith("export-20260101-000000-abcdef.zip")
+    assert seen[-1][2]["export"] == {"preset": "podcast"} and seen[-1][2]["include_attachments"] is True
+    _, d = call(mcp, "export_assets", {"ids": ["a1"], "preset": "podcast"})
+    assert seen[-1][1] == "/api/assets/a1/render" and seen[-1][2] == {"export": {"preset": "podcast"}}
+    assert d["path"] == str(tmp_path / "exports" / "render-0123456789ab" / "boom.mp3") and d["report"] == {}
+    _, d = call(mcp, "export_assets", {"ids": ["a1", "a2"], "game_audio": {"format": "ogg", "folder": "sfx"}})
+    assert seen[-1][1] == "/api/x/sound/export" and seen[-1][2] == {"ids": ["a1", "a2"], "format": "ogg", "folder": "sfx"} and "path" not in d
+    _, d = call(mcp, "export_assets", {"ids": ["m1"]})                       # one asset, no preset: just its files
+    assert d["id"] == "m1" and d["files"][0]["url"].endswith("/files/default/m1/mesh.glb")
+    assert call(mcp, "export_assets", {"ids": []})[0]["isError"]
+
+
+def test_studio_info_topics(mcp, monkeypatch):
+    seen = fake(mcp, monkeypatch, {
+        ("GET", "/api/profiles"): {"current": "game", "default_export": "original", "license": {"commercial_only": False},
+                                   "profiles": [{"id": "game", "label": "Game", "summary": "s", "export": "original", "export_presets": ["original"], "hints": {"x": 1}}],
+                                   "export_presets": [{"id": "original", "label": "Original files"}]},
+        ("GET", "/api/x/video/formats"): {"aspects": {"16:9": [1920, 1080]}},
+        ("GET", "/api/x/sound/voices"): {"total": 0, "items": []},
+        ("GET", "/api/x/media_audio/dub/options"): {"tts_models": []},
+        ("GET", "/api/x/pipelines/capabilities"): {"tasks": {"t2i": {"ready": ["m1"]}}},
+        ("GET", "/api/x/pipelines/flows"): {"flows": [{"id": "f1"}]},
+        ("GET", "/api/x/pipelines/flows/f1"): {"id": "f1", "state": {}},
+        ("GET", "/api/x/providers"): {"allow_cloud": False, "budget_usd": 20, "confirm_usd": 0.5, "spend": {"total_usd": 0},
+                                      "providers": [{"id": "fal", "label": "fal.ai", "key": {"set": False, "last4": None}, "modalities": ["image"], "models": 2}],
+                                      "models": [{"id": "fal-x", "name": "X", "tasks": ["t2i"], "status": {"status": "cloud_disabled"}, "example_usd": 0.04}]},
+        ("GET", "/api/improve/status"): {"state": "stopped"}, ("GET", "/api/x/image/comfyui"): {"reachable": False}, ("GET", "/api/downloads"): {"downloads": []},
+        ("GET", "/api/system/logs"): {"name": "studio", "lines": ["a"], "available": ["studio"], "bytes": 1}})
+    _, d = call(mcp, "studio_info")
+    assert {"profiles", "voices", "video_formats", "dub_options", "cloud", "flows", "logs"} <= set(d["topics"])
+    _, d = call(mcp, "studio_info", {"topic": "profiles"})
+    assert d["current"] == "game" and d["export_presets"][0]["id"] == "original" and "hints" not in d["profiles"][0]
+    assert call(mcp, "studio_info", {"topic": "video_formats"})[1]["aspects"]["16:9"] == [1920, 1080]
+    assert call(mcp, "studio_info", {"topic": "voices", "project": "p"})[1]["total"] == 0 and seen[-1][3] == {"project": "p"}
+    assert call(mcp, "studio_info", {"topic": "dub_options"})[1] == {"tts_models": []}
+    assert call(mcp, "studio_info", {"topic": "ready_tasks"})[1]["tasks"]["t2i"]["ready"] == ["m1"]
+    d = call(mcp, "studio_info", {"topic": "flows"})[1]
+    assert d["flows"] == [{"id": "f1"}] and "t2i" in d["ready_tasks"]
+    assert call(mcp, "studio_info", {"topic": "flows", "id": "f1"})[1]["id"] == "f1"
+    d = call(mcp, "studio_info", {"topic": "cloud"})[1]
+    assert d["providers"][0]["key_set"] is False and d["models"][0]["status"] == "cloud_disabled" and "key" not in d["providers"][0]
+    assert call(mcp, "studio_info", {"topic": "llm"})[1]["state"] == "stopped"
+    assert call(mcp, "studio_info", {"topic": "comfyui"})[1]["reachable"] is False
+    assert call(mcp, "studio_info", {"topic": "downloads"})[1] == {"downloads": []}
+    call(mcp, "studio_info", {"topic": "logs", "lines": 5000})
+    assert seen[-1][3]["lines"] == 300
+
+
+def test_create_project_update_mode(mcp, monkeypatch):
+    seen = fake(mcp, monkeypatch, {("PATCH", "/api/projects/p1"): {"id": "p1", "title": "New"}, ("POST", "/api/projects"): {"id": "p1"}})
+    _, d = call(mcp, "create_project", {"id": "p1", "title": "New", "update": True})
+    assert d["title"] == "New" and seen[-1][:3] == ("PATCH", "/api/projects/p1", {"title": "New"})
+    call(mcp, "create_project", {"id": "p1"})
+    assert seen[-1][0] == "POST"
+
+
+def test_assistant_mcp_stays_read_propose_only(monkeypatch):
+    """workers/studio_mcp.py: the Assistant's server keeps its 4 tools (no submit / delete), knows rig + motion, and its get_asset shows 3D info."""
+    import sys
+    sys.path.insert(0, str(config.STUDIO / "workers"))
+    try:
+        import studio_mcp
+    finally:
+        sys.path.pop(0)
+    from app.plugins import assistant
+    assert {t["name"] for t in studio_mcp.TOOLS} == {"list_models", "search_assets", "get_asset", "propose_plan"}
+    step = studio_mcp.TOOLS[3]["inputSchema"]["properties"]["steps"]["items"]["properties"]
+    assert "rig" in step["task"]["description"] and "motion" in step["task"]["description"]
+
+    class Store:
+        def get(self, aid):
+            return RIGGED
+
+    class Core:
+        assets = Store()
+
+    monkeypatch.setattr(assistant, "CORE", Core())
+    d = assistant.tool_get_asset("default", {"id": "r1"})
+    assert d["mesh3d"] == {"rigged": True, "joints": 34, "animations": ["flex", "wiggle"], "textured": None}

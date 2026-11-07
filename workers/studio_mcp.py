@@ -28,7 +28,7 @@ STEP = {
     "properties": {
         "id": {"type": "string", "description": "short step id, e.g. s1, props_img, amb"},
         "title": {"type": "string"},
-        "task": {"type": "string", "description": "registry task id (t2i, rgba, shape, texture, sfx, ambience, music, tts, ...)"},
+        "task": {"type": "string", "description": "registry task id (t2i, rgba, shape, texture, rig, motion, sfx, ambience, music, tts, ...; list_models shows them all)"},
         "tool": {"type": "string", "description": "instead of task+model: a CPU tool id such as audio.loop or audio.normalize"},
         "model": {"type": "string", "description": "model id from list_models (omit = the task's default)"},
         "params": {"type": "object", "description": "model params by name (prompt, negative, seconds, batch, seed, ...)"},
@@ -43,12 +43,12 @@ STEP = {
 }
 TOOLS = [
     {"name": "list_models", "description": "List the studio's generation models with status (ready or not), est. time, cloud cost, licence (commercial or not), tasks and parameters. Filter by task or modality.",
-     "inputSchema": {"type": "object", "properties": {"task": {"type": "string"}, "modality": {"type": "string", "enum": ["image", "mesh", "audio", "text"]},
+     "inputSchema": {"type": "object", "properties": {"task": {"type": "string"}, "modality": {"type": "string", "enum": ["image", "mesh", "audio", "video", "text"]},
                                                       "ready_only": {"type": "boolean"}}}},
     {"name": "search_assets", "description": "List or search existing assets of the current project (newest first).",
-     "inputSchema": {"type": "object", "properties": {"q": {"type": "string"}, "type": {"type": "string", "enum": ["image", "mesh", "audio", "voice"]},
+     "inputSchema": {"type": "object", "properties": {"q": {"type": "string"}, "type": {"type": "string", "enum": ["image", "mesh", "audio", "voice", "video"]},
                                                       "tag": {"type": "string"}, "limit": {"type": "integer"}}}},
-    {"name": "get_asset", "description": "Read one asset's metadata (prompt, model, params, lineage, tags, rating).",
+    {"name": "get_asset", "description": "Read one asset's metadata (prompt, model, params, parents, tags, rating; meshes also mesh3d: rigged, joints, animation clip names).",
      "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
     {"name": "propose_plan", "description": "Propose a plan to the user. It is shown as an editable card; the USER approves and runs it. Returns validation errors to fix (call again with a corrected plan).",
      "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}, "summary": {"type": "string"},

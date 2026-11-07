@@ -101,3 +101,6 @@ section.page[data-studio="image"] .studio-panel, section.page[data-studio="3d"] 
 .i3d-anim[hidden] { display: none; }
 .i3d-animsel { height: 28px; width: auto; max-width: 132px; padding: 0 24px 0 9px; font-size: 12.5px; border-radius: 7px; }
 .i3d-animname { font-size: 12.5px; }
+
+/* Bones toggle (only for a GLB with a skeleton): .btn sets display, which would override the hidden attribute */
+.i3d-vbar [hidden] { display: none !important; }

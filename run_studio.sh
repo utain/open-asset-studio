@@ -11,7 +11,14 @@ export HF_HUB_DISABLE_XET=1
 export PYTHONUNBUFFERED=1
 export PYTHONNOUSERSITE=1
 export STUDIO_PORT="${STUDIO_PORT:-7860}"
-export LLAMA_SERVER="${LLAMA_SERVER:-$(command -v llama-server || echo "$HOME/llama.cpp/build/bin/llama-server")}"
+if [ -z "${LLAMA_SERVER:-}" ]; then   # PATH first, then the usual llama.cpp build folders
+  LLAMA_SERVER="$(command -v llama-server || true)"
+  for c in "$HOME/llama.cpp/build/bin/llama-server" "$HOME/Workspace/llama.cpp/build/bin/llama-server"; do
+    [ -n "$LLAMA_SERVER" ] || { [ -x "$c" ] && LLAMA_SERVER="$c"; }
+  done
+  LLAMA_SERVER="${LLAMA_SERVER:-$HOME/llama.cpp/build/bin/llama-server}"
+fi
+export LLAMA_SERVER
 PY=envs/core/bin/python
 if [ ! -x "$PY" ]; then
   echo "envs/core is missing. Create it with:" >&2
