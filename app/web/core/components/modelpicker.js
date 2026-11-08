@@ -4,6 +4,7 @@ import { store, bus, modelsFor, prefs, isLicenseBlocked, isOverridden } from '..
 import { h, ic, btn, popover, closePopover, statusBadge, licenseBadge, copyText, MOD_ICON } from '../ui.js';
 import { cloudBadge, priceBadge, priceLabel, isCloud } from '../cost.js';
 import { navigate } from '../studio.js';
+import { uiInfo } from '../uiinfo.js';
 
 const CLOUD_CODES = ['missing_key', 'cloud_disabled'];
 function cloudFix(m) {
@@ -40,7 +41,7 @@ export class ModelPicker {
     this.task = task; this.onChange = onChange; this.includeTest = includeTest; this.label = label;
     this.el = h('div.field');
     this.btnEl = h('button.mp-btn', { type: 'button', 'aria-haspopup': 'listbox', on: { click: () => this.open() } });
-    this.el.append(h('div.field-label', label), this.btnEl);
+    this.el.append(h('div.field-label', label, uiInfo('model')), this.btnEl);
     this.value = value || this._initial();
     this._render();
     this._off = bus.on('models', () => { if (!this.model) this.value = this._initial(); this._render(); });

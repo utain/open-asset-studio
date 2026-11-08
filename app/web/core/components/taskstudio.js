@@ -15,6 +15,7 @@ import { openAsset, exportAssets } from './drawer.js';
 import { compare } from './compare.js';
 import { jobCard } from './jobs.js';
 import { costSpan } from '../cost.js';
+import { uiInfo } from '../uiinfo.js';
 
 /**
  * new TaskStudio({
@@ -89,7 +90,7 @@ export class TaskStudio {
     for (const s of Object.values(this.slots)) s.destroy();
     this.slots = {};
     for (const inp of t.inputs || []) {
-      const slot = new AssetSlot({ label: inp.label, types: inp.types, multiple: inp.multiple, max: inp.max || 10, role: inp.role || 'input', hint: inp.hint, onChange: () => this._eta() });
+      const slot = new AssetSlot({ label: inp.label, types: inp.types, multiple: inp.multiple, max: inp.max || 10, role: inp.role || 'input', hint: inp.hint, task: t.id, info: inp.info, onChange: () => this._eta() });
       this.slots[inp.key || inp.role || 'input'] = slot;
       this.panelBody.append(slot.el);
     }
@@ -100,7 +101,7 @@ export class TaskStudio {
       this.panelBody.append(this.prompt.el);
     }
     this.form.exclude = new Set(t.exclude || []);
-    this.panelBody.append(h('div.field', h('div.field-label', ic('settings-2', 14), 'Settings')), this.form.el);
+    this.panelBody.append(h('div.field', h('div.field-label', ic('settings-2', 14), 'Settings', uiInfo('settings'))), this.form.el);
     const extra = this.o.extraPanel?.(this, t);
     if (extra) this.panelBody.append(extra);
     this._onModel(m, true);

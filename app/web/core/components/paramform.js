@@ -4,7 +4,10 @@
 import { api } from '../api.js';
 import { prefs, bus, profileAspect, getProfile } from '../store.js';
 import { h, ic, seg, toggle, btn, menu, promptDialog, toast, toastError, confirmDialog } from '../ui.js';
+import { infoBtn, paramSpec } from './infotip.js';
+import { uiInfo } from '../uiinfo.js';
 
+let fieldSeq = 0;
 const BUILTIN = ['fast', 'balanced', 'quality'];
 const choiceVal = c => (typeof c === 'object' ? c.value : c);
 const choiceLab = c => (typeof c === 'object' ? c.label : String(c));
@@ -125,7 +128,7 @@ export class ParamForm {
       bar.append(more);
     }
     this.presetEl = bar;
-    return h('div.field', h('div.field-label', ic('sliders-horizontal', 14), 'Presets'), bar);
+    return h('div.field', h('div.field-label', ic('sliders-horizontal', 14), 'Presets', uiInfo('presets')), bar);
   }
   _presetMenu(anchor, only) {
     const user = Object.keys(this.userPresets || {});
@@ -142,10 +145,19 @@ export class ParamForm {
       } })),
     ]);
   }
+  /** One field. The (i) button sits right after the label; inside a <label> it is made not the labelled control (for=id). */
   _field(p) {
+    const el = this._fieldBody(p, infoBtn(paramSpec(p, this.task)));
+    if (el.tagName === 'LABEL' && el.querySelector('.tip-info')) {
+      const c = el.querySelector('input, select, textarea');
+      if (c) { c.id ||= `pf-${++fieldSeq}`; el.htmlFor = c.id; }
+    }
+    return el;
+  }
+  _fieldBody(p, info) {
     const v = this.vals[p.name];
     const set = nv => this._set(p.name, nv);
-    const label = h('span.field-label', p.label || p.name);
+    const label = h('span.field-label', p.label || p.name, info);
     const help = p.help ? h('span.field-help', p.help) : null;
     if (this.renderers[p.type]) return h('div.field', label, this.renderers[p.type](p, v, set, this), help);
     switch (p.type) {
@@ -182,7 +194,7 @@ export class ParamForm {
         return h('label.field', label, s, help);
       }
       case 'bool':
-        return h('div.field', h('div.row', h('span.field-label.grow', p.label || p.name), toggle(v, nv => set(nv), p.label)), help);
+        return h('div.field', h('div.row', h('span.field-label.grow', p.label || p.name, info), toggle(v, nv => set(nv), p.label)), help);
       case 'textarea': case 'lyrics': {
         const t = h('textarea.textarea', { value: v ?? '', rows: p.type === 'lyrics' ? 8 : 3, placeholder: p.placeholder || '', style: p.type === 'lyrics' ? { fontFamily: 'var(--mono)', fontSize: '12.5px' } : null,
           on: { input: e => { this.vals[p.name] = e.target.value; this.mem[p.name] = e.target.value; }, change: e => set(e.target.value) } });

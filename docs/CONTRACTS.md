@@ -112,6 +112,7 @@ the user switches model):
 | `type` | `int`, `float`, `seed`, `choice`, `bool`, `text`, `textarea`, `lyrics`, `asset`, `assets` (asset types are placeholders: studios render inputs with `AssetSlot`) |
 | `label`, `help`, `unit`, `placeholder` | UI text |
 | `default`, `min`, `max`, `step`, `choices` (values or `{value, label}`), `max_length` | validation; the core clips numbers and rejects bad choices (`registry.validate_params`) |
+| `info` | optional beginner explanation (1-3 sentences) shown in the (i) balloon next to the field. Wins over `app/param_info.py`; `GET /api/models` always returns the key (a string, "" when nothing is known), see below |
 | `group` | `basic` (default) or `advanced` (collapsed) |
 | `tasks` | only show/send this field for these tasks |
 | `show_if` | `{other_param: value}` |
@@ -135,6 +136,12 @@ px; worker helper `size_from_aspect`), `steps`, `guidance`, `cfg_scale`, `true_c
 The probe result is cached in `data/probe_cache.json` and is invalidated when the venv's `pyvenv.cfg` or the
 worker script changes. Defaults: `GET /api/models` -> `defaults: {task: model}`; set with
 `PUT /api/settings/defaults {task, model|null}` (stored in `settings.json`).
+
+**Param `info`** (additive, `Registry.public`): every param in `GET /api/models` / `GET /api/models/{id}` carries `info`, the per-model
+`info:` of the YAML entry if it has one, else `app.param_info.param_info(name, task)` (task-specific text first, then the generic one, "" if
+unknown; the module is imported lazily and a missing or broken module just gives ""). When a text differs for some task of the model, the
+param also has `info_by_task: {task: text}` and the UI picks the form's current task first, then `info`, then `help`. Stored registry
+entries (and what workers receive) are not modified.
 
 API: `GET /api/models?task=&modality=&include_test=` -> `{models, tasks, defaults, backends, errors}` ·
 `GET /api/models/{id}` (+ `user_presets`) · `POST /api/models/refresh` · `POST /api/models/probe {backend}` ·
@@ -583,6 +590,7 @@ Actions used today: `prompt`, `regenerate` (core); stubs declare `edit`, `extrac
 | `S.loadModelViewer()` | lazy-load the vendored `<model-viewer>` element |
 | `S.api.*`, `S.fileUrl(asset, name)`, `S.thumbUrl`, `S.waveform` | REST client (`ApiError {message, status, kind, fix}`) |
 | `S.store`, `S.bus`, `S.prefs`, `S.modelsFor(task)`, `S.promptStyleOf(model, task)`, `S.waitJob(id)` | state (project, models, tasks, defaults, jobs, memory, llm), events, localStorage prefs |
+| `S.infoBtn({title, text, facts: [[label, value, mono?]]})`, `S.uiInfo(key, {title?, facts?})`, `S.slotInfo(task, slot)`, `S.UI_INFO` | the (i) button with a beginner balloon (`components/infotip.js`; hover after 250 ms, click pins, Esc / outside click closes, one balloon at a time; `null` when there is no text). `ParamForm` adds one after every param label from `info_by_task[task]` / `info` / `help` plus Default / Range or Options / Key facts. Texts of fixed controls (prompt box, model picker, input slots, export dialog, Providers, Models page, 3D viewer and rig editor) are in `core/uiinfo.js` (`UI_INFO`); `AssetSlot` takes `info` (string / spec / false) and `task`. Do not put the button inside a `<label>` that wraps an input unless the label has `for=` (the button is labelable) |
 | `S.h(sel, attrs, ...children)`, `S.ic(name)`, `S.btn(label, {icon, kind, size, onClick})`, `S.toast`, `S.toastError`, `S.modal`, `S.confirmDialog`, `S.promptDialog`, `S.menu`, `S.popover`, `S.seg`, `S.toggle`, `S.stars`, `S.progressBar`, `S.empty`, `S.statusBadge`, `S.licenseBadge`, `S.fmt*` | DOM + UI kit. `append/replaceChildren` ignore `null`, so `cond ? el : null` is fine. Icons: `web/core/icons.js` (`ICONS` lists names) |
 
 Styling: use the classes and tokens in `web/app.css` (`.btn .btn-primary .btn-sm .chip .badge.ok|warn|err .card
@@ -1016,3 +1024,9 @@ when it takes effect, scope, the settings key).
   image / video / sound art-direction context stored per project, `models.js` star writes the project default, `shell.js` override
   dot, `system.js` quick card links to the page, new `studios/settings.js`. Not done: per-project cloud budget, `assets.tags`,
   seed policy. No new Python dependencies.
+- (i) info balloons everywhere (no behaviour change for existing callers): `app/registry.py` `Registry.public` adds `info` (+ optional `info_by_task`) to
+  every param (`_params_with_info`; lazy guarded import of `app/param_info.py`, re-looked-up on `reload()`), optional `info:` per param in the registry
+  schema (section 1), the public MCP `get_model` passes `info` through. Web: the settings balloon moved to `web/core/components/infotip.js`
+  (`S.infoBtn`, classes `.tip-info` / `.tip-bal`, balloons now sit above modals), `S.uiInfo` / `S.UI_INFO` (`web/core/uiinfo.js`), (i) in `paramform.js`,
+  `promptbox.js`, `modelpicker.js`, `assetpicker.js` (`task` / `info` options), `taskstudio.js`, `exportdialog.js`, Providers, Models and the 3D viewer /
+  rig editor. Test: `tests/test_param_info_api.py`.

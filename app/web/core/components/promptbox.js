@@ -5,6 +5,7 @@ import { api } from '../api.js';
 import { store, bus, promptStyleOf, prefs } from '../store.js';
 import { h, ic, btn, toastError, isThai, copyText, seg } from '../ui.js';
 import { backendPicker, generatedBy } from './writer.js';
+import { uiInfo } from '../uiinfo.js';
 
 /** Order a style's chips for the active use-case profile (chips carry `profiles: [...]` in prompts/*.yaml): chips for
  *  this profile first, untagged chips next, chips tagged only for other profiles last. `general` keeps the file order;
@@ -38,14 +39,14 @@ export class PromptBox {
     this.impBtn = h('button.btn.btn-sm.btn-improve', { type: 'button', title: 'Improve this prompt for the selected model (local LLM by default; API / CLI backends in the panel)', on: { click: () => this.togglePanel() } }, ic('sparkles', 15), 'Improve');
     this.negWrap = h('div.hidden');
     this.neg = h('input.input.input-sm', { placeholder: 'Negative prompt (what to avoid)', 'aria-label': 'Negative prompt', on: { input: () => o.onChange?.(this.value) } });
-    this.negWrap.append(h('label.field', h('span.field-label', ic('ban', 13), 'Negative'), this.neg));
+    this.negWrap.append(h('div.field', h('span.field-label', ic('ban', 13), 'Negative', uiInfo('negative')), this.neg));
     this.panel = h('div.imp.hidden');
     this.el = h('div.pb',
-      o.label ? h('div.field-label', o.label, h('span.spacer'), h('span.dim', { style: { fontWeight: 400, fontSize: '11.5px' } }, '⌘/Ctrl + Enter to generate')) : null,
-      h('div.pb-box', this.ta, h('div.pb-tools', this.thai, this.cnt, h('span.spacer'),
+      o.label ? h('div.field-label', o.label, uiInfo('prompt', { title: o.label }), h('span.spacer'), h('span.dim', { style: { fontWeight: 400, fontSize: '11.5px' } }, '⌘/Ctrl + Enter to generate')) : null,
+      h('div.pb-box', this.ta, h('div.pb-tools', this.thai, this.cnt, o.label ? null : uiInfo('prompt'), h('span.spacer'),
         btn('', { icon: 'copy', size: 'sm', kind: 'ghost', title: 'Copy prompt', onClick: () => this.value && copyText(this.value) }),
         btn('', { icon: 'eraser', size: 'sm', kind: 'ghost', title: 'Clear', onClick: () => { this.set(''); this.ta.focus(); } }),
-        this.impBtn)),
+        uiInfo('improve'), this.impBtn)),
       this.panel, this.negWrap);
     this.setModel(this.model, this.task);
     this._count();
@@ -102,10 +103,10 @@ export class PromptBox {
     if (state === 'busy') go.querySelector('.ic')?.classList.add('spin');
     const img = this.o.imageAsset?.();
     if (!this.bpick) this.bpick = backendPicker({ purpose: 'improve', value: this.backend, small: true, label: 'Improve with', onChange: v => { this.backend = v; prefs.set('improve.backend', v); } });
-    p.append(chipsEl.childElementCount ? chipsEl : null,
-      h('div.row.wrap', h('span.field-label', 'Variations'), seg([0, 2, 3, 4].map(v => ({ value: v, label: String(v) })), this.n, v => { this.n = v; prefs.set('improve.n', v); }),
+    p.append(chipsEl.childElementCount ? h('div.field-label', 'Style hints', uiInfo('improve_chips')) : null, chipsEl.childElementCount ? chipsEl : null,
+      h('div.row.wrap', h('span.field-label', 'Variations', uiInfo('improve_n')), seg([0, 2, 3, 4].map(v => ({ value: v, label: String(v) })), this.n, v => { this.n = v; prefs.set('improve.n', v); }),
         img ? h('span.badge.info', ic('image', 12), 'uses the input image') : null, h('span.spacer'), go),
-      h('div.imp-backend', h('span.field-label.nowrap', ic('bot', 13), 'With'), this.bpick));
+      h('div.imp-backend', h('span.field-label.nowrap', ic('bot', 13), 'With', uiInfo('improve_with')), this.bpick));
     if (state === 'busy') p.append(h('div.imp-notes', h('span', ic('loader', 14, 'spin'), ' '), this.backend && this.backend !== 'local' ? 'Writing… (external backend, 5-30 s)' : llm?.state === 'ready' || llm?.state === 'external' ? 'Writing…' : 'Loading the prompt model (5-20 s the first time)…'));
     if (state?.error) p.append(h('div.imp-notes', { style: { color: 'var(--err)' } }, state.error, state.fix ? h('div.dim', state.fix) : null));
     if (!result) return;

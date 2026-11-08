@@ -27,6 +27,29 @@ STATUSES = ("ready", "missing_key", "cloud_disabled", "missing_weights", "missin
 PARAM_TYPES = ("int", "float", "seed", "choice", "bool", "text", "textarea", "size", "asset", "assets", "lyrics")
 
 
+_PARAM_INFO = None      # None = not looked up yet, False = app/param_info.py missing or broken, else its param_info()
+
+
+def _param_info_fn():
+    """`app.param_info.param_info(key, task)` if that module exists (imported lazily, cached until the next reload)."""
+    global _PARAM_INFO
+    if _PARAM_INFO is None:
+        try:
+            from .param_info import param_info
+            _PARAM_INFO = param_info
+        except Exception:  # noqa: BLE001 - ImportError, or a broken module: the (i) text is optional
+            _PARAM_INFO = False
+    return _PARAM_INFO or None
+
+
+def _safe_info(fn, key: str, task: str | None) -> str:
+    try:
+        s = fn(key, task)
+    except Exception:  # noqa: BLE001
+        return ""
+    return s.strip() if isinstance(s, str) else ""
+
+
 def _expand(p: str | None, base: Path = config.STUDIO) -> Path | None:
     if not p:
         return None
@@ -65,6 +88,8 @@ class Registry:
         return files
 
     def reload(self):
+        global _PARAM_INFO
+        _PARAM_INFO = None      # Re-check on the Models page also looks for app/param_info.py again
         backends, models, tasks, errors = {}, {}, {}, []
         for f in self._files():
             try:
@@ -362,8 +387,37 @@ class Registry:
             return ps.get(task) if task in ps else next(iter(ps.values()), None)
         return ps
 
+    def _params_with_info(self, m: dict) -> list[dict]:
+        """Params for the API with a beginner `info` text (the (i) balloons): the param's own `info:` in the YAML wins, else
+        `app.param_info.param_info(name, task)`. A text that differs for one of the model's tasks goes to `info_by_task`.
+        A missing or broken `param_info` module only means `info` is ""; the stored params are never modified."""
+        fn = _param_info_fn()
+        out = []
+        for p in m.get("params") or []:
+            if not isinstance(p, dict):
+                out.append(p)
+                continue
+            q, name = dict(p), p.get("name")
+            own = p.get("info") if isinstance(p.get("info"), str) else ""
+            info, by_task = own.strip(), {}
+            if not info and fn and name:
+                generic = _safe_info(fn, name, None)
+                for t in p.get("tasks") or m.get("tasks") or []:
+                    s = _safe_info(fn, name, t)
+                    if s and s != generic:
+                        by_task[t] = s
+                info = generic or next(iter(by_task.values()), "")
+                by_task = {t: s for t, s in by_task.items() if s != info}
+            q["info"] = info
+            if by_task:
+                q["info_by_task"] = by_task
+            out.append(q)
+        return out
+
     def public(self, m: dict) -> dict:
         out = {k: v for k, v in m.items() if not k.startswith("_")}
+        if out.get("params"):
+            out["params"] = self._params_with_info(m)
         out["status"] = self.status.get(m["id"], {"status": "broken", "reason": "not computed"})
         b = self.backends.get(m.get("backend", ""), {})
         out["device"] = m.get("device") or b.get("device", "gpu")

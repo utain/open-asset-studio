@@ -618,7 +618,7 @@ class SoundStudio {
     const keep = this._slotTask === task ? new Map(this.slots.map(x => [x.def.role, x.slot.ids])) : new Map();
     this.slots.forEach(x => x.slot.destroy()); this.slots = [];
     for (const def of slotDefsFor(task, m)) {
-      const slot = new S.AssetSlot({ label: def.label + (def.required ? '' : ' (optional)'), types: def.types, role: def.role, hint: def.hint || '', onChange: ids => this._onSlot(def, slot, ids) });
+      const slot = new S.AssetSlot({ label: def.label + (def.required ? '' : ' (optional)'), types: def.types, role: def.role, hint: def.hint || '', task, info: def.info, onChange: ids => this._onSlot(def, slot, ids) });
       if (def.required) slot.el.querySelector('.field-label')?.append(h('span', { style: { color: 'var(--err)' }, title: 'Required' }, ' *'));
       this.slots.push({ def, slot });
       if (keep.get(def.role)?.length) slot.set(keep.get(def.role));

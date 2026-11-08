@@ -66,7 +66,7 @@ export default S.defineStudio({
       } });
       return h('div.prov-top',
         h('section.card.card-pad.col', { style: { gap: '10px' } },
-          h('div.prov-switch', sw, h('div.grow', h('div.big', D.allow_cloud ? 'Cloud models allowed' : 'Cloud models off'),
+          h('div.prov-switch', sw, h('div.grow', h('div.big', D.allow_cloud ? 'Cloud models allowed' : 'Cloud models off', S.uiInfo('cloud_allow')),
             h('div.dim', { style: { fontSize: '12.5px' } }, D.allow_cloud ? 'Jobs on cloud models may cost money and send prompts (and inputs you pick) to the provider.' : 'Everything runs locally. Cloud models show “Cloud off” and their jobs are refused.'))),
           D.mock ? h('div.prov-off', ic('flask-conical', 14), h('span', 'Test mode: STUDIO_CLOUD_MOCK points every provider at a local mock server.')) : null),
         h('section.card.card-pad.col', { style: { gap: '10px' } },
@@ -74,15 +74,15 @@ export default S.defineStudio({
             h('div.stat', { style: { textAlign: 'right' } }, h('b', sp.budget_usd ? S.fmtUsd(sp.budget_usd) : '∞'), h('span', 'monthly budget'))),
           h('div.budget-bar', h(`i${frac >= 1 ? '.over' : frac > 0.8 ? '.near' : ''}`, { style: { width: `${frac * 100}%` } })),
           h('div.prov-limits',
-            h('label.field', h('span.field-label', 'Monthly budget ($, 0 = none)'), budget),
-            h('label.field', h('span.field-label', 'Ask to confirm above ($)'), confirm), save)));
+            h('div.field', h('span.field-label', 'Monthly budget ($, 0 = none)', S.uiInfo('cloud_budget')), budget),
+            h('div.field', h('span.field-label', 'Ask to confirm above ($)', S.uiInfo('cloud_confirm')), confirm), save)));
     }
 
     // ---------------------------------------------------------------- provider cards
     function keyDialog(p) {
       const inp = h('input.input', { type: 'password', autocomplete: 'off', spellcheck: false, placeholder: p.key.env_names?.[0] ? `paste the key (or set ${p.key.env_names[0]})` : 'paste the key' });
       const md = S.modal({ title: `${p.key.set ? 'Replace' : 'Add'} ${p.label} key`, icon: 'key', width: 460,
-        body: h('div.col', { style: { gap: '10px' } }, inp,
+        body: h('div.col', { style: { gap: '10px' } }, h('div.field-label', 'API key', S.uiInfo('api_key')), inp,
           h('p.dim', { style: { margin: 0, fontSize: '12.5px' } }, 'Stored in data/secrets.json (mode 600) on this machine. The studio never sends it back to a browser; it is only used for calls to ', h('b', p.label), '.'),
           p.keys_url ? h('a', { href: p.keys_url, target: '_blank', rel: 'noopener' }, ic('external-link', 12), ' Get a key') : null),
         foot: [btn('Cancel', { kind: 'ghost', onClick: () => md.close() }), btn('Save key', { kind: 'primary', icon: 'check', onClick: save })] });
@@ -119,7 +119,7 @@ export default S.defineStudio({
             if (!(await S.confirmDialog(`Delete the saved ${p.label} key?`, { ok: 'Delete', danger: true, title: 'Delete key' }))) return;
             try { await api.del(`/api/x/providers/keys/${encodeURIComponent(p.id)}`); tests.delete(p.id); await S.loadModels(); load(); } catch (e) { S.toastError(e); }
           } }) : null,
-          btn('Test', { size: 'sm', icon: 'flask-conical', title: p.test, disabled: !p.key.set, onClick: () => test(p) })),
+          btn('Test', { size: 'sm', icon: 'flask-conical', title: p.test, disabled: !p.key.set, onClick: () => test(p) }), S.uiInfo('provider_test')),
         testBox(p.id),
         p.upload_ack ? h('div.keyline', h('span.badge.outline', ic('upload', 12), 'uploads allowed'), h('span.dim', S.fmtAgo(p.upload_ack)),
           btn('Revoke', { size: 'sm', kind: 'ghost', onClick: async () => { await api.put(`/api/x/providers/upload-ack/${p.id}`, { on: false }).catch(S.toastError); load(); } })) : null,
@@ -156,12 +156,12 @@ export default S.defineStudio({
           await S.loadModels(); load(); return true;
         } catch (e) { S.toastError(e, 'Cannot save the endpoint'); return false; }
       }
-      const fld = (l, x, help) => h('label.field', h('span.field-label', l), x, help ? h('span.field-help', help) : null);
+      const fld = (l, x, help, info) => h('div.field', h('span.field-label', l, info ? S.uiInfo(info) : null), x, help ? h('span.field-help', help) : null);
       const md = S.modal({ title: ep ? `Edit ${ep.label || ep.name}` : 'Add an OpenAI-compatible endpoint', icon: 'plug', width: 620,
         body: h('div.col', { style: { gap: '12px' } },
-          h('div.prov-form', fld('Name (id)', f.name, 'provider id: openai_compat:<name>'), fld('Label', f.label), fld('Base URL', f.base, 'ends with /v1 (…/chat/completions, …/images/generations, …/models)'),
-            fld('API key', f.key, 'optional; stored like the other keys'), fld('Price per image ($)', f.price, 'for image endpoints; 0 = free')),
-          fld('Models', f.models), h('div.field', h('span.field-label', 'Serves'), modBox),
+          h('div.prov-form', fld('Name (id)', f.name, 'provider id: openai_compat:<name>', 'endpoint_name'), fld('Label', f.label, null, 'endpoint_label'), fld('Base URL', f.base, 'ends with /v1 (…/chat/completions, …/images/generations, …/models)', 'endpoint_base'),
+            fld('API key', f.key, 'optional; stored like the other keys', 'endpoint_key'), fld('Price per image ($)', f.price, 'for image endpoints; 0 = free', 'endpoint_price')),
+          fld('Models', f.models, null, 'endpoint_models'), h('div.field', h('span.field-label', 'Serves', S.uiInfo('endpoint_serves')), modBox),
           h('p.dim', { style: { margin: 0, fontSize: '12.5px' } }, 'Local / LAN endpoints (127.0.0.1, 192.168.x, *.local) work even with cloud off and cost nothing. Text models appear in the prompt improver / assistant; image models in Image › Generate.')),
         foot: [fetchBtn, h('span.spacer'), btn('Cancel', { kind: 'ghost', onClick: () => md.close() }), btn('Save', { kind: 'primary', icon: 'check', onClick: () => saveEp(true) })] });
     }
@@ -186,7 +186,7 @@ export default S.defineStudio({
     function priceDialog(m) {
       const ta = h('textarea.textarea.mono', { rows: 6, value: JSON.stringify(m.pricing || {}, null, 1), spellcheck: false });
       const md = S.modal({ title: `Price of ${m.name}`, icon: 'circle-dollar-sign', width: 540,
-        body: h('div.col', { style: { gap: '10px' } },
+        body: h('div.col', { style: { gap: '10px' } }, h('div.field-label', 'Price (JSON)', S.uiInfo('price_override')),
           h('p.dim', { style: { margin: 0, fontSize: '12.5px' } }, `List price checked ${m.pricing_checked || '?'}`, m.pricing_source ? [' · ', h('a', { href: m.pricing_source, target: '_blank', rel: 'noopener' }, 'source')] : null,
             '. Keys: per_image, per_megapixel, first_megapixel, per_request, per_second, per_minute, per_1k_chars, credits + per_credit, input_per_mtok / output_per_mtok, by {param: {value: {...}}}, add {param: {value: usd}}.'),
           ta, m.pricing_overridden ? h('div.dim', { style: { fontSize: '12px' } }, 'Default: ', h('code', JSON.stringify(m.pricing_default))) : null),

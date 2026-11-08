@@ -89,12 +89,12 @@ export default S.defineStudio({
         h('td.nowrap', m.cloud ? (m.cloud.local ? 'endpoint' : 'cloud') : m.memory_gb ? `${m.memory_gb} GB` : '–', h('div.dim', { style: { fontSize: '11.5px' } }, m.cloud ? 'no GPU' : m.device === 'cpu' ? 'CPU' : 'GPU')),
         h('td', h('div.muted', { style: { fontSize: '12px', maxWidth: '200px' } }, m.speed || '')),
         h('td', statusCell(m))));
-      const table = h('div.card.matrix-wrap', h('div.tbl-wrap', h('table.tbl.matrix', h('thead', h('tr', ...['Model', 'Tasks (★ = default)', 'Features', 'License', 'Memory', 'Speed', 'Status'].map(x => h('th', x)))), h('tbody', ...rows))));
+      const table = h('div.card.matrix-wrap', h('div.tbl-wrap', h('table.tbl.matrix', h('thead', h('tr', ...[['Model'], ['Tasks (★ = default)', 'models_default'], ['Features'], ['License', 'models_license'], ['Memory', 'models_memory'], ['Speed'], ['Status']].map(([x, k]) => h('th', k ? { style: { whiteSpace: 'nowrap' } } : {}, x, k ? S.uiInfo(k) : null)))), h('tbody', ...rows))));
       const cards = h('div.mcards', ...list.map(m => h(`div.card.card-pad.col.mod-${m.modality}`, { style: { gap: '8px' } },
         h('div.row', h('div.mp-icon', ic(S.MOD_ICON[m.modality] || 'cpu', 17)), h('div.grow', h('div.mname', m.name), h('div.dim', { style: { fontSize: '12px' } }, m.speed || '')), S.statusBadge(m.status)),
         h('div.muted', { style: { fontSize: '12.5px' } }, m.summary), taskChips(m), h('div.feat.row.wrap', S.cloudBadge(m), S.priceBadge(m), S.licenseBadge(m.license), S.memBadge(m), ...S.featureBadges(m)),
         m.status.status !== 'ready' && m.status.code !== 'no_worker' ? statusCell(m) : null)));
-      const be = h('section.card.card-pad', h('div.section-head', h('h3', ic('server', 16), 'Backends (one worker process per venv)')),
+      const be = h('section.card.card-pad', h('div.section-head', h('h3', ic('server', 16), 'Backends (one worker process per venv)', S.uiInfo('models_deep_check', { title: 'Backends and Deep check' }))),
         h('div.tbl-wrap', h('table.tbl', h('thead', h('tr', ...['Backend', 'Environment', 'Worker', 'Models', ''].map(x => h('th', x)))),
           h('tbody', ...backends.map(b => h('tr',
             h('td', h('b', b.name), h('div.dim', { style: { fontSize: '12px', maxWidth: '340px' } }, b.label)),
@@ -111,9 +111,9 @@ export default S.defineStudio({
     }
     S.bus.on('models', render);
     el.append(h('div.page-pad.col', { style: { gap: '14px', maxWidth: '1600px' } },
-      h('div.section-head', { style: { margin: 0, flexWrap: 'wrap' } }, h('div.grow', h('h1.page-title', 'Models'), h('p.page-sub', 'What each model can do, whether it runs here, and whether its output may be used commercially. ★ sets the default model of a task.')), refresh),
+      h('div.section-head', { style: { margin: 0, flexWrap: 'wrap' } }, h('div.grow', h('h1.page-title', 'Models'), h('p.page-sub', 'What each model can do, whether it runs here, and whether its output may be used commercially. ★ sets the default model of a task.')), S.uiInfo('models_recheck'), refresh),
       summary,
-      h('div.row.wrap', { style: { gap: '8px' } }, q, modSeg, statusSel, licSel, h('label.row', { style: { gap: '6px', fontSize: '13px', color: 'var(--text-2)' }, title: 'Hide non-commercial models in every studio picker and make the API refuse them' }, comm, ic('shield-check', 14), 'Commercial-safe models only')),
+      h('div.row.wrap', { style: { gap: '8px' } }, q, modSeg, statusSel, S.uiInfo('models_status'), licSel, h('label.row', { style: { gap: '6px', fontSize: '13px', color: 'var(--text-2)' }, title: 'Hide non-commercial models in every studio picker and make the API refuse them' }, comm, ic('shield-check', 14), 'Commercial-safe models only', S.uiInfo('commercial_only'))),
       body));
     try { const r = await S.api.models({ include_test: true }); backends = r.backends; } catch (e) { S.toastError(e); }
     render();

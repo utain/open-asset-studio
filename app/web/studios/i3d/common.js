@@ -245,6 +245,8 @@ export function meshViewer({ height = 420, empty: emptyText = 'Generate or pick 
     const animBox = h('span.i3d-anim', { hidden: true });
     const boneBtn = btn('Bones', { size: 'sm', kind: bones ? 'primary' : '', title: 'Show the skeleton (follows the animation)', onClick: () => { bones = !bones; if (!bones) editing = false; S.prefs.set('i3d.bones', bones); render(); } });
     boneBtn.hidden = true; boneBtn.setAttribute('aria-pressed', String(bones));
+    const boneInfo = S.uiInfo('bones'), editInfo = S.uiInfo('edit_rig');
+    boneInfo.hidden = true; editInfo.hidden = true;
     const editBtn = btn('Edit rig', { size: 'sm', icon: 'pencil', kind: editing ? 'primary' : '', title: 'Edit the skeleton: move, rename, delete or add bones, then re-skin',
       onClick: () => { editing = !editing; render(); } });
     editBtn.hidden = true; editBtn.setAttribute('aria-pressed', String(editing));
@@ -262,8 +264,8 @@ export function meshViewer({ height = 420, empty: emptyText = 'Generate or pick 
       const tickBones = () => { if (cur !== a || !mv.isConnected || Date.now() - tb0 > 120000) return;
         const sk = mv.loaded && findSkeleton(mv); if (!sk) return setTimeout(tickBones, 150);
         if (!sk.bones.length) return;
-        boneBtn.hidden = false; skel = true;
-        editBtn.hidden = !bones || !/\.glb$/i.test(a.main || '');
+        boneBtn.hidden = false; boneInfo.hidden = false; skel = true;
+        editBtn.hidden = !bones || !/\.glb$/i.test(a.main || ''); editInfo.hidden = editBtn.hidden;
         if (bones && !applyBones(mv, sk)) return setTimeout(tickBones, 150);
         if (bones && editing && !ed && !editBtn.hidden) {      // the editor needs the Bones overlay; it shows the skeleton at rest
           playing = false; try { mv.pause(); mv.currentTime = 0; } catch { /* no animation */ }
@@ -299,11 +301,12 @@ export function meshViewer({ height = 420, empty: emptyText = 'Generate or pick 
     bar.replaceChildren(
       S.seg([{ value: 'textured', label: 'Textured' }, hasWhite(a) ? { value: 'white', label: 'Shape' } : null,
         { value: 'edges', label: 'Edges' }, { value: 'wire', label: 'Wireframe' }].filter(Boolean), mode, v => { mode = v; render(); }),
+      S.uiInfo('viewer_mode'),
       btn('', { size: 'sm', icon: rotate ? 'pause' : 'refresh-cw', title: rotate ? 'Stop rotating' : 'Auto-rotate', onClick: () => { rotate = !rotate; S.prefs.set('i3d.rotate', rotate); render(); } }),
       btn('', { size: 'sm', icon: 'sun', title: `Light: ${light}`, onClick: () => { light = { neutral: 'bright', bright: 'dark', dark: 'neutral' }[light]; S.prefs.set('i3d.light', light); render(); } }),
       animBox,
-      boneBtn,
-      editBtn,
+      boneBtn, boneInfo,
+      editBtn, editInfo,
       h('span.spacer'),
       btn('', { size: 'sm', icon: 'image', title: 'Use this view as the thumbnail', onClick: async () => {
         try { const blob = await el._mv.toBlob({ mimeType: 'image/webp', qualityArgument: 0.9 }); await S.api.setThumb(a.id, blob); S.toast('Thumbnail updated', { kind: 'ok' }); } catch (e) { S.toastError(e); }

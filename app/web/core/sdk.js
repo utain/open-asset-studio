@@ -11,6 +11,8 @@ export { h, ic, btn, toast, toastError, modal, confirmDialog, promptDialog, menu
 export { defineStudio, sendTo, sendActions, navigate, getStudio, allStudios, currentRoute } from './studio.js';
 export { ModelPicker, featureBadges, memBadge } from './components/modelpicker.js';
 export { ParamForm, estimateSeconds } from './components/paramform.js';
+export { infoBtn, closeInfo, closeOrphanInfo, paramSpec } from './components/infotip.js';
+export { UI_INFO, uiInfo, slotInfo } from './uiinfo.js';
 export { PromptBox, promptMeta, improveStyles, profileChips } from './components/promptbox.js';
 export { ResultsGrid, assetCard, assetSubtitle } from './components/results.js';
 export { openAsset, closeAsset, exportAssets, currentAsset, loadModelViewer } from './components/drawer.js';

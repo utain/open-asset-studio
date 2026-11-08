@@ -4,6 +4,7 @@
 import { api } from '../api.js';
 import { store, prefs, getProfile, isOverridden } from '../store.js';
 import { h, ic, btn, modal, seg, toast, toastError, fmtBytes } from '../ui.js';
+import { uiInfo } from '../uiinfo.js';
 
 const SR = [['', 'Keep'], ['44100', '44.1 kHz'], ['48000', '48 kHz'], ['96000', '96 kHz']];
 const BD = [['', 'Default'], ['16', '16-bit'], ['24', '24-bit'], ['32', '32-bit float']];
@@ -14,7 +15,8 @@ const SIZE = [['', 'Keep size'], ['m:1080', 'Long side 1080'], ['m:1920', 'Long 
 
 const sel = (opts, value, onChange, label) => h('select.select', { 'aria-label': label, on: { change: e => onChange(e.target.value) } },
   ...opts.map(([v, l]) => h('option', { value: v, selected: String(value ?? '') === v }, l)));
-const field = (label, el) => h('label.field', h('span.field-label', label), el);
+// a div, not a <label>: the (i) button would otherwise become the control that clicking the label activates (the selects carry an aria-label)
+const field = (label, el, info) => h('div.field', h('span.field-label', label, info ? uiInfo(info) : null), el);
 const sizeKey = i => (i?.width && i?.height ? `${i.width}x${i.height}` : i?.max_side ? `m:${i.max_side}` : '');
 const fromPreset = p => ({
   audio: { on: !!p?.audio, format: p?.audio?.format || 'wav', sample_rate: String(p?.audio?.sample_rate ?? ''), bit_depth: String(p?.audio?.bit_depth ?? ''),
@@ -57,28 +59,28 @@ export async function exportDialog(ids, { title = 'Export' } = {}) {
     sum.textContent = P?.summary || '';
     const a = st.audio, i = st.image;
     const parts = [];
-    parts.push(h('label.field', h('span.field-label', 'Preset', h('span.dim', { style: { fontWeight: 400 } }, ` · ${prof.label} profile first`)),
+    parts.push(h('div.field', h('span.field-label', 'Preset', uiInfo('export_preset'), h('span.dim', { style: { fontWeight: 400 } }, ` · ${prof.label} profile first`)),
       h('select.select', { 'aria-label': 'Export preset', on: { change: e => { preset = e.target.value; prefs.set(`export.preset.${store.project}`, preset); st = fromPreset(store.exportPresets[preset]); draw(); } } },
         ...order.map(id => h('option', { value: id, selected: id === preset }, store.exportPresets[id].label + (id === (store.exportDefault || prof.export) ? '  (default)' : ''))))), sum);
     if (audioN) {
       const grid = h('div.export-grid',
-        field('Format', seg(['wav', 'mp3', 'ogg', 'flac'], a.format, v => { a.format = v; draw(); })),
-        field('Loudness', sel(LUFS, a.lufs, v => { a.lufs = v; })),
-        field('Sample rate', sel(SR, a.sample_rate, v => { a.sample_rate = v; a.music_sample_rate = null; })),
-        ['wav', 'flac'].includes(a.format) ? field('Bit depth', sel(BD, a.bit_depth, v => { a.bit_depth = v; })) : null);
+        field('Format', seg(['wav', 'mp3', 'ogg', 'flac'], a.format, v => { a.format = v; draw(); }), 'export_audio_format'),
+        field('Loudness', sel(LUFS, a.lufs, v => { a.lufs = v; }), 'export_loudness'),
+        field('Sample rate', sel(SR, a.sample_rate, v => { a.sample_rate = v; a.music_sample_rate = null; }), 'export_sample_rate'),
+        ['wav', 'flac'].includes(a.format) ? field('Bit depth', sel(BD, a.bit_depth, v => { a.bit_depth = v; }), 'export_bit_depth') : null);
       parts.push(h('section.card.card-pad.col', { style: { gap: '10px' } },
-        h('label.row', { style: { gap: '8px' } }, h('input', { type: 'checkbox', checked: a.on, on: { change: e => { a.on = e.target.checked; draw(); } } }), h('b', ic('audio-lines', 15), ` Audio (${audioN})`)),
+        h('label.row', { style: { gap: '8px' } }, h('input', { type: 'checkbox', checked: a.on, on: { change: e => { a.on = e.target.checked; draw(); } } }), h('b', ic('audio-lines', 15), ` Audio (${audioN})`), uiInfo('export_audio')),
         a.on ? grid : h('div.dim', { style: { fontSize: '12.5px' } }, 'Original audio files.'),
         a.on && a.lufs !== '' ? h('div.dim', { style: { fontSize: '12px' } }, 'Two-pass ffmpeg loudnorm to the target, true peak -1 dBTP. Silent files get no gain.') : null));
     }
     if (imageN) {
       const grid = h('div.export-grid',
-        field('Format', seg([{ value: 'png', label: 'PNG' }, { value: 'jpeg', label: 'JPEG' }, { value: 'webp', label: 'WebP' }], i.format, v => { i.format = v; draw(); })),
-        field('Aspect', sel(ASPECT, i.aspect, v => { i.aspect = v; })),
-        field('Size', sel(SIZE, i.size, v => { i.size = v; })),
-        field('When the aspect differs', seg([{ value: 'crop', label: 'Crop' }, { value: 'pad', label: 'Pad' }], i.fit, v => { i.fit = v; })));
+        field('Format', seg([{ value: 'png', label: 'PNG' }, { value: 'jpeg', label: 'JPEG' }, { value: 'webp', label: 'WebP' }], i.format, v => { i.format = v; draw(); }), 'export_image_format'),
+        field('Aspect', sel(ASPECT, i.aspect, v => { i.aspect = v; }), 'export_aspect'),
+        field('Size', sel(SIZE, i.size, v => { i.size = v; }), 'export_size'),
+        field('When the aspect differs', seg([{ value: 'crop', label: 'Crop' }, { value: 'pad', label: 'Pad' }], i.fit, v => { i.fit = v; }), 'export_fit'));
       parts.push(h('section.card.card-pad.col', { style: { gap: '10px' } },
-        h('label.row', { style: { gap: '8px' } }, h('input', { type: 'checkbox', checked: i.on, on: { change: e => { i.on = e.target.checked; draw(); } } }), h('b', ic('image', 15), ` Images (${imageN})`)),
+        h('label.row', { style: { gap: '8px' } }, h('input', { type: 'checkbox', checked: i.on, on: { change: e => { i.on = e.target.checked; draw(); } } }), h('b', ic('image', 15), ` Images (${imageN})`), uiInfo('export_images')),
         i.on ? grid : h('div.dim', { style: { fontSize: '12.5px' } }, 'Original image files.'),
         i.on && i.format === 'jpeg' ? h('div.dim', { style: { fontSize: '12px' } }, 'JPEG has no transparency: transparent areas are flattened onto white.') : null));
     }

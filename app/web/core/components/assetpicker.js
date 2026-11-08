@@ -3,6 +3,8 @@ import { api, thumbUrl } from '../api.js';
 import { store, bus } from '../store.js';
 import { h, ic, btn, modal, toastError, debounce, empty, MOD_ICON } from '../ui.js';
 import { ResultsGrid } from './results.js';
+import { infoBtn } from './infotip.js';
+import { slotInfo } from '../uiinfo.js';
 
 /** pickAssets({types, multiple, title, exclude}) -> Promise<string[] | null> */
 export function pickAssets({ types = null, multiple = false, title = 'Pick an asset', exclude = [] } = {}) {
@@ -41,14 +43,15 @@ function acceptFor(types) {
 }
 
 /**
- * new AssetSlot({label, types, multiple, max, role, onChange}) -> .el ; .ids ; .set(ids) ; .inputs() -> [{asset, role}]
+ * new AssetSlot({label, types, multiple, max, role, onChange, task, info}) -> .el ; .ids ; .set(ids) ; .inputs() -> [{asset, role}]
  * Drop files on it, click to pick from the library. Studios pass slot.inputs() as job `inputs`.
+ * (i) beginner text: `info` = a string / {title, text, facts} / false (none); default from UI_INFO by `task` + `role`, then role, then type.
  */
 export class AssetSlot {
-  constructor({ label = 'Input', types = ['image'], multiple = false, max = 10, role = 'input', onChange, hint = '' } = {}) {
+  constructor({ label = 'Input', types = ['image'], multiple = false, max = 10, role = 'input', onChange, hint = '', task = null, info } = {}) {
     this.types = types; this.multiple = multiple; this.max = max; this.role = role; this.onChange = onChange; this.ids = []; this.metas = new Map();
     this.box = h('div.slot', { tabindex: 0, role: 'button', 'aria-label': `${label}: pick or drop a file` });
-    this.el = h('div.field', h('div.field-label', label, multiple ? h('span.dim', `up to ${max}`) : null), this.box, hint ? h('span.field-help', hint) : null);
+    this.el = h('div.field', h('div.field-label', label, info === false ? null : typeof info === 'string' ? infoBtn({ title: label, text: info }) : info ? infoBtn(info) : slotInfo(task, { role, types }), multiple ? h('span.dim', `up to ${max}`) : null), this.box, hint ? h('span.field-help', hint) : null);
     this.box.addEventListener('click', () => this.pick());
     this.box.addEventListener('keydown', e => { if (e.key === 'Enter') this.pick(); });
     this.box.addEventListener('dragover', e => { e.preventDefault(); this.box.classList.add('drag'); });

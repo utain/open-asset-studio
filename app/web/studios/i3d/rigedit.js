@@ -65,7 +65,7 @@ export function rigEditor({ asset, mv, host, overlayHost, scene, root, st, runJo
   let info = null, alive = true, busy = false, raf = 0, live = null;     // live: {key, pos} while a dot is dragged
   const svgNS = 'http://www.w3.org/2000/svg';
   const body = h('div.rige-body', h('p.dim', ic('loader', 14, 'spin'), ' Reading the skeleton…'));
-  const panel = h('div.rige', h('div.rige-head', h('b', 'Edit rig'), h('span.dim.rige-asset.ellipsis', asset.name || asset.id), h('span.spacer'),
+  const panel = h('div.rige', h('div.rige-head', h('b', 'Edit rig'), S.uiInfo('edit_rig'), h('span.dim.rige-asset.ellipsis', asset.name || asset.id), h('span.spacer'),
     btn('', { size: 'sm', icon: 'x', title: 'Close the rig editor', onClick: () => onClose() })), body);
   host.replaceChildren(panel); host.hidden = false;
   const svg = document.createElementNS(svgNS, 'svg'); svg.setAttribute('class', 'rige-lines');
@@ -262,12 +262,12 @@ export function rigEditor({ asset, mv, host, overlayHost, scene, root, st, runJo
     stepSel.replaceChildren(...[0.005, 0.02, 0.05].map(f => { const v = r4(hgt * f); return h('option', { value: v, selected: f === 0.02 }, cm(v)); }));
     body.replaceChildren(
       h('p.dim.rige-help', 'Click a dot to select a bone, drag it (or use the buttons) to move it. Changes are written to a new copy; the mesh and its rest pose stay as they are.'),
-      joints, sel,
+      h('div.rige-row', joints, S.uiInfo('rige_select')), sel,
       h('div.rige-row', nameIn, renB),
-      h('div.rige-row.rige-nudge', h('span.dim', 'Move'), stepSel, ...nudges),
-      h('label.rige-check', follow, ' children follow'),
-      h('div.rige-row', addB, delB, h('span.spacer'), undoB, redoB),
-      list, h('div.rige-row', applyB, skinB), status);
+      h('div.rige-row.rige-nudge', h('span.dim', 'Move'), stepSel, S.uiInfo('rige_step'), ...nudges),
+      h('div.rige-row', h('label.rige-check', follow, ' children follow'), S.uiInfo('rige_follow')),
+      h('div.rige-row', addB, delB, h('span.spacer'), undoB, redoB, S.uiInfo('rige_undo')),
+      list, h('div.rige-row', applyB, S.uiInfo('rige_apply'), skinB, S.uiInfo('rige_reskin')), status);
     refresh();
     raf = requestAnimationFrame(frame);
   }

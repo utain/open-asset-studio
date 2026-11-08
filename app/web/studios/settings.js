@@ -51,18 +51,6 @@ const CSS = `
 .set-env td { vertical-align: top; }
 .set-env td:first-child { white-space: nowrap; }
 .set-env .v { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
-.set-info { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 22px; height: 22px; padding: 0; margin: 0 -2px; border: 0; border-radius: 50%; background: none; color: var(--text-3); cursor: pointer; vertical-align: middle; transition: color .12s, background .12s; }
-.set-info:hover, .set-info[aria-expanded="true"] { color: var(--accent); background: var(--accent-soft); }
-.set-info:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-@media (pointer: coarse) { .set-info { width: 30px; height: 30px; margin: -4px -4px; } }
-.popover.set-bal { padding: 0; min-width: 0; }
-.set-bal-body { padding: 11px 13px 12px; font-size: 13px; line-height: 1.5; color: var(--text); font-weight: 400; text-transform: none; letter-spacing: 0; }
-.set-bal-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
-.set-bal-text { color: var(--text-2); overflow-wrap: anywhere; }
-.set-bal-facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 10px; margin: 10px 0 0; padding-top: 9px; border-top: 1px solid var(--line-soft); font-size: 12px; }
-.set-bal-facts dt { color: var(--text-3); }
-.set-bal-facts dd { margin: 0; color: var(--text-2); overflow-wrap: anywhere; }
-.set-bal-facts code { font-family: var(--mono); font-size: 11.5px; color: var(--text); user-select: all; }
 .set-fld { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .set-cloud { padding: 12px 16px; display: flex; flex-direction: column; gap: 12px; border-top: 1px solid var(--line-soft); }
 @media (max-width: 899px) {
@@ -136,61 +124,8 @@ export default S.defineStudio({
     };
 
     // ------------------------------------------------------------------ info balloons
-    // One balloon at a time (S.popover closes the previous one). Mouse: opens on hover after 250 ms and stays while the pointer is
-    // over the icon or the balloon; a click pins it (click outside / Esc / second click closes). Touch and keyboard: click / Enter /
-    // Space toggles. role=tooltip while hovering, role=dialog once pinned; the icon keeps aria-expanded / aria-describedby in sync.
-    let bal = null, hoverT = 0, leaveT = 0, balSeq = 0;
-    const closeInfo = () => { clearTimeout(hoverT); clearTimeout(leaveT); if (bal) S.closePopover(); };
-    function balloon(spec) {
-      const body = h('div.set-bal-body', h('div.set-bal-title', spec.title), h('div.set-bal-text', spec.text));
-      if (spec.facts?.length) body.append(h('dl.set-bal-facts', ...spec.facts.flatMap(([k, v, mono]) => [h('dt', k), h('dd', mono ? h('code', v) : v)])));
-      return body;
-    }
-    function openInfo(btn, spec, pinned) {
-      if (bal && bal.btn === btn) return;
-      if (bal?.pinned && !pinned) return;                      // a pinned balloon is not replaced by a hover
-      clearTimeout(leaveT);
-      const id = `set-bal-${++balSeq}`;
-      const onScroll = e => { if (!bal || !bal.pop.el.contains(e.target)) closeInfo(); };
-      const cur = { btn, pinned, pop: null };
-      const pop = S.popover(btn, balloon(spec), { role: pinned ? 'dialog' : 'tooltip', width: 'min(320px, calc(100vw - 24px))', onClose: () => {
-        btn.setAttribute('aria-expanded', 'false'); btn.removeAttribute('aria-describedby');
-        removeEventListener('scroll', onScroll, true);
-        if (bal === cur) bal = null;
-      } });
-      cur.pop = pop; bal = cur;
-      pop.el.id = id; pop.el.classList.add('set-bal');
-      if (pinned) pop.el.setAttribute('aria-label', `About ${spec.title}`);
-      btn.setAttribute('aria-expanded', 'true'); btn.setAttribute('aria-describedby', id);
-      pop.el.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse') clearTimeout(leaveT); });
-      pop.el.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse' && bal === cur && !cur.pinned) leaveT = setTimeout(closeInfo, 200); });
-      addEventListener('scroll', onScroll, true);
-    }
-    function pinInfo() {
-      if (!bal) return;
-      bal.pinned = true; bal.pop.el.setAttribute('role', 'dialog'); bal.pop.el.setAttribute('aria-label', `About ${bal.btn.dataset.title || 'this setting'}`);
-    }
-    /** The (i) button for a spec {title, text, facts}; null when there is nothing to say. */
-    function infoBtn(spec) {
-      if (!spec?.text) return null;
-      const b = h('button.set-info', { type: 'button', 'aria-label': `About ${spec.title}`, 'aria-expanded': 'false', 'aria-haspopup': 'dialog', dataset: { title: spec.title } }, ic('info', 15));
-      b.addEventListener('pointerenter', e => {
-        if (e.pointerType !== 'mouse') return;
-        clearTimeout(leaveT);
-        if (!bal || bal.btn !== b) { clearTimeout(hoverT); hoverT = setTimeout(() => openInfo(b, spec, false), 250); }
-      });
-      b.addEventListener('pointerleave', e => {
-        if (e.pointerType !== 'mouse') return;
-        clearTimeout(hoverT);
-        if (bal && bal.btn === b && !bal.pinned) leaveT = setTimeout(closeInfo, 200);
-      });
-      b.addEventListener('click', e => {
-        e.preventDefault(); e.stopPropagation(); clearTimeout(hoverT);
-        if (bal && bal.btn === b) { if (bal.pinned) closeInfo(); else pinInfo(); } else openInfo(b, spec, true);
-      });
-      b.addEventListener('keydown', e => { if (e.key === 'Tab' && bal && bal.btn === b) closeInfo(); });
-      return b;
-    }
+    // The (i) button and its balloon are the shared component core/components/infotip.js (S.infoBtn); this page only builds the specs.
+    const { infoBtn, closeInfo } = S;
     const APPLY_WORDS = { live: 'right away', new_worker: 'for workers started after the change', llm_start: 'the next time the prompt LLM starts', restart: 'after the studio is restarted' };
     function fieldSpec(f) {
       const text = f.info || f.help || '';                    // an older core has no `info`: fall back to the one-line help
@@ -206,11 +141,7 @@ export default S.defineStudio({
     }
     const groupSpec = g => (g.info ? { title: g.label, text: g.info } : null);
     const envSpec = e => (e.info ? { title: e.label, text: e.info, facts: [['Variable', e.key, true], ['Change it', 'restart the studio with a different value']] } : null);
-    const CLOUD_INFO = {
-      allow: { title: 'Allow cloud models', text: 'Cloud models run on a provider’s computers instead of yours. They are paid per use, and your prompt (and any image or file you pick) is sent to that provider. Everything stays local while this is off. Turn it on only when you want a model that is not available locally.' },
-      budget: { title: 'Monthly budget (USD)', text: 'The most the studio will let cloud jobs cost in one calendar month. A job whose estimated price would push the total over this amount is refused. Set it to what you are comfortable spending; 0 means no limit, so avoid that unless you track costs elsewhere.' },
-      confirm: { title: 'Confirm above (USD)', text: 'Cloud jobs estimated at this price or more ask for your confirmation before they run, and jobs with an unknown price always ask. Raise it to be asked less often; set it to 0 to be asked about every paid job.' },
-    };
+    const CLOUD_INFO = { allow: S.UI_INFO.cloud_allow, budget: S.UI_INFO.cloud_budget, confirm: S.UI_INFO.cloud_confirm };    // texts live in core/uiinfo.js (shared with the Providers page)
 
     // ------------------------------------------------------------------ saving
     async function save(f, value, { quiet = false } = {}) {
@@ -456,7 +387,7 @@ export default S.defineStudio({
         btn('Reset all project overrides', { size: 'sm', kind: 'danger', icon: 'rotate-ccw', disabled: !proj?.overridden?.length, onClick: resetAll })) : null;
       root.replaceChildren(h('div.set-layout', nav,
         h('div.set-groups', ...(cards.length ? cards : [S.empty('search', 'No setting matches', changedOnly ? 'Nothing is changed in this scope.' : 'Try another word.')]), foot)));
-      if (bal && !bal.btn.isConnected) closeInfo();            // the row of an open balloon was replaced
+      S.closeOrphanInfo();            // the row of an open balloon was replaced
     }
 
     async function resetAll() {

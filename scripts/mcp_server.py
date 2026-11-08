@@ -163,7 +163,8 @@ def model_view(m: dict, detail: bool) -> dict:
     if m.get("backend") == "cloud":
         out["cloud"] = True
     if detail:
-        out["params"] = [{k: p[k] for k in ("name", "type", "default", "min", "max", "choices", "unit", "label") if k in p}
+        out["params"] = [{**{k: p[k] for k in ("name", "type", "default", "min", "max", "choices", "unit", "label") if k in p},
+                          **({"info": p["info"]} if p.get("info") else {})}      # "info" = beginner explanation of the param (API: GET /api/models/{id})
                          for p in m.get("params") or []]
         if m.get("presets"):
             out["presets"] = m["presets"]
