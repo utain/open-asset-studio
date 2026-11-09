@@ -1,0 +1,57 @@
+# Game-engine export: LOD chain (meshoptimizer), collision (CoACD / simple shapes), engine presets (Unreal / Unity / Godot / glTF).
+# CPU only, no weights. docs/research/engine_export.md has the measurements; workers/engine_worker.py the pipeline.
+tasks:
+  engine_export: {label: Game engine export, modality: mesh, studio: 3d}
+
+backends:
+  engine:
+    label: envs/retopo (meshoptimizer, CoACD)
+    python: envs/retopo/bin/python
+    script: workers/engine_worker.py
+    device: cpu
+    lock: retopo
+
+models:
+  - id: engine-export
+    name: Game engine export (LODs + collision)
+    modality: mesh
+    tasks: [engine_export]
+    default_for: [engine_export]
+    order: 86
+    tags: [tool, cpu, lod, collision, unreal, unity, godot]
+    summary: "Packages a mesh for a game engine: a LOD chain that shares the baked UVs and textures (meshoptimizer), collision hulls (CoACD convex decomposition, or box / capsule / one hull) and engine naming, units and texture packing for Unreal (FBX, UCX_, ORM), Unity (FBX, mask map), Godot (GLB, -convcolonly) or plain glTF (MSFT_lod). Rigged meshes keep their skeleton and clips (GLB). CPU, no weights."
+    features: {input: mesh, export: [fbx, glb]}
+    backend: engine
+    handler: engine.export
+    device: cpu
+    weights: []
+    license: {name: "MIT (meshoptimizer, CoACD)", commercial: true, note: "The result keeps the licence of the source mesh."}
+    memory_gb: 1           # measured peak RSS 0.7 GB (4.4k-tri character with 4096 maps, 4 LODs, hulls; see docs/research/engine_export.md)
+    speed: "about 2-12 s on 20 CPU cores (CoACD dominates; LODs < 20 ms)"
+    est: {load_s: 1, run_s: 8}
+    params:
+      - {name: target, label: Engine, type: choice, choices: [unreal, unity, godot, gltf], default: unreal, group: basic}
+      - {name: name, label: Asset name, type: text, default: "", group: basic, help: "Base name in the engine (letters, digits, _). Empty = the asset name."}
+      - {name: lods, label: LOD levels, type: int, min: 0, max: 5, default: 3, group: basic, help: "Extra levels below LOD0. 0 = no LODs. Godot builds its own and ignores this."}
+      - {name: lod_preset, label: LOD steps, type: choice, choices: [halves, aggressive, gentle, custom], default: halves, group: basic, help: "halves 50/25/12.5 %, aggressive 40/15/6 %, gentle 70/50/35 % of LOD0."}
+      - {name: lod_ratios, label: Custom LOD ratios, type: text, default: "0.5,0.25,0.1", group: advanced, help: "Comma list of fractions of LOD0 (custom steps), or absolute triangle counts like 6000,2500,800."}
+      - {name: lod_max_error, label: LOD max error, type: float, min: 0.001, max: 0.2, step: 0.001, default: 0.03, group: advanced, help: "Stop simplifying a level when the shape error passes this fraction of the model size."}
+      - {name: lod_min_tris, label: Smallest LOD (triangles), type: int, min: 12, max: 20000, step: 50, default: 300, group: advanced}
+      - {name: collision, label: Collision, type: choice, choices: [auto, none, box, obb, capsule, convex_hull, decomposition], default: auto, group: basic, help: "auto = decomposition for props, capsule for rigged characters."}
+      - {name: collision_quality, label: Collision detail, type: choice, choices: [fast, balanced, detailed], default: balanced, group: basic}
+      - {name: max_hulls, label: Max hulls, type: int, min: 1, max: 64, default: 16, group: advanced}
+      - {name: hull_max_verts, label: Max vertices per hull, type: int, min: 8, max: 128, step: 4, default: 64, group: advanced, help: "64 keeps every hull under Unity's 255-triangle limit."}
+      - {name: size_mode, label: Size, type: choice, choices: [keep, height], default: keep, group: basic}
+      - {name: height_m, label: Height (m), type: float, min: 0.01, max: 1000, step: 0.01, default: 1.8, group: basic, help: "Used when Size = height: scales the model so its height is this many metres."}
+      - {name: pivot, label: Pivot, type: choice, choices: [keep, bottom_center, center], default: bottom_center, group: advanced}
+      - {name: tex_max, label: Max texture size, type: choice, choices: [keep, 512, 1024, 2048, 4096], default: keep, group: basic}
+      - {name: unity_pipeline, label: Unity pipeline, type: choice, choices: [urp, hdrp, both], default: both, group: advanced}
+      - {name: yaw, label: Turn (degrees), type: choice, choices: [0, 90, 180, 270], default: 0, group: advanced, help: "Rotate around the up axis before export if the model faces the wrong way in your engine."}
+      - {name: include_collision_preview, label: Collision preview, type: bool, default: true, group: advanced}
+    presets:
+      unreal_prop:      {target: unreal, lods: 3, lod_preset: halves, collision: decomposition, collision_quality: balanced}
+      unreal_character: {target: unreal, lods: 3, lod_preset: halves, collision: capsule}
+      unity_prop:       {target: unity, lods: 3, lod_preset: halves, collision: decomposition, unity_pipeline: both}
+      unity_mobile:     {target: unity, lods: 2, lod_preset: aggressive, collision: convex_hull, tex_max: 1024}
+      godot:            {target: godot, lods: 0, collision: decomposition}
+      gltf_web:         {target: gltf, lods: 3, lod_preset: halves, collision: none, tex_max: 2048}

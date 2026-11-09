@@ -226,6 +226,11 @@ function applyBones(mv, sk) {
 }
 
 // ------------------------------------------------------------------ mesh viewer
+/** Extension point for other i3d modules (engine.js): a function (asset, rerender) -> {bar?: Element[], src?: () => Promise<url|null>} | null.
+ *  `bar` elements are added to the viewer's toolbar, `src` may return another model URL (a blob) to show instead of the asset's file,
+ *  `stats` is a text that replaces the faces / verts figures (the file's own counts include hidden LOD and hull nodes). */
+export const viewerHooks = [];
+
 /** Big model-viewer with view toggles: textured / white shape / edges / wireframe, auto-rotate, light, stats, downloads. */
 export function meshViewer({ height = 420, empty: emptyText = 'Generate or pick a mesh to preview it here.', actions } = {}) {
   const box = h('div.i3d-viewer', { style: { '--vh': `${height}px` } });
@@ -271,9 +276,13 @@ export function meshViewer({ height = 420, empty: emptyText = 'Generate or pick 
       onClick: () => { editing = !editing; render(); } });
     editBtn.hidden = true; editBtn.setAttribute('aria-pressed', String(editing));
     box.replaceChildren(h('div.empty', ic('loader', 22, 'spin'), h('p', 'Loading the 3D viewer…')));
-    S.loadModelViewer().then(() => {
+    const hooks = viewerHooks.map(f => { try { return f(a, render); } catch { return null; } }).filter(Boolean);
+    S.loadModelViewer().then(async () => {
       if (cur !== a) return;
-      const mv = h('model-viewer', { src: srcOf(a), 'camera-controls': true, 'auto-rotate': (rotate && !editing) || null, 'shadow-intensity': '0.8',
+      let alt = null;                                  // a hook may swap the model (engine export: another LOD, hull overlay)
+      for (const hk of hooks) { if (hk.src && !alt) alt = await hk.src(); }
+      if (cur !== a) return;
+      const mv = h('model-viewer', { src: alt || srcOf(a), 'camera-controls': true, 'auto-rotate': (rotate && !editing) || null, 'shadow-intensity': '0.8',
         exposure: light === 'bright' ? '1.4' : light === 'dark' ? '0.7' : '1', 'environment-image': 'neutral', 'interaction-prompt': 'none', alt: a.name || '3D model', 'touch-action': 'pan-y',
         autoplay: true });           // a GLB with animation clips plays the first one; static meshes are unaffected
       const t0a = Date.now();      // poll like the wireframe overlay below: the 'load' event is unreliable for a re-created element
@@ -300,7 +309,7 @@ export function meshViewer({ height = 420, empty: emptyText = 'Generate or pick 
         setTimeout(tick, 150);
       }
       mv.addEventListener('load', () => setTimeout(async () => {   // the visible viewer doubles as the thumbnail camera
-        if (mode === 'edges' || mode === 'wire' || (bones && skel)) return;   // don't save a wireframe / skeleton overlay as the thumbnail
+        if (mode === 'edges' || mode === 'wire' || (bones && skel) || alt) return;   // don't save a wireframe / skeleton / hull overlay as the thumbnail
         if (a.preview?.thumb || thumbSeen.has(a.id) || cur !== a) return;
         thumbSeen.add(a.id);
         try {
@@ -314,11 +323,12 @@ export function meshViewer({ height = 420, empty: emptyText = 'Generate or pick 
       box.replaceChildren(mv);
       el._mv = mv;
     }).catch(() => box.replaceChildren(h('div.empty', 'The 3D viewer could not be loaded.')));
+    const hookStats = hooks.map(hk => hk.stats).find(Boolean);           // e.g. the engine export: the shown LOD's triangles, not every hidden LOD and hull in the file
     const I = a.info || {}, RT = a.worker?.retopo;     // a retopo result: quads are the unit, not triangles
     stats.replaceChildren(h('span.ellipsis', { style: { fontWeight: 600, color: 'var(--text)' } }, a.name || a.id),
       RT ? h('span', `${RT.faces.toLocaleString()} polys (${RT.quad_pct}% quads) · ${RT.triangles.toLocaleString()} tris · ${RT.vertices.toLocaleString()} verts · ${RT.tex_size}² maps`)
-        : I.faces ? h('span', `${I.faces.toLocaleString()} faces`) : null,
-      !RT && I.vertices ? h('span', `${I.vertices.toLocaleString()} verts`) : null,
+        : hookStats ? h('span', hookStats) : I.faces ? h('span', `${I.faces.toLocaleString()} faces`) : null,
+      !RT && !hookStats && I.vertices ? h('span', `${I.vertices.toLocaleString()} verts`) : null,
       I.textures != null ? h('span', `${I.textures} texture(s)`) : null, a.worker?.stats?.time?.total ? h('span', `made in ${S.fmtDur(a.worker.stats.time.total)}`) : null);
     bar.replaceChildren(
       S.seg([{ value: 'textured', label: 'Textured' }, hasWhite(a) ? { value: 'white', label: 'Shape' } : null,
@@ -329,6 +339,7 @@ export function meshViewer({ height = 420, empty: emptyText = 'Generate or pick 
       animBox,
       boneBtn, boneInfo,
       editBtn, editInfo,
+      ...hooks.flatMap(hk => hk.bar || []),
       h('span.spacer'),
       btn('', { size: 'sm', icon: 'image', title: 'Use this view as the thumbnail', onClick: async () => {
         try { const blob = await el._mv.toBlob({ mimeType: 'image/webp', qualityArgument: 0.9 }); await S.api.setThumb(a.id, blob); S.toast('Thumbnail updated', { kind: 'ok' }); } catch (e) { S.toastError(e); }

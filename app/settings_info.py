@@ -17,6 +17,9 @@ GROUP_INFO: dict[str, str] = {
     "prompts": "Many studios have a sparkle button that rewrites your idea into a better prompt, and the Assistant and writers "
                "create text for you. These settings choose which text engine does that, in which language it explains itself, "
                "and the art direction it should always follow.",
+    "engine": "Settings of the Game engine step in the 3D studio, which packages a model for Unreal, Unity, Godot or the web "
+              "(LOD levels, collision, engine file names). You can pick a different engine or character height per project here. "
+              "The delivery folders are the exception: they can only be set by editing settings.json.",
     "cloud": "Cloud models run on someone else's computers and are paid per use, so they are off until you allow them. "
              "Set a monthly budget here and the studio will refuse jobs that would go over it. "
              "Your API keys are stored on the Providers page and never shown here.",
@@ -36,6 +39,22 @@ GROUP_INFO: dict[str, str] = {
 
 # ----------------------------------------------------------------------------------------------- fields (by exact key)
 FIELD_INFO: dict[str, str] = {
+    "engine.target": "The game engine that is pre-selected when you open the Game engine step of the 3D studio. Each engine wants "
+                     "slightly different files: Unreal and Unity get an FBX plus engine-named textures, Godot and the web get a GLB. "
+                     "You can still change it for a single export.",
+    "engine.height_m": "Real-world height, in metres, that a model is scaled to when you choose 'Size = height' in the Game engine "
+                       "step. 1.8 is a typical person. Props can be set to their real size in the step itself.",
+    "engine.prefix_static": "Unreal projects usually start mesh names with SM_ (static) or SK_ (skeletal, i.e. with a skeleton). "
+                            "If your project uses another convention, type your prefix here (letters, digits and _, e.g. Env_). "
+                            "Leave it empty for SM_ / SK_. It only affects Unreal packages.",
+    "engine.prefix_texture": "Unreal projects usually start texture names with T_. Type your own prefix here if your project "
+                             "uses another one (letters, digits and _). Leave it empty for T_. It only affects Unreal packages.",
+    "engine.destinations": "Folders of your game projects that the studio may copy an engine package into. This is a file-only "
+                           "safety setting: the web page and the Assistant can only pick a folder from this list by its short id and "
+                           "can never type a path, so it has to be written in settings.json by you. Each entry looks like "
+                           "{\"id\": \"my-game\", \"label\": \"My game\", \"path\": \"/home/me/MyGame/Assets\", \"engine\": \"unity\"}; "
+                           "optional keys: subdir (default OpenAssetStudio), max_mb, allow_lan. Files are only ever added or "
+                           "replaced inside <path>/<subdir>/<asset name>, never deleted. See docs/CONTRACTS.md section 12.",
     "profile": "Tells the studio what you are making, for example a game, a video or a podcast. It then offers the matching "
                "picture shapes (16:9 for video, square for a podcast cover), style chips and a sensible export format. "
                "It only changes suggestions and defaults, never what the models can do, so 'General' is a safe choice if unsure.",

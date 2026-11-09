@@ -75,6 +75,10 @@ DEFAULT_SETTINGS: dict = {
     "textgen": {},
     # Prompt-box defaults: language for /api/improve when the request has none, and per-studio art direction text.
     "prompt": {"lang": "auto", "context": {}},
+    # Game-engine export (docs/CONTRACTS.md section 12): per-project defaults for the 3D studio's Game engine step and the
+    # asset-name prefixes (None = SM_ / SK_ / T_). `destinations` is FILE-ONLY (settings.json): the folders a package may be
+    # delivered into; the API only ever names one by its id.
+    "engine": {"target": "unreal", "height_m": 1.8, "prefix_static": None, "prefix_texture": None, "destinations": []},
 }
 
 

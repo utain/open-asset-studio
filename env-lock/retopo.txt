@@ -1,5 +1,6 @@
 # retopo env lock (py3.12 aarch64; CPU only, no torch). Recreate with ./install.sh backend retopo, or by hand from the repo root:
 #   uv venv --python 3.12 envs/retopo && VIRTUAL_ENV=envs/retopo uv pip install --no-deps -r env-lock/retopo.txt
+# coacd 1.0.14 (convex decomposition, MIT) is for the engine export (install/engine.yaml adds libmeshoptimizer.so on top of this venv).
 # Not in this list (built from source by install/retopo.yaml): pynanoinstantmeshes (vendor/PyNanoInstantMeshes at the pinned commit
 #   + install/files/pynim_pure_quad.patch) and pymikktspace 0.3.0 (needs cython<3). open3d's unused deps (dash, plotly, flask, ...)
 #   are listed because open3d.visualization imports them at import time.
@@ -9,6 +10,7 @@ blinker==1.9.0
 certifi==2026.10.23
 charset-normalizer==3.5.2
 click==8.5.1
+coacd==1.0.14
 comm==0.2.3
 configargparse==1.9.0
 dash==4.5.0

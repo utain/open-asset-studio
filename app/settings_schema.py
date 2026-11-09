@@ -32,6 +32,8 @@ GROUPS = [
      "help": "The model each task uses when nothing else is picked."},
     {"id": "prompts", "label": "Prompts & text", "icon": "sparkles", "scopes": ["system", "project"],
      "help": "Which text backend improves prompts and writes, prompt language and project art direction."},
+    {"id": "engine", "label": "Game engine", "icon": "gamepad-2", "scopes": ["system", "project"],
+     "help": "Defaults of the Game engine export and the folders it may deliver into."},
     {"id": "cloud", "label": "Cloud", "icon": "cloud", "scopes": ["system"],
      "help": "Optional paid cloud models. Off by default."},
     {"id": "memory", "label": "Memory", "icon": "memory-stick", "scopes": ["system"],
@@ -71,6 +73,17 @@ def _static_fields() -> list[dict]:
            help="Used when assets are downloaded or zipped. Empty = the profile's preset."))
     add(_f("ui.show_test_models", "bool", "Show self-test models", "general", scope=SYS, default=False,
            help="List the synthetic test models in the pickers."))
+    # ---- game engine (app/plugins/engine.py)
+    add(_f("engine.target", "choice", "Engine", "engine", choices_from="engine_targets", default=D["engine"]["target"],
+           help="Pre-selected in the Game engine step."))
+    add(_f("engine.height_m", "float", "Character height", "engine", unit="m", min=0.01, max=1000, step=0.01, default=D["engine"]["height_m"],
+           help="Used when the export is set to Size = height."))
+    add(_f("engine.prefix_static", "text", "Mesh prefix (Unreal)", "engine", maxlen=12, pattern=r"[A-Za-z0-9_]{0,12}", nullable=True,
+           default=None, help="Empty = SM_ for static and SK_ for rigged meshes."))
+    add(_f("engine.prefix_texture", "text", "Texture prefix (Unreal)", "engine", maxlen=12, pattern=r"[A-Za-z0-9_]{0,12}", nullable=True,
+           default=None, help="Empty = T_."))
+    add(_f("engine.destinations", "json", "Delivery folders", "engine", scope=SYS, editable=False, default=[],
+           help="Game-project folders a package may be copied into. Edit settings.json (file-only, see the info balloon)."))
     # ---- prompts & text
     for p, lab in (("improve", "Prompt improver"), ("write", "Writer (barks, SFX lists ...)"), ("assistant", "Assistant")):
         add(_f(f"textgen.{p}", "backend", f"{lab} backend", "prompts", nullable=True, default=None,
@@ -164,6 +177,8 @@ def _choices(field: dict) -> list[dict] | None:
         return [{"value": k, "label": v["label"], "help": v.get("summary", "")} for k, v in profiles.PROFILES.items()]
     if src == "export_presets":
         return [{"value": k, "label": v["label"], "help": v.get("summary", "")} for k, v in profiles.EXPORT_PRESETS.items()]
+    if src == "engine_targets":
+        return [{"value": k, "label": v} for k, v in (("unreal", "Unreal Engine"), ("unity", "Unity"), ("godot", "Godot"), ("gltf", "glTF / web"))]
     if src == "prompt_lang":
         return [{"value": "auto", "label": "Auto (follow what I type)"}, {"value": "en", "label": "English"}, {"value": "th", "label": "Thai"}]
     return None

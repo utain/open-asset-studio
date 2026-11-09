@@ -5,6 +5,7 @@
 import * as S from '../core/sdk.js';
 import { css, meshViewer, autoThumb, runJob } from './i3d/common.js';
 import { attachSourcePanel, retopoBeforeSubmit, retopoCompare } from './i3d/retopo.js';
+import { enginePanel, engineBeforeSubmit } from './i3d/engine.js';
 const { h, ic, btn } = S;
 
 // Workflow steps: the task tabs are grouped as 1 Create · 2 Refine · 3 Animate · 4 Export (task ids and routes are unchanged).
@@ -12,7 +13,7 @@ const GROUPS = [
   { id: 'create', label: 'Create', title: 'Make a mesh: from an image, from text, or other views of an image' },
   { id: 'refine', label: 'Refine', title: 'Texture a mesh, or retopologise it into a clean low-poly copy' },
   { id: 'animate', label: 'Animate', title: 'Rig a character, recompute its skin weights, or animate it from text' },
-  { id: 'export', label: 'Export', title: 'Clean up, decimate and export meshes as GLB / OBJ / PLY / STL' },
+  { id: 'export', label: 'Export', title: 'Clean up, decimate and export meshes as GLB / OBJ / PLY / STL, or package them for Unreal, Unity, Godot or the web' },
 ];
 const TASKS = [
   { id: 'shape', group: 'create', label: 'Image → 3D', result: 'mesh', prompt: false, receives: ['shape'],
@@ -40,6 +41,9 @@ const TASKS = [
       hint: 'A rigged humanoid from the Rig tab, in a T- or A-pose (two legs, two arms). Result: a new mesh asset with the animation clip “motion”, retargeted onto its skeleton.' }] },
   { id: 'mesh_export', group: 'export', label: 'Export', result: 'mesh', prompt: false, receives: ['export'],
     inputs: [{ key: 'mesh', label: 'Meshes', types: ['mesh'], role: 'mesh', multiple: true, max: 12, required: true }] },
+  { id: 'engine_export', group: 'export', label: 'Game engine', result: 'mesh', prompt: false, receives: ['engine'],
+    inputs: [{ key: 'mesh', label: 'Meshes for the engine', types: ['mesh'], role: 'mesh', multiple: true, max: 12, required: true,
+      hint: 'A GLB model, best the retopo result with its baked textures. Rigged characters stay GLB. Result: a zip with LODs, collision and engine-named textures; the viewer shows the LOD levels and the collision pieces.' }] },
 ];
 
 export default S.defineStudio({
@@ -48,6 +52,7 @@ export default S.defineStudio({
     { action: 'shape', label: 'Make 3D', icon: 'cuboid', types: ['image'] },
     { action: 'retexture', label: 'Retexture', icon: 'palette', types: ['mesh'] },
     { action: 'export', label: 'Export mesh', icon: 'package', types: ['mesh'] },
+    { action: 'engine', label: 'Send to game engine', icon: 'gamepad-2', types: ['mesh'] },
     { action: 'retopo', label: 'Retopo + bake', icon: 'layers', types: ['mesh'] },
     { action: 'rig', label: 'Auto-rig', icon: 'bot', types: ['mesh'] },
     { action: 'reskin', label: 'Re-skin (keep the skeleton)', icon: 'bot', types: ['mesh'] },
@@ -65,14 +70,17 @@ export default S.defineStudio({
       isRigged(a) ? btn('Motion', { size: 'sm', icon: 'wand-sparkles', title: 'Describe a movement in words and animate this rigged character (text to motion)', onClick: () => receive({ action: 'motion', assets: [a] }) }) : null,
       needsReskin(a) ? btn('Re-skin', { size: 'sm', icon: 'bot', kind: 'primary', title: 'This rig has bones without skin weight (it was edited). Recompute the weights for its skeleton.', onClick: () => receive({ action: 'reskin', assets: [a] }) }) : null,
       needsClips(a) ? btn('Animate preview', { size: 'sm', icon: 'play', title: 'Add a flex test and a wiggle loop to this rigged mesh (a new asset) to see how the skin moves', onClick: e => animatePreview(a, e.currentTarget) }) : null,
+      btn('Game engine', { size: 'sm', icon: 'gamepad-2', title: 'Package this model for Unreal, Unity, Godot or the web: LOD levels, collision, engine-named textures', onClick: () => receive({ action: 'engine', assets: [a] }) }),
       btn('Export', { size: 'sm', icon: 'package', onClick: () => receive({ action: 'export', assets: [a] }) }),
     ] });
     const kit = new S.TaskStudio({
       studio: '3d', groups: GROUPS, numberedGroups: true,
-      tasks: TASKS.filter(t => (t.id !== 'reskin' || S.modelsFor('reskin').length) && (t.id !== 'retopo' || S.modelsFor('retopo').length)),    // an older core has no task reskin / retopo: no tab
-      extraPanel: (k, t) => extraPanel(k, t),
+      tasks: TASKS.filter(t => (t.id !== 'reskin' || S.modelsFor('reskin').length) && (t.id !== 'retopo' || S.modelsFor('retopo').length) && (t.id !== 'engine_export' || S.modelsFor('engine_export').length)),    // an older core has no task reskin / retopo / engine_export: no tab
+      extraPanel: (k, t) => (t.id === 'engine_export' ? enginePanel(k, viewer) : extraPanel(k, t)),
       beforeSubmit: (spec, k) => beforeSubmit(spec, k),
     });
+    const viewerSet = viewer.set;                       // the Game engine report follows the model in the viewer
+    viewer.set = a => { viewerSet(a); kit._engResult?.set(a); };
     const top = h('div.m3d-top', viewer);
     kit.center.querySelector('.sc-body')?.prepend(top);
     el.append(kit.el);
@@ -112,6 +120,8 @@ export default S.defineStudio({
       if (p.action === 'reskin' && meshes[0]) { if (!kit.tasks.find(t => t.id === 'reskin')) { S.toast('Re-skin needs the newest core: restart Open Asset Studio.', { kind: 'warn' }); return; }
         kit.setTask('reskin'); await kit.slots.mesh.set([meshes[0].id]); viewer.set(meshes[0]); S.toast('Press Generate to recompute the skin weights for this skeleton.', { kind: 'info' }); return; }
       if (p.action === 'motion' && meshes[0]) { kit.setTask('motion'); await kit.slots.mesh.set([meshes[0].id]); viewer.set(meshes[0]); S.toast('Character loaded: describe the movement and press Generate.', { kind: 'info' }); return; }
+      if (p.action === 'engine' && meshes.length) { if (!kit.tasks.find(t => t.id === 'engine_export')) { S.toast('Game engine export needs the newest core: restart Open Asset Studio.', { kind: 'warn' }); return; }
+        kit.setTask('engine_export'); await kit.slots.mesh.set(meshes.map(a => a.id)); viewer.set(meshes[0]); return; }
       if (p.action === 'export' && meshes.length) { kit.setTask('mesh_export'); await kit.slots.mesh.set(meshes.map(a => a.id)); viewer.set(meshes[0]); return; }
       return kit.receive(p);
     }
@@ -167,7 +177,7 @@ function extraPanel(kit, t) {
     return h('div.field-help', ic('info', 13), ' HY-Motion writes up to 12 s of human motion from the text and retargets it onto the skeleton of the rigged character (the original asset is not changed; the result plays in the viewer). The character must be a two-legged, two-armed humanoid standing upright; other skeletons are refused with a reason. Prompts in English work best (“a person …”). “Root motion: in place” keeps the character on the spot. Commercial use: Tencent’s licence excludes the EU, UK and South Korea.');
   }
   if (t.id === 'mesh_export') {
-    return h('div.field-help', ic('info', 13), ' Presets: “mobile” 5k faces, “pc” 30k faces (untextured shape, then retexture), “textured_glb” keeps the PBR texture. OBJ exports a zip with .mtl and texture maps.');
+    return h('div.field-help', ic('info', 13), ' Presets: “mobile” 5k faces, “pc” 30k faces (untextured shape, then retexture), “textured_glb” keeps the PBR texture. OBJ exports a zip with .mtl and texture maps. Making something for Unreal, Unity, Godot or the web? Use the Game engine tab: LOD levels, collision and engine-named textures.');
   }
   return null;
 }
@@ -179,6 +189,7 @@ function beforeSubmit(spec, kit) {
     for (const [k, v] of Object.entries(all)) if (k.startsWith('tex_') || ['super_res', 'sr_tile', 'bake_exp', 'bake_angle', 'vertex_inpaint', 'uv_padding', 'metallic_scale', 'roughness_scale'].includes(k)) spec.params[k] = v;
   }
   if (t.id === 'retopo') return retopoBeforeSubmit(spec, kit);
+  if (t.id === 'engine_export') return engineBeforeSubmit(spec, kit);
   const first = spec.inputs[0];
   if (t.id === 'mesh_export') { spec.params.batch = spec.inputs.length; spec.title = `Export ${spec.params.export_type?.toUpperCase() || ''} · ${spec.inputs.length} mesh(es)`; }
   if (t.id === 'shape') spec.title = `3D from ${kit.slots.image?.metas.get(first?.asset)?.name || 'image'}`.slice(0, 60);

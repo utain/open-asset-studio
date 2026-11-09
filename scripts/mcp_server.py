@@ -114,6 +114,12 @@ MESH_ATTACHMENTS = {
     "retopo_normal.png": "baked normal map, tangent space, OpenGL Y+ (retopo task)",
     "retopo_orm.png": "baked R = AO, G = roughness, B = metallic (retopo task)",
     "retopo_report.json": "retopo measurements (faces, quad %, bake fidelity, warnings)",
+    "engine_unreal.zip": "game-engine package for Unreal: FBX with LODs + UCX_ collision, T_ textures, manifest (engine_export task)",
+    "engine_unity.zip": "game-engine package for Unity: FBX with LODs + collision hulls, URP / HDRP texture packing, Editor postprocessor (engine_export task)",
+    "engine_godot.zip": "game-engine package for Godot: GLB with -convcolonly collision hulls (engine_export task)",
+    "engine_gltf.zip": "web / generic glTF package: GLB with MSFT_lod levels + separate collision GLB (engine_export task)",
+    "engine_report.json": "engine export measurements (LOD triangles and error, hulls, textures, warnings)",
+    "engine_collision.glb": "the collision hulls alone, for a look in any glTF viewer (engine_export task)",
     "motion.npz": "raw motion data (motion task)",
     "retarget.json": "how the motion was mapped onto this skeleton (motion task)",
 }
@@ -131,6 +137,13 @@ def mesh_view(a: dict, files: list, full: bool = False) -> dict:
     r = w.get("retopo")
     if r:
         out["retopo"] = {k: r[k] for k in ("faces", "quad_pct", "triangles", "tex_size", "dist_p99_frac") if k in r}
+    e = w.get("engine")
+    if isinstance(e, dict):
+        out["engine"] = {"target": e.get("target"), "name": e.get("name"), "rigged": e.get("rigged"), "package": e.get("package"),
+                         "lods": [{"name": x.get("name"), "tris": x.get("tris")} for x in e.get("lods") or []],
+                         "hulls": e.get("hulls"), "collision": e.get("collision"), "files": e.get("files"),
+                         "deliveries": [{"destination": d.get("destination"), "at": d.get("at")} for d in e.get("deliveries") or []] or None}
+        out["engine"] = {k: v for k, v in out["engine"].items() if v not in (None, [], {})}
     out = {k: v for k, v in out.items() if v not in (None, [], {})}
     out["rigged"], out["animations"] = rigged, list(anims)
     att = [f["name"] for f in files if f.get("role") == "attachment"]
@@ -361,7 +374,8 @@ def _setting_view(f: dict, value, *, overridden: bool | None = None, system_valu
 
 
 def _settings_fields(schema: dict) -> list:
-    return [f for f in schema.get("fields", []) if f.get("gui") is not False]       # json maps (API models / endpoints) are not exposed
+    # json maps (API models / endpoints) are not exposed; neither are the delivery folders (paths of this machine: engine_destinations shows what a caller may see)
+    return [f for f in schema.get("fields", []) if f.get("gui") is not False and f.get("key") != "engine.destinations"]
 
 
 def t_get_settings(a, _ctx):
@@ -667,6 +681,23 @@ def t_import_file(a, ctx):
     return asset_view(http("POST", "/api/upload", raw=body, ctype=ctype, timeout=300), True)
 
 
+def t_engine_destinations(_a, ctx):
+    d = http("GET", "/api/x/engine/destinations")
+    dests = d.get("destinations") or []
+    if not ctx.allow_paths:              # the REST call came from 127.0.0.1, so the core thinks it is local: never pass folder paths on
+        dests = [{k: v for k, v in x.items() if k != "path"} for x in dests]
+    return {"destinations": dests, "problems": d.get("problems") if ctx.allow_paths else None,
+            "note": "Add or change destinations by editing settings.json (key engine.destinations); they cannot be set from here."}
+
+
+def t_deliver_engine_export(a, ctx):
+    if not ctx.allow_paths:
+        raise StudioError("deliver_engine_export writes files into a game project on the studio's machine, so it only works for MCP clients on that "
+                          "machine (this request came over the network). Use the web UI on that computer.", "input")
+    body = {"asset_id": a["asset_id"], "destination": a["destination"], "overwrite": bool(a.get("overwrite"))}
+    return http("POST", "/api/x/engine/deliver", body)
+
+
 def t_update_asset(a, _ctx):
     patch = {k: a[k] for k in ("name", "tags", "rating", "notes", "favorite") if k in a}
     return asset_view(http("PATCH", f"/api/assets/{urllib.parse.quote(a['id'])}", patch), True)
@@ -810,7 +841,7 @@ PROJECT = {"type": "string", "description": "project id (default: default)"}
 INPUTS = {"type": "array", "description": "input assets, e.g. [{asset: '<id>', role: 'ref'}] (roles per model: get_model -> input_slots)",
           "items": {"type": "object", "properties": {"asset": S, "role": S}, "required": ["asset"]}}
 RO = {"readOnlyHint": True, "openWorldHint": False}
-TASKS_HELP = 'Tasks: image (t2i, edit, multi_ref, inpaint, rgba, extract, rmbg, upscale, recenter), 3D (multiview, text3d, shape, texture, retopo = rebuild a dense mesh as a clean quad low poly with a face budget and baked normal / colour / AO maps (CPU, 6-40 s; before rig), rig = auto-rig a mesh, reskin = recompute the skin weights of a rigged mesh after editing its skeleton with tool rig.edit, motion = text to motion for a rigged humanoid, mesh_export), audio (sfx, ambience, music, song, tts, voice_design, voice_clone, voice_convert, sing, s2s, v2a, separate, dub, qa_clap, qa_asr), text (transcribe, subtitles, audio_ask), video (t2v, i2v, flf2v, interpolate).'
+TASKS_HELP = 'Tasks: image (t2i, edit, multi_ref, inpaint, rgba, extract, rmbg, upscale, recenter), 3D (multiview, text3d, shape, texture, retopo = rebuild a dense mesh as a clean quad low poly with a face budget and baked normal / colour / AO maps (CPU, 6-40 s; before rig), rig = auto-rig a mesh, reskin = recompute the skin weights of a rigged mesh after editing its skeleton with tool rig.edit, motion = text to motion for a rigged humanoid, mesh_export, engine_export = package a mesh for Unreal / Unity / Godot / glTF: LOD chain sharing the textures, collision hulls (UCX_ / -convcolonly), engine texture packing and naming (CPU, 3-12 s; rigged meshes stay GLB; then deliver_engine_export copies it into the game project)), audio (sfx, ambience, music, song, tts, voice_design, voice_clone, voice_convert, sing, s2s, v2a, separate, dub, qa_clap, qa_asr), text (transcribe, subtitles, audio_ask), video (t2v, i2v, flf2v, interpolate).'
 TOOLS = [
     {"name": "studio_status", "description": "Studio health, queue (running / queued jobs), free memory, loaded models, profile and licence filter.",
      "inputSchema": {"type": "object", "properties": {}}, "annotations": RO, "fn": t_status},
@@ -848,6 +879,7 @@ TOOLS = [
         "Use list_models / get_model first for valid params and input slots (roles); list_tools for CPU tools. seed=-1 is random; the real seed is in the asset. "
         "3D chain: t2i / rgba -> recenter -> shape -> texture -> [retopo (inputs=[{asset: mesh, role: 'mesh'}], params.target_faces / tex_size or a preset: mobile | pc | hero)] -> rig (inputs=[{asset: mesh}]) -> motion (inputs=[{asset: rigged mesh, role: 'mesh'}], params.prompt); "
         "or tool 'mesh.flex_preview' on a rigged mesh for test clips. "
+        "For a game engine: task 'engine_export' (CPU, inputs=[{asset: mesh, role: 'mesh'}], params.target unreal | unity | godot | gltf, lods, collision, size_mode / height_m, tex_max; get_model has the rest) writes a NEW mesh asset with an engine_<target>.zip attachment (FBX/GLB, LODs, collision, engine-named textures); use deliver_engine_export to copy it into the user's game project. "
         "Edit a rig: get_rig(asset) to see the bones, preview_rig_edit(asset, ops) to check the ops without writing, then tool 'rig.edit' with params.ops (add_chain / add_bone / move_joint / delete_bone / rename / rename_standard / reparent; list_tools has the full syntax), "
         "e.g. submit_job(tool='rig.edit', params={ops:[{op:'add_chain', parent:'hips', count:5, direction:'back', length:0.08, name_prefix:'tail'}]}, inputs=[{asset:'<rigged mesh>', role:'mesh'}]); "
         "the result is a NEW asset; if it reports needs_reskin (new bones have no weights) run submit_job(task='reskin', inputs=[{asset:'<edited mesh>', role:'mesh'}]) (GPU, ~35 s, keeps the skeleton, recomputes the weights). "
@@ -871,6 +903,16 @@ TOOLS = [
     {"name": "import_file", "description": "Add a local file (image, audio, GLB, video) to a project as an asset, e.g. to use it as a job input. as_voice=true marks audio as a voice reference.",
      "inputSchema": {"type": "object", "properties": {"path": S, "project": PROJECT, "name": S, "tags": {"type": "array", "items": S}, "as_voice": B}, "required": ["path"]},
      "fn": t_import_file},
+    {"name": "engine_destinations", "description": ("The game-project folders the studio may deliver engine packages into (id, label, engine, subfolder, size limit; the folder path only for clients on the "
+                                                    "studio machine). They are configured by the user in settings.json and cannot be changed through MCP. Empty = delivery is not set up."),
+     "inputSchema": {"type": "object", "properties": {}}, "annotations": RO, "fn": t_engine_destinations},
+    {"name": "deliver_engine_export", "description": ("Copy the package of an engine_export result (asset_id = the mesh asset it produced) into the user's game project: "
+                                                     "<destination folder>/<subfolder>/<asset name>/. WRITES FILES INTO THE USER'S GAME PROJECT: ask the user first, and name the destination. "
+                                                     "destination = an id from engine_destinations (never a path). Existing files are only replaced when the studio wrote them and they were not edited "
+                                                     "(overwrite=true is needed to replace them); nothing is ever deleted. Only for MCP clients on the studio machine."),
+     "inputSchema": {"type": "object", "properties": {"asset_id": S, "destination": {**S, "description": "destination id from engine_destinations"}, "overwrite": B},
+                      "required": ["asset_id", "destination"]},
+     "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}, "fn": t_deliver_engine_export},
     {"name": "update_asset", "description": "Rename, tag, rate (0-5), favourite or annotate an asset.",
      "inputSchema": {"type": "object", "properties": {"id": S, "name": S, "tags": {"type": "array", "items": S}, "rating": I, "notes": S, "favorite": B}, "required": ["id"]},
      "fn": t_update_asset},

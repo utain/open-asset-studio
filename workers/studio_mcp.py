@@ -32,7 +32,7 @@ STEP = {
     "properties": {
         "id": {"type": "string", "description": "short step id, e.g. s1, props_img, amb"},
         "title": {"type": "string"},
-        "task": {"type": "string", "description": "registry task id (t2i, rgba, shape, texture, retopo, rig, reskin, motion, sfx, ambience, music, tts, ...; list_models shows them all)"},
+        "task": {"type": "string", "description": "registry task id (t2i, rgba, shape, texture, retopo, rig, reskin, motion, engine_export, sfx, ambience, music, tts, ...; list_models shows them all)"},
         "tool": {"type": "string", "description": "instead of task+model: a CPU tool id such as audio.loop, audio.normalize or rig.edit (params.ops = list of rig edit operations; see the system prompt)"},
         "model": {"type": "string", "description": "model id from list_models (omit = the task's default)"},
         "params": {"type": "object", "description": "model params by name (prompt, negative, seconds, batch, seed, ...)"},

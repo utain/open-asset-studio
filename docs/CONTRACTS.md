@@ -1044,6 +1044,53 @@ n/a / hidden; the per-job choice is stored in `prefs style.job.<project>.<studio
 
 ---
 
+## 12. Game-engine export and delivery (`app/plugins/engine.py`, `app/netguard.py`, `workers/engine_*.py`, `web/studios/i3d/engine.js`)
+
+Design, measurements and validation: `docs/research/engine_export.md`.
+
+### 12.1 Task, model, assets
+
+Task `engine_export` (CPU), model `engine-export`, handler `engine.export` (`gpu=False`), backend `engine` (`shares_env_with: retopo`, script `workers/engine_worker.py`).
+Inputs: `mesh` slots (1 to 12 mesh assets, GLB). Params: see `models.d/engine.yaml` (`target` unreal | unity | godot | gltf, `name`, `lods`, `lod_preset`, `lod_ratios`, `collision`
+auto | none | box | obb | capsule | convex_hull | decomposition, `collision_quality`, `max_hulls`, `size_mode`, `height_m`, `pivot`, `yaw`, `tex_max`, `unity_pipeline`, ...).
+Output: one **mesh asset** per input. `mesh.glb` is the preview (LOD0, lower LODs as `MSFT_lod` nodes, hidden hull nodes; `extras.oas_engine = {lod0, lods, hulls, root}`).
+Attachments: `engine_<target>.zip` (package: FBX or GLB, `Textures/`, `manifest.json`, `engine_report.json`, `README.txt`, Unity: `Editor/*.cs`), `engine_report.json`, `engine_collision.glb`.
+
+`meta.worker.engine = {target, name, rigged, lods: [{name, tris, ratio, error, screen_size}], hulls, collision, volume_ratio, package, package_bytes, files, textures, images_resized,
+style, deliveries: [{destination, at}]}`. The manifest carries `x_style = {name, version, hash}` of the project's style guide (section 11.2) and the licence of the source mesh.
+The generic texture packer `workers/engine_common.pack_textures(maps, target)` and `engine_material(target)` are the hook for the seamless-material export (canonical maps: OpenGL normal,
+ORM = R occlusion, G roughness, B metallic).
+
+### 12.2 Settings
+
+`engine.target`, `engine.height_m`, `engine.prefix_static`, `engine.prefix_texture` (per project, `config.DEFAULT_SETTINGS["engine"]`; they pre-fill the form, only the prefixes are read by the handler) and
+`engine.destinations` (system, `editable: false`: **only in settings.json**). A destination: `{id: [a-z0-9_-]{1,32}, label, path, engine: unreal|unity|godot|gltf|any, subdir: "OpenAssetStudio", max_mb: 512, allow_lan: false}`.
+`GET /api/settings`, the bootstrap payload and the SSE `settings` event never contain `path` for a non-local caller (`main._redact_engine`, `_engine_public`).
+
+### 12.3 Delivery API (`/api/x/engine`)
+
+| call | |
+|---|---|
+| `GET /destinations` | `{destinations: [{id, label, subdir, engine, max_mb, allow_lan, can_deliver, path?}], local, problems}`; `path` only for a local caller; invalid entries are listed in `problems` and unusable |
+| `POST /deliver {asset_id, destination, overwrite?}` | copies the package of an engine export into `<path>/<subdir>/<name>/`; body model `extra=forbid` (a `path` is a 422); `200 {ok, destination, relpath, written, unchanged, stale}` |
+
+Refusals (all 4xx `{error, code, kind: "input"}`, logged): `no_destination` 404 (not configured / path given as id / invalid destination), `origin` 403 (browser `Origin` not the studio's), `not_local` 403 (the peer or an
+`X-Forwarded-For` / `Forwarded` hop is not local and `allow_lan` is false), `not_a_package` 400, `engine_mismatch` 400, `too_big` 413 (`max_mb`, or the zip-bomb guard), `bad_package` / `bad_member` / `bad_name` / `too_many_files` 400 (member name, extension or count
+over the whitelist), `no_package` 404, `bad_ledger` 409, `exists_foreign` 409 (a file of the same name that the studio did not write), `io` 500, `unsafe_path` 409 (a symlink or non-folder on the path; the walk uses `O_NOFOLLOW` file descriptors), `not_ours` 409 (the folder exists without a ledger), `edited` 409 (a delivered file was changed
+since; **never overwritten**, with or without `overwrite`), `exists` 409 (own, unedited files differ and `overwrite` is false), `busy` 409 (one delivery at a time). Files are written to an `O_EXCL` temp name then `os.replace`d; nothing is
+deleted; the ledger `.oas-delivery.json` (sha256 per file) is the only extra file. `app/netguard.py`: `origin_ok(request)`, `is_local(request)` (stdlib, shared helpers for plugins).
+
+MCP: `engine_destinations` (paths only for local clients) and `deliver_engine_export` (gated like `import_file`: the MCP client itself must be local, because the HTTP MCP server calls the REST API from 127.0.0.1;
+`ctx.allow_paths`). `submit_job` documents `engine_export`. The in-app Assistant server (`workers/studio_mcp.py`) only reads the destinations (id / label / engine, no path).
+
+### 12.4 Web
+
+`web/studios/i3d/engine.js` (not a studio module): the "What you get" card, the report panel (LOD table, collision, textures, Download, Deliver), the viewer hook (`viewerHooks` in `i3d/common.js`: `{bar, src, stats}`; LOD
+switcher and a Hulls toggle by editing the GLB in the browser) and the Library action "Export for game engine..." (`registerSelectionAction`). 3D studio: tab "Game engine" in step "4 Export", send-to action `engine`.
+Export dialog (`core/components/exportdialog.js`): a hint row for mesh selections.
+
+---
+
 ## Changelog
 - 0.1.0: initial core.
 - 0.1.1 (image/3D studio): `app/main.py` keeps the catch-all static mount last after `load_plugins()`, so plugin routers
@@ -1136,3 +1183,10 @@ n/a / hidden; the per-job choice is stored in `prefs style.job.<project>.<studio
   optional `style: {version}` key. Drop-ins: `app/style_common.py`, `app/plugins/style.py` (tool `style.palette`), `prompts/style.yaml` (`style_describe`), `web/studios/style.js`.
   MCP: 4 new public tools (28), `submit_job.style`, `x_style` in `get_asset`, `style` in `studio_status` / `list_projects` / job results; the Assistant server gets `get_style_guide` and a step `style`.
   Integration points for later work: `core.style.register_task` / `STYLE_TASKS`, `x_material.map`, `x_style.{name,version,hash}` in export manifests, the two hook lists. Tests: `tests/test_style.py`.
+- (m) game-engine export (section 12; additive, no existing behaviour changes): new drop-ins `app/plugins/engine.py` (handler `engine.export`, router `/api/x/engine`: `/destinations`, `/deliver`),
+  `app/netguard.py`, `workers/engine_worker.py` + `engine_common.py` + `fbx_write.py` + `meshopt_ctypes.py` + `engine_files/`, `models.d/engine.yaml`, `install/engine.yaml` (extends `envs/retopo`: coacd, libmeshoptimizer.so),
+  `web/studios/i3d/engine.js`, `tests/test_engine_export.py`. Core-owned files touched with small hooks: `config.py` (`DEFAULT_SETTINGS["engine"]`), `settings_schema.py` + `settings_info.py` (group "Game engine", file-only
+  `engine.destinations`), `main.py` (`engine` in the settings payload / events / effective views; `_redact_engine` removes destination paths for non-local callers in GET `/api/settings`; PATCH of `engine.destinations`
+  is refused by `editable: false`), `web/core/components/exportdialog.js` (mesh hint), `web/core/uiinfo.js` (`engine_*` balloons), `param_info.py`. Result assets: mesh with `meta.worker.engine` and the attachments of 12.1.
+  MCP: 2 new public tools (30): `engine_destinations`, `deliver_engine_export`; `get_settings` hides destination paths from remote callers. Frontend extension point: `viewerHooks` (`i3d/common.js`).
+  Security: delivery only into folders named in settings.json, by id, local-only unless `allow_lan`, origin-checked, no symlink following, never overwrites an edited file, never deletes.

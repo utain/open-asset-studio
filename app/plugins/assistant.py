@@ -305,6 +305,9 @@ def tool_get_asset(project: str, args: dict) -> dict:
                          "animations": w.get("animations") or info.get("animations") or [], "textured": w.get("textured")}
         if w.get("retopo"):
             out["mesh3d"]["retopo"] = {k: w["retopo"][k] for k in ("faces", "quad_pct", "triangles", "tex_size") if k in w["retopo"]}
+        if isinstance(w.get("engine"), dict):
+            e = w["engine"]
+            out["mesh3d"]["engine"] = {k: e.get(k) for k in ("target", "name", "hulls", "collision", "package") if e.get(k) is not None}
     return out
 
 
@@ -593,6 +596,8 @@ Rules:
   intro stings and music beds (music, short); asset.export to deliver loudness-normalised audio or platform-sized images. Write prompts in English, in the target model's style
   (Stable Audio: comma-separated sound tags; images: concrete visual description, plain background for 3D).
 - Never retopo a rigged mesh (the skeleton and skin would be lost): retopo the unrigged one, then rig.
+- For a game engine, the last step can be task engine_export (CPU; params.target unreal | unity | godot | gltf) on the finished mesh: LOD chain, collision and engine-named
+  files in a zip. A plan never delivers into a game project folder; the user does that in the 3D studio.
 - Honour the USE CASE line when present (aspect ratios, lengths, loudness targets) and keep game support intact when the
   request is about a game.
 - Keep plans short (usually <= 12 steps). Step ids: short snake_case. Give every step a clear title.

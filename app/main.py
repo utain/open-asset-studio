@@ -129,9 +129,15 @@ def _studio_modules() -> list[str]:
     return sorted(p.name for p in d.glob("*.js")) if d.is_dir() else []
 
 
+def _engine_public(view) -> dict:
+    """The effective `engine` settings a browser may see: never `destinations` (their paths are for local callers only)."""
+    e = view.get("engine") or {}
+    return {k: e.get(k) for k in ("target", "height_m", "prefix_static", "prefix_texture")}
+
+
 def _settings_payload(c: Core, view) -> dict:
     """What the browser needs of the effective settings (system, or system + one project's overrides)."""
-    return {"ui": view.get("ui"), "profile": view.get("profile"), "license": view.get("license"), "export": view.get("export"),
+    return {"ui": view.get("ui"), "engine": _engine_public(view), "profile": view.get("profile"), "license": view.get("license"), "export": view.get("export"),
             "prompt": view.get("prompt"), "defaults": {t: c.registry.default_for(t, settings=view) for t in c.registry.tasks},
             "overridden": sorted(config.flatten(getattr(view, "overrides", None) or {}))}
 
@@ -287,9 +293,21 @@ def models_probe(req: ProbeReq):
     return {"backend": req.backend, "results": res}
 
 
+def _redact_engine(data: dict, request: Request) -> dict:
+    """`engine.destinations` holds folder paths of this machine: only same-machine callers get them (others see id / label)."""
+    from . import netguard
+
+    dests = (data.get("engine") or {}).get("destinations")
+    if not dests or netguard.is_local(request):
+        return data
+    out = dict(data)
+    out["engine"] = {**data["engine"], "destinations": [{k: v for k, v in d.items() if k != "path"} for d in dests if isinstance(d, dict)]}
+    return out
+
+
 @app.get("/api/settings")
-def settings_get():
-    return C().settings.data
+def settings_get(request: Request):
+    return _redact_engine(C().settings.data, request)
 
 
 @app.get("/api/settings/schema")
@@ -304,23 +322,23 @@ def _publish_settings(c: Core, project: str | None, patch: dict):
     """SSE `settings` event after a change of the system settings (project=None) or of one project's overrides. Clients
     must refetch their effective settings; a system event can carry values the current project overrides."""
     view = c.settings_for(project)
-    if {"profile", "license", "export", "ui", "prompt", "textgen", "defaults"} & set(patch):
+    if {"profile", "license", "export", "ui", "prompt", "textgen", "defaults", "engine"} & set(patch):
         c.bus.publish("settings", {"scope": "project" if project else "system", "project": project,
                                    "profile": view.get("profile"), "license": view.get("license"),
-                                   "export": view.get("export"), "ui": view.get("ui")})
+                                   "export": view.get("export"), "ui": view.get("ui"), "engine": _engine_public(view)})
     if "defaults" in patch or ("ui" in patch and "show_test_models" in (patch.get("ui") or {})):
         c.bus.publish("models", {"defaults": True, **({"project": project} if project else {})})
 
 
 @app.patch("/api/settings")
-def settings_patch(patch: dict):
+def settings_patch(patch: dict, request: Request):
     from . import settings_schema
 
     c = C()
     patch = settings_schema.validate_patch(patch, "system", c)
     out = c.settings.update(patch)
     _publish_settings(c, None, patch)
-    return out
+    return _redact_engine(out, request)
 
 
 def _project_settings_body(c: Core, project: str) -> dict:
@@ -334,7 +352,7 @@ def _project_settings_body(c: Core, project: str) -> dict:
     return {"project": project, "overrides": view.overrides, "overridden": sorted(config.flatten(view.overrides)),
             "effective": {"profile": view.get("profile"), "license": view.get("license"), "export": view.get("export"),
                           "defaults": view.get("defaults"), "textgen": {p: view.get("textgen", p) for p in tg},
-                          "prompt": view.get("prompt"), "ui": view.get("ui")},
+                          "prompt": view.get("prompt"), "ui": view.get("ui"), "engine": _engine_public(view)},
             "resolved": {"defaults": {t: c.registry.default_for(t, settings=view) for t in c.registry.tasks},
                          "textgen": tg, "export_preset": profiles.default_export_preset(view)}}
 

@@ -171,3 +171,28 @@ section.page[data-studio="image"] .studio-panel, section.page[data-studio="3d"] 
   .rt-table { font-size: 11.5px; grid-template-columns: 70px minmax(0, 1fr) minmax(0, 1fr); }
   .rt-table > * { padding: 4px 5px; }
 }
+
+/* ---- Game engine export: "what you get" card, report, delivery (eng-) */
+.eng-panel { display: flex; flex-direction: column; gap: 10px; min-width: 0; margin-top: 4px; }
+.eng-card, .eng-result { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--line-soft); border-radius: 12px; background: var(--panel-2); font-size: 12.5px; min-width: 0; }
+.eng-title { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; color: var(--text); }
+.eng-title > .dim { min-width: 0; overflow-wrap: anywhere; }
+.eng-sp { flex: 1 1 0; }
+.eng-sub { color: var(--text-3); font-weight: 600; margin-top: 4px; }
+.eng-table { display: grid; grid-template-columns: minmax(70px, 1.4fr) repeat(4, minmax(0, 1fr)); border-top: 1px solid var(--line-soft); font-variant-numeric: tabular-nums; }
+.eng-table.eng-table3 { grid-template-columns: minmax(0, 2fr) minmax(0, 2fr) auto; }
+.eng-table.eng-table3 > :nth-child(3n) { white-space: nowrap; }
+.eng-table > * { padding: 4px 6px; border-bottom: 1px solid var(--line-soft); min-width: 0; overflow-wrap: anywhere; color: var(--text); }
+.eng-table > b { color: var(--text-3); font-weight: 600; }
+.eng-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.eng-deliver { display: flex; flex-direction: column; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line-soft); }
+.eng-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; }
+.eng-row .select { min-width: 0; max-width: 100%; flex: 1 1 140px; }
+.eng-k { display: inline-flex; align-items: center; gap: 6px; color: var(--text-3); font-weight: 600; }
+.eng-ow { display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); cursor: pointer; }
+.eng-note { font-size: 12px; overflow-wrap: anywhere; }
+@media (max-width: 480px) {
+  .eng-table { grid-template-columns: minmax(60px, 1.3fr) repeat(4, minmax(0, 1fr)); font-size: 11.5px; }
+  .eng-table.eng-table3 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+  .eng-table > * { padding: 3px 4px; }
+}

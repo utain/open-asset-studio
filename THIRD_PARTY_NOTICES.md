@@ -47,6 +47,7 @@ Upstream source code that the workers import, cloned at the pinned commit from `
 | `vendor/Make-An-Audio-2` | [bytedance/Make-An-Audio-2](https://github.com/bytedance/Make-An-Audio-2) | `f02ec0a3d874` | MIT |
 | `vendor/Matcha-TTS` | [shivammehta25/Matcha-TTS](https://github.com/shivammehta25/Matcha-TTS) | `bd4d90d93214` | MIT |
 | `vendor/MeloTTS` | [myshell-ai/MeloTTS](https://github.com/myshell-ai/MeloTTS) | `209145371cff` | MIT |
+| `vendor/meshoptimizer` | [zeux/meshoptimizer](https://github.com/zeux/meshoptimizer) | `f0a684f11ead` | MIT (c) Arseny Kapoulkine. Built into `envs/retopo/lib/libmeshoptimizer.so` by `install/engine.yaml` and called through ctypes (`workers/meshopt_ctypes.py`) for the LOD chain of the game-engine export |
 | `vendor/MiniCPM-o` | [OpenBMB/MiniCPM-o](https://github.com/OpenBMB/MiniCPM-o) | `47e1fa75b45b` | Apache-2.0 (code; model licence separate) |
 | `vendor/MMAudio` | [hkchengrex/MMAudio](https://github.com/hkchengrex/MMAudio) | `974010a026c7` | MIT (code; weights CC-BY-NC-4.0) |
 | `vendor/OpenVoice` | [myshell-ai/OpenVoice](https://github.com/myshell-ai/OpenVoice) | `74a1d147b17a` | MIT |
@@ -105,6 +106,13 @@ in addition to this repository's Apache-2.0 licence.
   for tangents, [trimesh](https://github.com/mikedh/trimesh) (MIT), fast-simplification (MIT), SciPy and NumPy (BSD), Pillow (MIT-CMU).
   Instant Meshes is listed in the table above. The `retopo-instant-meshes` registry entry is marked commercial because every
   component is BSD / MIT / Apache; re-check the Instant Meshes repository licence (see `verify: true` above) before shipping a product.
+
+- **Game-engine export** (`models.d/engine.yaml`, `workers/engine_worker.py`, `app/plugins/engine.py`; commercial: yes). LODs use
+  [meshoptimizer](https://github.com/zeux/meshoptimizer) (MIT, listed in the table above). Collision uses
+  [CoACD](https://github.com/SarahWeiii/CoACD) 1.0.14 (MIT, (c) Xinyue Wei et al.; the `coacd` PyPI wheel bundles OpenVDB (MPL-2.0), oneTBB (Apache-2.0),
+  Boost (BSL-1.0), Eigen (MPL-2.0), spdlog (MIT), zlib and other permissive libraries; installed into `envs/retopo` and pinned in `env-lock/retopo.txt`).
+  The binary FBX 7.4 writer (`workers/fbx_write.py`) is original code written from the public file-format description and checked with ufbx;
+  it contains no Autodesk code and uses no FBX SDK. The Unity editor script `workers/engine_files/OpenAssetStudioPostprocessor.cs` is part of this project (it calls only the public Unity API).
 
 ## Not included: model weights
 

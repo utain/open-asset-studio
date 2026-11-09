@@ -541,6 +541,25 @@ PARAM_INFO: dict[str, str] = {
                "32 for hero assets.",
     "ao_distance": "How far away an object still casts ambient shadow, as a share of the model size. Small values darken only "
                    "tight creases; large values darken whole areas between limbs.",
+    # ------------------------------------------------------------------------------------------- engine export
+    "target": "Which game engine the package is made for. Unreal and Unity get an FBX file plus textures named the way that engine likes; Godot and the web get a GLB. Characters with a skeleton are always a GLB. Pick the engine you will import into.",
+    "name": "The name the model gets in your game project (letters, digits and underscores). Empty uses the asset's name. Unreal adds its usual SM_ (static) or SK_ (skeleton) prefix for you.",
+    "lods": "LOD means level of detail: lighter copies of the model that the engine shows when it is far from the camera, so a scene with many objects runs faster. 3 adds three lighter levels below the full model; 0 makes none. Godot makes its own levels and ignores this.",
+    "lod_preset": "How much each lighter level keeps of the full model's triangles. Halves keeps 50%, 25% and 12.5%. Aggressive drops faster (40%, 15%, 6%) for mobile or crowds; gentle (70%, 50%, 35%) keeps more shape for hero objects. Custom uses your own list below.",
+    "lod_ratios": "Your own list of levels for the Custom steps, separated by commas. Numbers up to 1 are fractions of the full model (0.5,0.25,0.1); bigger numbers are exact triangle counts (6000,2500,800).",
+    "lod_max_error": "A safety limit: a level stops getting lighter when the shape would change by more than this share of the model size. Lower keeps the silhouette truer but may give fewer or heavier levels. The default suits most models.",
+    "lod_min_tris": "No level is made lighter than this many triangles, because tiny levels look broken. Raise it for characters, lower it for simple props.",
+    "collision": "The invisible shapes a game uses to decide what a model touches, much cheaper than its real surface. Auto picks several convex pieces that follow the shape for objects and one capsule for a character. Box and capsule are the simplest; None skips collision.",
+    "collision_quality": "How closely the collision pieces follow the shape. Fast makes a few rough pieces, detailed makes more and tighter ones but takes longer to compute and costs more physics time in the game. Balanced is right for most props.",
+    "max_hulls": "The most separate convex pieces the collision may use. More pieces fit the shape better but make physics slower in the game; hollow shapes like chairs or arches need more than blocks do.",
+    "hull_max_verts": "The most corner points each collision piece may have. Lower is faster for the engine's physics; 64 is within Unity's limit for convex colliders, so pieces import without being simplified again.",
+    "size_mode": "Keep leaves the model at the size it has now. Height scales it so it is a real-world height in metres, which is the easiest way to get a character or prop the right size in the engine.",
+    "height_m": "The real-world height in metres the model is scaled to when Size is set to Height. 1.8 is an adult person, 0.9 a chair, 2.1 a door.",
+    "pivot": "The point the model turns and scales around in the engine. Bottom centre puts it on the floor under the middle, which is right for things that stand on the ground. Keep leaves it as it is.",
+    "tex_max": "Shrinks the texture pictures to at most this size (keeping power-of-two sizes) to save memory in the game. Keep leaves them as they are. 1024 suits mobile, 2048 PC, 4096 only for close-up hero items.",
+    "unity_pipeline": "Unity can render with the Universal (URP) or High Definition (HDRP) pipeline and each wants its roughness, metal and occlusion maps packed differently. Both writes the files for each so you can use either; pick one to keep the package smaller.",
+    "yaw": "Turns the model around the vertical axis before it is saved, in steps of 90 degrees. Use it if the model faces the wrong way in your engine after import.",
+    "include_collision_preview": "Adds a separate GLB that shows only the collision pieces, so you can check them in any viewer, and lets the 3D studio draw them over the model. It is not needed in the game.",
 }
 
 # ------------------------------------------------------------------------------------------------- emotion sliders

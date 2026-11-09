@@ -85,6 +85,7 @@ export async function exportDialog(ids, { title = 'Export' } = {}) {
         i.on && i.format === 'jpeg' ? h('div.dim', { style: { fontSize: '12px' } }, 'JPEG has no transparency: transparent areas are flattened onto white.') : null));
     }
     if (otherN) parts.push(h('div.dim', { style: { fontSize: '12.5px' } }, `${otherN} other asset(s) (3D, video…) are included unchanged.`));
+    if (metas.some(m => m.type === 'mesh')) parts.push(h('div.dim', { style: { fontSize: '12.5px' } }, 'For Unreal, Unity or Godot packages (LOD levels, collision, engine textures) use 3D › Export › Game engine. Engine packages you already made are included as attachments.'));
     parts.push(h('div.dim', { style: { fontSize: '12px' } }, ic('shield-check', 12), ' Your library files are never modified: conversions are written to new files.'));
     body.replaceChildren(...parts);
   };

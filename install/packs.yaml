@@ -41,6 +41,7 @@ packs:
       - trellis-image-large     # [20 GB]
       - hunyuan3d-2.1           # [45 GB] shape + texture (texturing needs nvcc)
       - retopo-instant-meshes   # [4 GB] CPU: quad retopology + normal map bake of a dense mesh
+      - engine-export           # [0 GB] CPU: LOD chain + collision + Unreal / Unity / Godot / glTF package (shares the retopo env)
 
   video:
     title: Video

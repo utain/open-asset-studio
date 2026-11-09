@@ -1,0 +1,31 @@
+# Game-engine export: LOD chain (meshoptimizer 1.3, built from the pinned checkout) + collision (CoACD) in the retopo venv. No weights.
+# The venv itself is envs/retopo (install/retopo.yaml); this recipe only adds libmeshoptimizer.so and coacd to it.
+backend: engine
+env: retopo
+python: "3.12"
+torch: []
+lock: null
+lock_flags: []
+vendor: [meshoptimizer]
+steps:
+  - |
+    # coacd (MIT, manylinux wheel with its own OpenVDB / TBB); also in env-lock/retopo.txt
+    if ! "$PY" -c "import coacd" 2>/dev/null; then
+      uv pip install --no-deps coacd==1.0.14
+    fi
+  - |
+    # libmeshoptimizer.so (MIT) from vendor/meshoptimizer: one g++ line, ~4 s, rebuilt when the pinned commit changes
+    SHA=$(git -C vendor/meshoptimizer rev-parse HEAD)
+    LIB="$VIRTUAL_ENV/lib/libmeshoptimizer.so"
+    if [ ! -f "$LIB" ] || [ "$(cat "$LIB.sha" 2>/dev/null)" != "$SHA" ]; then
+      mkdir -p "$VIRTUAL_ENV/lib"
+      g++ -O2 -shared -fPIC -o "$LIB.tmp" vendor/meshoptimizer/src/*.cpp
+      mv "$LIB.tmp" "$LIB"
+      echo "$SHA" > "$LIB.sha"
+    fi
+check: "import coacd, ctypes, os, sys; ctypes.CDLL(os.path.join(sys.prefix, 'lib', 'libmeshoptimizer.so'))"
+manual:
+  - "Needs g++ (the retopo recipe already asks for a C++17 compiler). No sudo, no weights."
+tested: [linux-aarch64]
+size_gb: 0.05
+shares_env_with: retopo

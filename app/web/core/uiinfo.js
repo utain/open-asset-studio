@@ -30,6 +30,7 @@ export const UI_INFO = {
   'retopo.mesh': { title: 'Detailed model', text: 'The detailed model to rebuild: usually an Image → 3D or Texture result. It must not be rigged yet: retopologise first, then rig the clean copy. The original is kept.' },
   'rig.mesh': { title: 'Mesh to rig', text: 'A character or creature to give a skeleton, so that it can be posed and animated. It works best in a neutral A- or T-pose with arms and legs apart.' },
   'reskin.mesh': { title: 'Rigged mesh', text: 'A model that already has a skeleton, usually one you just edited with Edit rig. Its skeleton is kept exactly as it is and only the skin weights (how much each bone pulls the surface) are recomputed.' },
+  'engine_export.mesh': { title: 'Models for the game engine', text: 'The 3D models (GLB) to package for a game engine. A model with a skeleton stays a GLB; a static model also gets an FBX for Unreal or Unity. Several models are packaged one after the other, each into its own result. The originals are not changed.' },
   'motion.mesh': { title: 'Rigged character', text: 'The character to animate: a rigged two-legged, two-armed model from the Rig tab, standing upright in a T- or A-pose. Other skeletons are refused with a reason.' },
 
   // ------------------------------------------------------------- export dialog
@@ -82,6 +83,15 @@ export const UI_INFO = {
   rige_apply: { title: 'Apply', text: 'Writes your list of changes into a new copy of the model. New bones have no skin weight yet, so run Re-skin afterwards to make the surface follow them.' },
   rige_reskin: { title: 'Re-skin', text: 'Recomputes the skin weights (how strongly each bone pulls the surface) for the current skeleton. Needed after you add bones. It runs on the GPU and takes about half a minute; the skeleton itself is not changed.' },
   rige_undo: { title: 'Undo and Redo', text: 'Steps back or forward through your edits in the list. Nothing is saved until you press Apply.' },
+
+  // ------------------------------------------------------------- game engine export (3D studio, Export > Game engine)
+  engine_target: { title: 'What you get', text: 'A summary of the package for the engine you picked: which files are written (FBX or GLB), how many LOD levels, what kind of collision, and how the textures are named and packed. It updates as you change the settings below and is only a preview; the numbers come after the job runs.' },
+  engine_lod: { title: 'LOD level', text: 'LODs are lighter copies of the model that a game shows when it is far away. Pick a level to see it in the viewer; the numbers in the report say how many triangles each one has. All levels share the same texture, so only the shape changes.' },
+  engine_hulls: { title: 'Collision shapes', text: 'Shows the collision pieces the game physics will use, as coloured see-through shapes over the model. They should hug the model without sticking far out of it. Characters get a single capsule, props get several convex pieces.' },
+  engine_report: { title: 'Export report', text: 'What the export did: the triangles of every LOD and how far each one drifts from the full model, the collision pieces, the textures that were repacked for the engine, and anything that needed fixing. Warnings are not errors; they tell you what to look at.' },
+  engine_download: { title: 'Download package', text: 'A zip with everything to drop into a game project: the model file or files, the textures, a manifest and a short README. Unity packages also contain an optional editor script that sets up collision. The package is a copy; your original model is not changed.' },
+  engine_deliver: { title: 'Deliver to project', text: 'Copies the package straight into a game project folder on this computer, into a sub folder named after the model. Folders are set up by hand in settings.json, so this button only appears when one exists. Files that you changed after the last delivery are never overwritten, and nothing is ever deleted.' },
+  engine_overwrite: { title: 'Replace earlier delivery', text: 'When this model was delivered before and the files in the game project are still exactly as the studio wrote them, ticking this replaces them with the new ones. Files you edited in the meantime are always kept.' },
 };
 
 /** The (i) button for a UI_INFO key; null for an unknown key. `o`: {title} to rename the balloon, {facts: [[label, value, mono?], ...]} to add rows. */

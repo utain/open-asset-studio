@@ -180,8 +180,8 @@ PLAIN = {"id": "m1", "project": "default", "type": "mesh", "name": "knight", "ma
 
 def test_tool_count_stays_reasonable_and_names_unique(mcp):
     names = [t["name"] for t in mcp.TOOLS]
-    assert len(names) == len(set(names)) <= 28
-    assert {"retry_job", "delete_asset", "improve_prompt", "save_preset", "export_assets", "studio_info", "get_settings", "update_settings", "preview_rig_edit", "get_style_guide", "set_style_guide", "style_from_assets", "preview_style"} <= set(names)
+    assert len(names) == len(set(names)) <= 30
+    assert {"retry_job", "delete_asset", "improve_prompt", "save_preset", "export_assets", "studio_info", "get_settings", "update_settings", "preview_rig_edit", "get_style_guide", "set_style_guide", "style_from_assets", "preview_style", "engine_destinations", "deliver_engine_export"} <= set(names)
     desc = {t["name"]: t["description"] for t in mcp.TOOLS}
     assert "rig" in desc["list_models"] and "motion" in desc["list_models"] and "mesh.flex_preview" in desc["submit_job"]
 
