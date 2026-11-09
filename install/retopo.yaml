@@ -1,0 +1,30 @@
+backend: retopo
+env: retopo
+python: "3.12"
+torch: []
+lock: retopo
+lock_flags: [--no-deps]
+vendor: [PyNanoInstantMeshes]
+steps:
+  - |
+    # Instant Meshes binding with the pure_quad switch (install/files/pynim_pure_quad.patch), built from the pinned checkout
+    if ! "$PY" -c "import pynanoinstantmeshes as n, sys; sys.exit(0 if 'pure_quad' in (n.remesh.__doc__ or '') else 1)" 2>/dev/null; then
+      B="$VIRTUAL_ENV/src/pynim"; rm -rf "$B"; mkdir -p "$(dirname "$B")"
+      cp -r vendor/PyNanoInstantMeshes "$B"
+      rm -rf "$B/.git"
+      patch -d "$B" -p1 < install/files/pynim_pure_quad.patch
+      CXXFLAGS="-fpermissive -Wno-changes-meaning" uv pip install --no-deps "$B"
+    fi
+  - |
+    # MikkTSpace tangents; optional (the worker falls back to its own tangents)
+    if ! "$PY" -c "import mikktspace" 2>/dev/null; then
+      echo 'cython<3' > "$VIRTUAL_ENV/cython-lt3.txt"
+      uv pip install --no-deps --build-constraints "$VIRTUAL_ENV/cython-lt3.txt" pymikktspace==0.3.0 \
+        || echo "WARNING: pymikktspace did not build; retopo uses its fallback tangents"
+    fi
+check: "import numpy, scipy, trimesh, xatlas, open3d, pynanoinstantmeshes, PIL, pygltflib, fast_simplification"
+manual:
+  - "Needs a C++17 compiler (gcc/g++) for Instant Meshes; cmake / ninja / nanobind come from PyPI. No sudo, no weights."
+tested: [linux-aarch64]
+size_gb: 0.5
+shares_env_with: null

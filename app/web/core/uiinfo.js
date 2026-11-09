@@ -27,6 +27,7 @@ export const UI_INFO = {
   'slot.mesh_export': { title: 'Meshes to export', text: 'The 3D models to clean up, reduce and convert. You can add several at once; each one becomes a new file and the originals stay as they are.' },
   'texture.mesh': { title: 'Mesh to texture', text: 'The shape (a 3D model without colours, or one you want to repaint) that gets a new texture. Usually the result of an Image → 3D job.' },
   'texture.image': { title: 'Reference image', text: 'Optional picture the texture is painted from. If you leave it empty, the image that the shape was made from is used.' },
+  'retopo.mesh': { title: 'Detailed model', text: 'The detailed model to rebuild: usually an Image → 3D or Texture result. It must not be rigged yet: retopologise first, then rig the clean copy. The original is kept.' },
   'rig.mesh': { title: 'Mesh to rig', text: 'A character or creature to give a skeleton, so that it can be posed and animated. It works best in a neutral A- or T-pose with arms and legs apart.' },
   'reskin.mesh': { title: 'Rigged mesh', text: 'A model that already has a skeleton, usually one you just edited with Edit rig. Its skeleton is kept exactly as it is and only the skin weights (how much each bone pulls the surface) are recomputed.' },
   'motion.mesh': { title: 'Rigged character', text: 'The character to animate: a rigged two-legged, two-armed model from the Rig tab, standing upright in a T- or A-pose. Other skeletons are refused with a reason.' },
@@ -69,7 +70,10 @@ export const UI_INFO = {
   models_status: { title: 'Status filter', text: 'Show only models in a certain state, such as ready to use, missing files, or cloud-only.' },
 
   // ------------------------------------------------------------- 3D viewer and rig tools
-  viewer_mode: { title: 'View mode', text: 'Textured shows the model as it will look. Shape is the plain white mesh, Edges and Wireframe show how the surface is built from triangles. This only changes the preview.' },
+  viewer_mode: { title: 'View mode', text: 'Textured shows the model as it will look. Shape is the plain white mesh, Edges and Wireframe show how the surface is built from triangles. This only changes the preview. Clean low-poly (retopo) models show their quads here instead of triangles.' },
+  retopo_compare: { title: 'Before / after', text: 'The original (left or top) and the clean low-poly copy (right or bottom) side by side; dragging one view turns both. Use Clay to judge the baked detail without colours, and Edges to see the new quads.' },
+  retopo_clay: { title: 'Clay', text: 'Shows both models in plain grey so you can see the shape and the baked normal detail without the colours distracting.' },
+  retopo_normal_toggle: { title: 'Normal map', text: 'Turns the baked normal map off and on. The difference is the detail the bake carries over from the original.' },
   bones: { title: 'Bones', text: 'Draws the skeleton of a rigged model on top of it. The lines are bones and the dots are joints; they move with the animation. Turn it on to check the rig or to start editing it.' },
   edit_rig: { title: 'Edit rig', text: 'Opens the skeleton editor: move, rename, add or delete bones, then apply the changes as a new copy of the model. Your original is never changed.' },
   rige_select: { title: 'Selecting a bone', text: 'Click a dot in the viewer, or pick a bone from the list. The selected bone can then be moved, renamed, deleted or given a child.' },

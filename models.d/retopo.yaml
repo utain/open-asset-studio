@@ -1,0 +1,50 @@
+# Retopo + bake (phase 1): dense mesh -> quad-dominant low poly with UVs and baked PBR maps, CPU only, no weights.
+# docs/research/retopo.md has the measurements; workers/retopo_worker.py the pipeline.
+tasks:
+  retopo: {label: Retopo + bake, modality: mesh, studio: 3d}
+
+backends:
+  retopo:
+    label: envs/retopo (Instant Meshes, xatlas, Open3D)
+    python: envs/retopo/bin/python
+    script: workers/retopo_worker.py
+    device: cpu
+    lock: retopo
+
+models:
+  - id: retopo-instant-meshes
+    name: Retopo + bake (Instant Meshes)
+    modality: mesh
+    tasks: [retopo]
+    default_for: [retopo]
+    order: 85
+    tags: [tool, cpu, quads, pbr]
+    summary: "Rebuilds a dense mesh as a clean, mostly-quad low-poly model with a face budget (Instant Meshes), unwraps UVs (xatlas) and bakes the detail and colour of the original into PBR textures: tangent-space normal map, base colour, AO + roughness + metallic. Output is a game-ready GLB for Rig and Motion, plus an OBJ with real quads. CPU only, no Blender, no weights."
+    features: {input: mesh, pbr: true, export: [glb, obj]}
+    backend: retopo
+    handler: retopo.bake
+    device: cpu
+    weights: []
+    license: {name: "BSD-3 (Instant Meshes) + MIT (xatlas, Open3D, pymikktspace)", commercial: true, note: "The result keeps the licence of the source mesh."}
+    memory_gb: 4          # measured peak RSS 2.1 GB (hero 30k / 4096, chunked bake; 2.5 GB for a 2.2M-triangle input), 7.7 GB before texel chunking
+    speed: "6 s (mobile) / 14 s (pc) / 41 s (hero) on 20 CPU cores, for a 550k-triangle character"
+    est: {load_s: 2, run_s: 15}
+    params:
+      - {name: target_faces, label: Target faces, type: int, min: 500, max: 100000, step: 500, default: 12000, group: basic, help: "Polygons (mostly quads) in the result; the GLB has about twice as many triangles."}
+      - {name: tex_size, label: Texture size, type: choice, choices: [512, 1024, 2048, 4096], default: 2048, group: basic}
+      - {name: bake_normal, label: Bake normal map, type: bool, default: true, group: basic}
+      - {name: bake_color, label: Bake colour, type: bool, default: true, group: basic, help: "Base colour + metallic / roughness from the source texture or vertex colours."}
+      - {name: bake_ao, label: Bake AO, type: bool, default: true, group: basic}
+      - {name: quad_mode, label: Topology, type: choice, choices: [quad_dominant, pure_quads], default: quad_dominant, group: advanced, help: "Pure quads subdivides every face: no triangles, but a coarser fit for the same budget."}
+      - {name: crease_angle, label: Keep creases above, type: float, min: 0, max: 90, step: 5, default: 0, group: advanced, help: "Degrees; 0 = off. Aligns edge flow to sharp edges (hard-surface props)."}
+      - {name: smooth_iter, label: Edge-flow smoothing, type: int, min: 0, max: 10, default: 2, group: advanced}
+      - {name: use_shape_mesh, label: Use stored shape mesh, type: bool, default: true, group: advanced, help: "Bake detail from white_mesh.glb (the dense shape) when the model has one."}
+      - {name: fill_holes, label: Fill holes up to (edges), type: int, min: 0, max: 512, default: 64, group: advanced}
+      - {name: min_part, label: Drop parts smaller than, type: float, min: 0, max: 0.2, step: 0.005, default: 0.01, group: advanced, help: "Fraction of all faces; loose fragments below it are removed."}
+      - {name: ray_distance, label: Ray distance, type: float, min: 0, max: 0.1, step: 0.001, default: 0, group: advanced, help: "Fraction of the model size; 0 = automatic."}
+      - {name: ao_rays, label: AO rays, type: int, min: 4, max: 64, step: 4, default: 16, group: advanced}
+      - {name: ao_distance, label: AO distance, type: float, min: 0.01, max: 0.5, step: 0.01, default: 0.08, group: advanced, help: "Fraction of the model size."}
+    presets:
+      mobile: {target_faces: 2500, tex_size: 1024, ao_rays: 16}
+      pc: {target_faces: 12000, tex_size: 2048, ao_rays: 16}
+      hero: {target_faces: 30000, tex_size: 4096, ao_rays: 16}

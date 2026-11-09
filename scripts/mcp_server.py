@@ -108,6 +108,12 @@ MESH_ATTACHMENTS = {
     "skeleton.json": "joint names / hierarchy of the rig (rig task, tool rig.edit)",
     "rigged_plain.glb": "the same rigged mesh without the flex / wiggle test clips (rig task)",
     "white_mesh.glb": "untextured mesh (shape / texture tasks)",
+    "retopo_quads.obj": "the low poly with real quads + UVs (retopo task; for Blender / Maya)",
+    "retopo_quads.mtl": "material for retopo_quads.obj",
+    "retopo_basecolor.png": "baked base colour map (retopo task)",
+    "retopo_normal.png": "baked normal map, tangent space, OpenGL Y+ (retopo task)",
+    "retopo_orm.png": "baked R = AO, G = roughness, B = metallic (retopo task)",
+    "retopo_report.json": "retopo measurements (faces, quad %, bake fidelity, warnings)",
     "motion.npz": "raw motion data (motion task)",
     "retarget.json": "how the motion was mapped onto this skeleton (motion task)",
 }
@@ -122,6 +128,9 @@ def mesh_view(a: dict, files: list, full: bool = False) -> dict:
            "needs_reskin": True if info.get("needs_reskin") else None,
            "textured": w.get("textured") if "textured" in w else None,
            "vertices": info.get("vertices"), "faces": info.get("faces"), "motion": w.get("motion")}
+    r = w.get("retopo")
+    if r:
+        out["retopo"] = {k: r[k] for k in ("faces", "quad_pct", "triangles", "tex_size", "dist_p99_frac") if k in r}
     out = {k: v for k, v in out.items() if v not in (None, [], {})}
     out["rigged"], out["animations"] = rigged, list(anims)
     att = [f["name"] for f in files if f.get("role") == "attachment"]
@@ -135,7 +144,11 @@ def mesh_view(a: dict, files: list, full: bool = False) -> dict:
     elif rigged and not anims:
         out["hint"] = "Rigged but no clips: run submit_job(tool='mesh.flex_preview') or task 'motion' on it."
     elif not rigged:
-        out["hint"] = "Not rigged: run task 'rig' on it before 'motion' or tool 'mesh.flex_preview'."
+        hint = "Not rigged: run task 'rig' on it before 'motion' or tool 'mesh.flex_preview'."
+        if (info.get("faces") or 0) > 100000 and not r:
+            hint = (f"Dense mesh ({info['faces']:,} triangles): run task 'retopo' (CPU) for a game-ready low poly with baked maps, then 'rig'. "
+                    + hint)
+        out["hint"] = hint
     return out
 
 
@@ -540,7 +553,7 @@ PROJECT = {"type": "string", "description": "project id (default: default)"}
 INPUTS = {"type": "array", "description": "input assets, e.g. [{asset: '<id>', role: 'ref'}] (roles per model: get_model -> input_slots)",
           "items": {"type": "object", "properties": {"asset": S, "role": S}, "required": ["asset"]}}
 RO = {"readOnlyHint": True, "openWorldHint": False}
-TASKS_HELP = 'Tasks: image (t2i, edit, multi_ref, inpaint, rgba, extract, rmbg, upscale, recenter), 3D (multiview, text3d, shape, texture, rig = auto-rig a mesh, reskin = recompute the skin weights of a rigged mesh after editing its skeleton with tool rig.edit, motion = text to motion for a rigged humanoid, mesh_export), audio (sfx, ambience, music, song, tts, voice_design, voice_clone, voice_convert, sing, s2s, v2a, separate, dub, qa_clap, qa_asr), text (transcribe, subtitles, audio_ask), video (t2v, i2v, flf2v, interpolate).'
+TASKS_HELP = 'Tasks: image (t2i, edit, multi_ref, inpaint, rgba, extract, rmbg, upscale, recenter), 3D (multiview, text3d, shape, texture, retopo = rebuild a dense mesh as a clean quad low poly with a face budget and baked normal / colour / AO maps (CPU, 6-40 s; before rig), rig = auto-rig a mesh, reskin = recompute the skin weights of a rigged mesh after editing its skeleton with tool rig.edit, motion = text to motion for a rigged humanoid, mesh_export), audio (sfx, ambience, music, song, tts, voice_design, voice_clone, voice_convert, sing, s2s, v2a, separate, dub, qa_clap, qa_asr), text (transcribe, subtitles, audio_ask), video (t2v, i2v, flf2v, interpolate).'
 TOOLS = [
     {"name": "studio_status", "description": "Studio health, queue (running / queued jobs), free memory, loaded models, profile and licence filter.",
      "inputSchema": {"type": "object", "properties": {}}, "annotations": RO, "fn": t_status},
@@ -571,7 +584,7 @@ TOOLS = [
         "Generate assets: run a model on a task (or a CPU tool on existing assets) through the studio's queue. One GPU job runs at a time. "
         "Waits up to wait_s (default 300, max 600) and returns the new assets with local file paths (and image previews). "
         "Use list_models / get_model first for valid params and input slots (roles); list_tools for CPU tools. seed=-1 is random; the real seed is in the asset. "
-        "3D chain: t2i / rgba -> recenter -> shape -> texture -> rig (inputs=[{asset: mesh}]) -> motion (inputs=[{asset: rigged mesh, role: 'mesh'}], params.prompt); "
+        "3D chain: t2i / rgba -> recenter -> shape -> texture -> [retopo (inputs=[{asset: mesh, role: 'mesh'}], params.target_faces / tex_size or a preset: mobile | pc | hero)] -> rig (inputs=[{asset: mesh}]) -> motion (inputs=[{asset: rigged mesh, role: 'mesh'}], params.prompt); "
         "or tool 'mesh.flex_preview' on a rigged mesh for test clips. "
         "Edit a rig: get_rig(asset) to see the bones, then tool 'rig.edit' with params.ops (add_chain / add_bone / move_joint / delete_bone / rename / rename_standard / reparent; list_tools has the full syntax), "
         "e.g. submit_job(tool='rig.edit', params={ops:[{op:'add_chain', parent:'hips', count:5, direction:'back', length:0.08, name_prefix:'tail'}]}, inputs=[{asset:'<rigged mesh>', role:'mesh'}]); "
@@ -679,7 +692,7 @@ def handle(msg: dict, emit=None, allow_paths=True) -> dict | None:
             "capabilities": {"tools": {"listChanged": False}}, "serverInfo": {"name": "open-asset-studio", "version": "1.0"},
             "instructions": ("Open Asset Studio makes images, 3D models, sound and video with local open-weight models. "
                              "Typical flow: list_models(task=...) -> get_model(id) -> [improve_prompt] -> submit_job(...) -> use the returned file paths; "
-                             "export_assets packages results. 3D: shape -> texture -> rig -> motion (get_asset shows mesh3d: rigged, joints, animation clips); edit a rig with get_rig + submit_job(tool='rig.edit') then task 'reskin'. "
+                             "export_assets packages results. 3D: shape -> texture -> [retopo for a game-ready low poly with baked maps] -> rig -> motion (get_asset shows mesh3d: rigged, joints, animation clips); edit a rig with get_rig + submit_job(tool='rig.edit') then task 'reskin'. "
                              "Check each model's licence before commercial use; many are non-commercial. "
                              "Never delete, spend cloud money or upload files without the user's explicit OK.")}}
     if method == "ping":

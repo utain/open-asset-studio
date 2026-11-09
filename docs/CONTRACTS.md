@@ -1030,3 +1030,4 @@ when it takes effect, scope, the settings key).
   (`S.infoBtn`, classes `.tip-info` / `.tip-bal`, balloons now sit above modals), `S.uiInfo` / `S.UI_INFO` (`web/core/uiinfo.js`), (i) in `paramform.js`,
   `promptbox.js`, `modelpicker.js`, `assetpicker.js` (`task` / `info` options), `taskstudio.js`, `exportdialog.js`, Providers, Models and the 3D viewer /
   rig editor. Test: `tests/test_param_info_api.py`.
+- (j) retopo + bake (additive only): `web/core/uiinfo.js` gains the keys `retopo.mesh`, `retopo_compare`, `retopo_clay`, `retopo_normal_toggle` and the `viewer_mode` text mentions quads (no behaviour change for existing keys). Everything else is a drop-in file (`models.d/retopo.yaml`, `app/plugins/retopo.py`, `workers/retopo_*.py`, `install/retopo.yaml`, `web/studios/i3d/retopo.js`).

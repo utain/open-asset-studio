@@ -23,6 +23,7 @@ vendor/MiniCPM-o https://github.com/OpenBMB/MiniCPM-o 47e1fa75b45b8c122ca2a52150
 vendor/MMAudio https://github.com/hkchengrex/MMAudio.git 974010a026c731054592d8f777218bd9d85a6c24
 vendor/OpenVoice https://github.com/myshell-ai/OpenVoice 74a1d147b17a8c3092dd5430504bd83ef6c7eb23
 vendor/parler-tts https://github.com/huggingface/parler-tts d108732cd57788ec86bc857d99a6cabd66663d68
+vendor/PyNanoInstantMeshes https://github.com/vork/PyNanoInstantMeshes.git d02a725f93a1a66308ae0a63532779ae815ecc32
 vendor/rvc https://github.com/RVC-Project/Retrieval-based-Voice-Conversion-WebUI 81eed5e8f68b6bed1789f682fe78cdd324495afc
 vendor/seed-vc https://github.com/Plachtaa/seed-vc 51383efd921027683c89e5348211d93ff12ac2a8
 vendor/Spark-TTS https://github.com/SparkAudio/Spark-TTS 2f1ea9082400547242641f5271b6f941c9f439d1

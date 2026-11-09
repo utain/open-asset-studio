@@ -512,6 +512,35 @@ PARAM_INFO: dict[str, str] = {
     # ------------------------------------------------------------------------------------------- remaining
     "max_faces": "A limit on the number of triangles. Larger meshes keep more detail but take longer and more memory; a smaller "
                  "limit is faster and lighter.",
+    # ------------------------------------------------------------------------------------------- retopo + bake
+    "target_faces": "How many polygons the clean model should have. Fewer is lighter and faster in a game but loses shape detail; "
+                    "the baked normal map brings back the fine surface detail, not the silhouette. Mobile games: a few "
+                    "thousand; PC characters: about ten thousand; close-up hero models: thirty thousand.",
+    "bake_normal": "Copies the fine surface detail of the original (wrinkles, seams, small bumps) into a normal map, so the light "
+                   "model still looks detailed when lit. Keep it on unless you only need the shape.",
+    "bake_color": "Copies the colours (and metallic / roughness) of the original onto the new model's texture. Turn it off for a "
+                  "plain grey model, for example when you will retexture it.",
+    "bake_ao": "Ambient occlusion: darkens creases and corners the light cannot reach, which adds depth in game engines. It is "
+               "the slowest bake step; turn it off for quick tests.",
+    "quad_mode": "Mostly quads keeps a few triangles where the flow needs them and follows the shape best. Pure quads has no "
+                 "triangles at all, which some modelling tools prefer, but it fits the shape less closely for the same face count.",
+    "crease_angle": "Makes the new edges follow sharp corners of the shape, which helps hard-surface props such as boxes, weapons "
+                    "or furniture. 0 turns it off, which is right for organic characters; try 30-45 degrees for hard edges.",
+    "smooth_iter": "How much the flow of the new edges is evened out. A little (the default) gives cleaner loops; more can round "
+                   "off small details. Rarely needs changing.",
+    "use_shape_mesh": "Many generated models keep a dense shape-only copy next to the lighter textured one. With this on, the "
+                      "detail is baked from that dense copy and the colour from the textured one, which gives the sharpest result.",
+    "fill_holes": "Small gaps in the new mesh up to this many edges are closed automatically. Bigger openings (a sleeve, a mouth) "
+                  "are kept on purpose. Set 0 to keep every hole.",
+    "min_part": "Removes tiny loose pieces (dust, stray fragments) that are smaller than this share of the model. Raise it if "
+                "specks remain; lower it if small separate parts such as earrings disappear.",
+    "ray_distance": "How far the bake looks for the original surface from the new one, as a share of the model size. Automatic "
+                    "works for almost every model; raise it only if the maps show stretched smears, lower it if details from a "
+                    "nearby part (an arm on the body) bleed through.",
+    "ao_rays": "How many directions are tested for each pixel of the AO map. More is smoother but slower; 16 is usually clean, "
+               "32 for hero assets.",
+    "ao_distance": "How far away an object still casts ambient shadow, as a share of the model size. Small values darken only "
+                   "tight creases; large values darken whole areas between limbs.",
 }
 
 # ------------------------------------------------------------------------------------------------- emotion sliders
@@ -765,6 +794,10 @@ PARAM_INFO_BY_TASK: dict[tuple[str, str], str] = {
                              "the model as it is. Painting adds time and cost.",
     ("text3d", "textured"): "Also paints the 3D shape with color in the same job. Turn it off if you only need the grey "
                             "shape. Texturing adds time and cost.",
+    # retopo: the texture size of the baked maps
+    ("retopo", "tex_size"): "The size of the baked texture pictures (colour, normal, AO). Bigger keeps more fine detail but makes "
+                            "the file and the GPU memory larger and the bake slower (4096 takes about three times longer than "
+                            "2048). Match it to how close the camera gets: 1024 for mobile, 2048 for PC, 4096 for hero assets.",
     # alpha_clean
     ("rmbg", "alpha_clean"): "Makes nearly invisible pixels at the cut-out edge fully transparent, which removes the faint "
                              "haze that background removal can leave. Raise it if you still see a ghost halo.",

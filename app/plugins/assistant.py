@@ -216,6 +216,8 @@ def tool_get_asset(project: str, args: dict) -> dict:
         w, info = a.get("worker") or {}, a.get("info") or {}
         out["mesh3d"] = {"rigged": bool(w.get("rigged") or info.get("rigged")), "joints": w.get("joints") or info.get("joints"),
                          "animations": w.get("animations") or info.get("animations") or [], "textured": w.get("textured")}
+        if w.get("retopo"):
+            out["mesh3d"]["retopo"] = {k: w["retopo"][k] for k in ("faces", "quad_pct", "triangles", "tex_size") if k in w["retopo"]}
     return out
 
 
@@ -484,11 +486,12 @@ Rules:
   "inputs", never in params. batch = takes / variations per step (keep 1-4).
 - Chain steps with inputs: {"step": "<earlier step id>", "use": "first"|"all"|"each"} ("each" = one job per output of that
   step, e.g. turn every concept image into a 3D shape). Existing assets: {"asset": "<id>"}.
-- Typical chains: concept image (t2i or rgba) -> shape -> texture for 3D props (-> rig for a skeleton; for a humanoid, -> motion
+- Typical chains: concept image (t2i or rgba) -> shape -> texture for 3D props (-> retopo for a game-ready low poly with baked maps, before rig; -> rig for a skeleton; for a humanoid, -> motion
   with an English prompt such as "walks forward", whose input is the rigged mesh); sfx / ambience with 3 takes;
   ambience then tool audio.loop; voice_design then tts; thumbnail or b-roll stills (t2i at 16:9 or 9:16); podcast or video
   intro stings and music beds (music, short); asset.export to deliver loudness-normalised audio or platform-sized images. Write prompts in English, in the target model's style
   (Stable Audio: comma-separated sound tags; images: concrete visual description, plain background for 3D).
+- Never retopo a rigged mesh (the skeleton and skin would be lost): retopo the unrigged one, then rig.
 - Honour the USE CASE line when present (aspect ratios, lengths, loudness targets) and keep game support intact when the
   request is about a game.
 - Keep plans short (usually <= 12 steps). Step ids: short snake_case. Give every step a clear title.

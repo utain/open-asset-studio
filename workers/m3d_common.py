@@ -11,8 +11,10 @@ machine: shape models that only have vertex colours say so in their registry sum
 """
 from __future__ import annotations
 
+import json
 import os
 import random
+import struct
 import sys
 import types
 from pathlib import Path
@@ -219,3 +221,146 @@ def shim_missing(*names):
 def vendor(name: str) -> Path:
     studio = Path(os.environ.get("STUDIO_ROOT") or Path(__file__).resolve().parent.parent)
     return studio / "vendor" / name
+
+
+# ------------------------------------------------------------------ GLB inspection / vertex-attribute carry-over (pure struct + json + numpy)
+_GLB_CT = {5126: ("<f4", 4), 5125: ("<u4", 4), 5123: ("<u2", 2), 5121: ("u1", 1), 5122: ("<i2", 2), 5120: ("i1", 1)}
+_GLB_NC = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4, "MAT2": 4, "MAT3": 9, "MAT4": 16}
+
+
+def _glb_split(path):
+    """-> (json dict, BIN bytes) of a binary glTF file."""
+    data = Path(path).read_bytes()
+    if len(data) < 20 or struct.unpack("<I", data[:4])[0] != 0x46546C67:
+        raise ValueError("not a GLB file")
+    jl = struct.unpack("<I", data[12:16])[0]
+    j = json.loads(data[20:20 + jl].decode("utf-8"))
+    off = 20 + jl
+    blob = b""
+    if off + 8 <= len(data):
+        bl = struct.unpack("<I", data[off:off + 4])[0]
+        blob = data[off + 8:off + 8 + bl]
+    return j, blob
+
+
+def glb_read_json(path) -> dict:
+    """The JSON chunk of a GLB (no geometry is read)."""
+    return _glb_split(path)[0]
+
+
+def glb_flags(path) -> dict:
+    """What a GLB contains, from its JSON chunk only: skins, animations, morph_targets, primitives, triangles."""
+    j = glb_read_json(path)
+    prims = [p for m in j.get("meshes", []) for p in m.get("primitives", [])]
+    tris = 0
+    for p in prims:
+        if p.get("mode", 4) != 4:
+            continue
+        if "indices" in p:
+            tris += j["accessors"][p["indices"]]["count"] // 3
+        elif "POSITION" in p.get("attributes", {}):
+            tris += j["accessors"][p["attributes"]["POSITION"]]["count"] // 3
+    return {"skins": len(j.get("skins", [])), "animations": len(j.get("animations", [])),
+            "morph_targets": any(p.get("targets") for p in prims), "primitives": len(prims), "triangles": int(tris)}
+
+
+def _glb_accessor(j, blob, i):
+    import numpy as np
+    a = j["accessors"][i]
+    bv = j["bufferViews"][a["bufferView"]]
+    dt, size = _GLB_CT[a["componentType"]]
+    n = _GLB_NC[a["type"]]
+    stride = bv.get("byteStride") or size * n
+    base = bv.get("byteOffset", 0) + a.get("byteOffset", 0)
+    if stride == size * n:
+        arr = np.frombuffer(blob, dt, a["count"] * n, base)
+    else:
+        arr = np.ndarray((a["count"], n), dt, blob, base, (stride, size)).copy()
+    return arr.reshape(a["count"], n) if n > 1 else arr
+
+
+def _glb_write(path, j, blob: bytes):
+    jb = json.dumps(j, separators=(",", ":")).encode("utf-8")
+    jb += b" " * (-len(jb) % 4)
+    bb = bytes(blob) + b"\0" * (-len(blob) % 4)
+    with open(path, "wb") as fh:
+        fh.write(struct.pack("<III", 0x46546C67, 2, 12 + 8 + len(jb) + (8 + len(bb) if bb else 0)))
+        fh.write(struct.pack("<II", len(jb), 0x4E4F534A) + jb)
+        if bb:
+            fh.write(struct.pack("<II", len(bb), 0x004E4942) + bb)
+
+
+def carry_vertex_attrs(src_glb, dst_glb) -> bool:
+    """Copy NORMAL / TANGENT and the primitive `extras` of `src_glb` onto the matching primitives of `dst_glb`.
+
+    The rig worker round-trips the input through trimesh, which drops the authored NORMAL / TANGENT (and recomputes normals that
+    differ at UV seams) and the primitive extras (e.g. `oas_quad_pairs` of the retopo task). For each primitive of dst (in order)
+    the src primitive with the same vertex count and the same POSITIONs (1e-5 x bbox diagonal; an evenly spaced sample of 1000
+    vertices first, then all) is looked up; its NORMAL / TANGENT are appended as new bufferViews and accessors and replace
+    dst's (missing or re-computed) ones, and the extras are copied. JOINTS_0 / WEIGHTS_0 and everything else of dst stay untouched. Returns True when the file was
+    rewritten; False (file untouched, byte for byte) when nothing matched."""
+    import numpy as np
+    sj, sb = _glb_split(src_glb)
+    dj, db = _glb_split(dst_glb)
+    sprims = [p for m in sj.get("meshes", []) for p in m.get("primitives", []) if "POSITION" in p.get("attributes", {})]
+    if not sprims:
+        return False
+    cache = {}
+
+    def pos_of(prim, j, blob, key):
+        k = (key, prim["attributes"]["POSITION"])
+        if k not in cache:
+            cache[k] = _glb_accessor(j, blob, prim["attributes"]["POSITION"]).astype(np.float64)
+        return cache[k]
+
+    new_blob = bytearray(db)
+    changed = False
+    used = set()
+    for m in dj.get("meshes", []):
+        for dp in m.get("primitives", []):
+            if "POSITION" not in dp.get("attributes", {}):
+                continue
+            dpos = pos_of(dp, dj, db, "d")
+            n = len(dpos)
+            diag = float(np.linalg.norm(dpos.max(0) - dpos.min(0))) or 1.0
+            tol = 1e-5 * diag
+            match = None
+            for si, sp in enumerate(sprims):
+                if si in used:
+                    continue
+                spos = pos_of(sp, sj, sb, "s")
+                if len(spos) != n:
+                    continue
+                probe = np.linspace(0, n - 1, min(n, 1000)).astype(np.int64)
+                if np.abs(spos[probe] - dpos[probe]).max() > tol or np.abs(spos - dpos).max() > tol:
+                    continue
+                match = si
+                break
+            if match is None:
+                continue
+            sp = sprims[match]
+            used.add(match)
+            for a in ("NORMAL", "TANGENT"):
+                if a not in sp["attributes"]:
+                    continue
+                arr = np.ascontiguousarray(_glb_accessor(sj, sb, sp["attributes"][a]).astype("<f4"))
+                if a in dp["attributes"]:                                 # trimesh may have re-computed it: only keep dst if identical
+                    cur = _glb_accessor(dj, db, dp["attributes"][a])
+                    if cur.shape == arr.shape and np.abs(cur - arr).max() < 1e-6:
+                        continue
+                while len(new_blob) % 4:
+                    new_blob.append(0)
+                dj.setdefault("bufferViews", []).append({"buffer": 0, "byteOffset": len(new_blob), "byteLength": arr.nbytes, "target": 34962})
+                new_blob.extend(arr.tobytes())
+                dj.setdefault("accessors", []).append({"bufferView": len(dj["bufferViews"]) - 1, "componentType": 5126, "count": n,
+                                                       "type": "VEC3" if a == "NORMAL" else "VEC4"})
+                dp["attributes"][a] = len(dj["accessors"]) - 1
+                changed = True
+            if "extras" in sp and "extras" not in dp:
+                dp["extras"] = sp["extras"]
+                changed = True
+    if not changed:
+        return False
+    dj.setdefault("buffers", [{}])[0]["byteLength"] = len(new_blob)
+    _glb_write(dst_glb, dj, bytes(new_blob))
+    return True

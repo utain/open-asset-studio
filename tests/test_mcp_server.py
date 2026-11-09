@@ -200,6 +200,31 @@ def test_get_asset_surfaces_3d_info_and_lineage(mcp, monkeypatch):
     assert d["mesh3d"]["rigged"] is False and d["mesh3d"]["textured"] is True and "rig" in d["mesh3d"]["hint"] and "lineage" not in d
 
 
+DENSE = {"id": "d1", "project": "default", "type": "mesh", "name": "dense", "main": "mesh.glb", "files": [{"name": "mesh.glb", "role": "main"}],
+         "info": {"vertices": 274000, "faces": 548000}, "worker": {"textured": True}}
+RETOPO = {"id": "q1", "project": "default", "type": "mesh", "name": "dense · retopo 12.1k", "main": "mesh.glb", "task": "retopo",
+          "files": [{"name": "mesh.glb", "role": "main"}, {"name": "retopo_quads.obj", "role": "attachment"}, {"name": "retopo_normal.png", "role": "attachment"}],
+          "info": {"vertices": 13000, "faces": 24000}, "worker": {"textured": True, "retopo": {"faces": 12111, "quad_pct": 85.8, "triangles": 22500,
+          "tex_size": 2048, "dist_p99_frac": 0.0012, "cage_frac_diag": 0.004}}}
+
+
+def test_retopo_in_tool_descriptions_and_mesh_view(mcp, monkeypatch):
+    desc = {t["name"]: t["description"] for t in mcp.TOOLS}
+    assert "retopo" in desc["submit_job"] and "retopo" in desc["list_models"] and "retopo" in mcp.TASKS_HELP
+    assert "retopo" in mcp.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})["result"]["instructions"]
+    fake(mcp, monkeypatch, {("GET", "/api/assets/q1"): RETOPO, ("GET", "/api/assets/d1"): DENSE, ("GET", "/api/assets/m1"): PLAIN})
+    _, d = call(mcp, "get_asset", {"id": "q1"})
+    m = d["mesh3d"]
+    assert m["retopo"] == {"faces": 12111, "quad_pct": 85.8, "triangles": 22500, "tex_size": 2048, "dist_p99_frac": 0.0012}
+    assert m["attachments"]["retopo_quads.obj"].startswith("the low poly with real quads") and m["attachments"]["retopo_normal.png"] != "attachment"
+    assert "retopo" not in m["hint"]                                 # already retopologised: only the rig hint
+    _, d = call(mcp, "get_asset", {"id": "d1"})
+    hint = d["mesh3d"]["hint"]
+    assert "retopo" in hint and "rig" in hint and "548,000" in hint and "retopo" not in d["mesh3d"].get("retopo", {})
+    assert hint.index("retopo") < hint.index("Not rigged")
+    assert "retopo" not in call(mcp, "get_asset", {"id": "m1"})[1]["mesh3d"]["hint"]      # a light mesh gets no dense-mesh hint
+
+
 def test_search_assets_mesh_has_compact_3d_info(mcp, monkeypatch):
     fake(mcp, monkeypatch, {("GET", "/api/assets"): {"total": 1, "items": [RIGGED]}})
     _, d = call(mcp, "search_assets", {"type": "mesh"})
@@ -389,6 +414,19 @@ def test_assistant_mcp_stays_read_propose_only(monkeypatch):
     monkeypatch.setattr(assistant, "CORE", Core())
     d = assistant.tool_get_asset("default", {"id": "r1"})
     assert d["mesh3d"] == {"rigged": True, "joints": 34, "animations": ["flex", "wiggle"], "textured": None}
+    assert "retopo" in step["task"]["description"]
+
+    class Store2:
+        def get(self, aid):
+            return RETOPO
+
+    class Core2:
+        assets = Store2()
+
+    monkeypatch.setattr(assistant, "CORE", Core2())
+    d = assistant.tool_get_asset("default", {"id": "q1"})
+    assert d["mesh3d"]["retopo"] == {"faces": 12111, "quad_pct": 85.8, "triangles": 22500, "tex_size": 2048}
+    assert "Never retopo a rigged mesh" in assistant.SYSTEM
 
 
 def test_proxied_callers_are_not_local():

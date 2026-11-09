@@ -51,6 +51,7 @@ Upstream source code that the workers import, cloned at the pinned commit from `
 | `vendor/MMAudio` | [hkchengrex/MMAudio](https://github.com/hkchengrex/MMAudio) | `974010a026c7` | MIT (code; weights CC-BY-NC-4.0) |
 | `vendor/OpenVoice` | [myshell-ai/OpenVoice](https://github.com/myshell-ai/OpenVoice) | `74a1d147b17a` | MIT |
 | `vendor/parler-tts` | [huggingface/parler-tts](https://github.com/huggingface/parler-tts) | `d108732cd577` | Apache-2.0 |
+| `vendor/PyNanoInstantMeshes` | [vork/PyNanoInstantMeshes](https://github.com/vork/PyNanoInstantMeshes) (Python binding of [Instant Meshes](https://github.com/wjakob/instant-meshes)) | `d02a725f93a1` | BSD-3-Clause per the package classifier and `native/LICENSE.txt` (Instant Meshes, (c) Wenzel Jakob, Daniele Panozzo, Marco Tarini, Olga Sorkine-Hornung); **the repository root has no LICENSE file: verify: true**. Built from source with `install/files/pynim_pure_quad.patch` (adds a `pure_quad` switch; BSD-3, same terms). Bundled in `native/ext`: TBB (Apache-2.0), Eigen (MPL-2.0, headers, unmodified), rply (MIT), pcg32 (Apache-2.0), dset (zlib-style), pss (Intel BSD-style), half (MIT) |
 | `vendor/rvc` | [RVC-Project/Retrieval-based-Voice-Conversion-WebUI](https://github.com/RVC-Project/Retrieval-based-Voice-Conversion-WebUI) | `81eed5e8f68b` | MIT |
 | `vendor/seed-vc` | [Plachtaa/seed-vc](https://github.com/Plachtaa/seed-vc) | `51383efd9210` | GPL-3.0 |
 | `vendor/Spark-TTS` | [SparkAudio/Spark-TTS](https://github.com/SparkAudio/Spark-TTS) | `2f1ea9082400` | Apache-2.0 (code; weights CC-BY-NC-SA-4.0) |
@@ -96,6 +97,14 @@ in addition to this repository's Apache-2.0 licence.
 - **RIFE v4 IFNet** (MIT, [hzwer/ECCV2022-RIFE](https://github.com/hzwer/ECCV2022-RIFE) / Practical-RIFE). `workers/video_rife.py`
   is a pure-PyTorch re-implementation of the v4 `IFNet` (frame interpolation) that loads the `TensorForger/RIFE-safetensors`
   weights. No upstream repository is cloned.
+
+- **Retopo + bake dependencies** (`install/retopo.yaml`, `env-lock/retopo.txt`; pip-installed into `envs/retopo`, no weights):
+  [xatlas](https://github.com/mworchel/xatlas-python) 0.0.11 (MIT; wraps [xatlas](https://github.com/jpcy/xatlas), MIT) for UV unwrapping,
+  [Open3D](https://github.com/isl-org/Open3D) 0.20.0 (MIT; its Embree 4 is Apache-2.0) for ray casting, closest point and distance queries,
+  [pymikktspace](https://github.com/bhouston/pymikktspace) 0.3.0 (MIT wrapper around MikkTSpace by Morten S. Mikkelsen, zlib-style licence)
+  for tangents, [trimesh](https://github.com/mikedh/trimesh) (MIT), fast-simplification (MIT), SciPy and NumPy (BSD), Pillow (MIT-CMU).
+  Instant Meshes is listed in the table above. The `retopo-instant-meshes` registry entry is marked commercial because every
+  component is BSD / MIT / Apache; re-check the Instant Meshes repository licence (see `verify: true` above) before shipping a product.
 
 ## Not included: model weights
 

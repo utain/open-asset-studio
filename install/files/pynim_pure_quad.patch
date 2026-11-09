@@ -1,0 +1,32 @@
+diff --git a/src/process_numpy.cpp b/src/process_numpy.cpp
+index b59d80e..d42da86 100644
+--- a/src/process_numpy.cpp
++++ b/src/process_numpy.cpp
+@@ -23,7 +23,8 @@ remesh(nb::ndarray<Float, nb::ndim<2>, nb::device::cpu> verts,
+        int vertex_count, int rosy = 4, int posy = 4, Float scale = -1.0,
+        int face_count = -1, Float creaseAngle = 0.0,
+        bool align_to_boundaries = false, bool extrinsic = true,
+-       int smooth_iter = 0, int knn_points = 1000, bool deterministic = false) {
++       int smooth_iter = 0, int knn_points = 1000, bool deterministic = false,
++       bool pure_quad = true) {
+   MatrixXu F;
+   F.resize(faces.shape(1), faces.shape(0));
+   MatrixXf V, N;
+@@ -204,7 +205,7 @@ remesh(nb::ndarray<Float, nb::ndim<2>, nb::device::cpu> verts,
+ 
+   MatrixXu F_extr;
+   extract_faces(adj_extr, O_extr, N_extr, Nf_extr, F_extr, posy, mRes.scale(),
+-                crease_out, true, posy == 4, bvh, smooth_iter);
++                crease_out, true, posy == 4 && pure_quad, bvh, smooth_iter);
+   cout << "Extraction is done. (total time: " << timeString(timer.reset())
+        << ")" << endl;
+ 
+@@ -252,7 +253,7 @@ NB_MODULE(_pynim, m) {
+         "posy"_a = 4, "scale"_a = -1.0, "face_count"_a = -1,
+         "creaseAngle"_a = 0.0, "align_to_boundaries"_a = false,
+         "extrinsic"_a = true, "smooth_iter"_a = 0, "knn_points"_a = 1000,
+-        "deterministic"_a = false,
++        "deterministic"_a = false, "pure_quad"_a = true,
+         "Remeshes the input mesh and returns the new mesh as a tuple of "
+         "vertices and faces.");
+ }

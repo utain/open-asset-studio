@@ -40,6 +40,7 @@ packs:
       - hunyuan3d-2mini         # [10 GB]
       - trellis-image-large     # [20 GB]
       - hunyuan3d-2.1           # [45 GB] shape + texture (texturing needs nvcc)
+      - retopo-instant-meshes   # [4 GB] CPU: quad retopology + normal map bake of a dense mesh
 
   video:
     title: Video

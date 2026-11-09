@@ -150,7 +150,7 @@ class RigBackend(Backend):
         joints_b = joints_norm * scale + center                      # back to the Blender frame of the input
         joints_g = _from_blender(joints_b)                          # and to glTF (+Y up)
         glb = out / "rigged.glb"
-        _write_rigged_glb(scene_meshes, skin, joints_g, parents, names, glb)
+        _write_rigged_glb(scene_meshes, skin, joints_g, parents, names, glb, src=Path(inp["path"]))
         (out / "skeleton.json").write_text(json.dumps({
             "joints": [{"name": n, "parent": q, "position": [round(float(x), 5) for x in j]}
                        for n, q, j in zip(names, parents, joints_g)]}, indent=1))
@@ -333,8 +333,10 @@ def _make_configs(work: Path, p: dict):
 
 
 # ------------------------------------------------------------------------------------------------------------ glTF skin
-def _write_rigged_glb(meshes, skin, joints, parents, names, dst: Path):
-    """Export `meshes` (same vertex order as `skin`) as GLB, then add a glTF skeleton + skin with JOINTS_0 / WEIGHTS_0."""
+def _write_rigged_glb(meshes, skin, joints, parents, names, dst: Path, src: Path | None = None):
+    """Export `meshes` (same vertex order as `skin`) as GLB, then add a glTF skeleton + skin with JOINTS_0 / WEIGHTS_0.
+    `src` is the input GLB: the trimesh round trip drops its NORMAL / TANGENT (re-computed normals differ at UV seams, which breaks
+    a baked normal map) and the primitive extras, so they are carried back over before the skin is added."""
     import pygltflib as G
     import trimesh
 
@@ -343,6 +345,11 @@ def _write_rigged_glb(meshes, skin, joints, parents, names, dst: Path):
         sc.add_geometry(m, node_name=f"part{i}", geom_name=f"part{i}")
     tmp = dst.with_suffix(".base.glb")
     sc.export(str(tmp))
+    if src is not None:
+        try:
+            C.carry_vertex_attrs(src, tmp)
+        except Exception as e:  # noqa: BLE001 - a malformed input must not stop the rig; the result just lacks the authored normals
+            print(f"carry_vertex_attrs skipped: {e}", file=sys.stderr)
     g = G.GLTF2().load_binary(str(tmp))
     blob = bytearray(g.binary_blob() or b"")
 

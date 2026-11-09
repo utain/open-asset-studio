@@ -106,9 +106,26 @@ function mvScene(mv) {
   const scene = sym && mv[sym], root = scene && (scene.model || scene._model);
   return root ? { scene, root } : null;
 }
-/** Draw the mesh's triangle edges on a loaded <model-viewer>. view: 'edges' (over the surface) | 'wire' (lines only, see-through).
+/** Index buffer that draws quad edges only, for a retopo mesh: its first 2n triangles are n quads (triangles 2k and 2k+1 share the
+ *  diagonal), and the primitive carries `extras.oas_quad_pairs = n` (three.js GLTFLoader copies primitive extras to geometry.userData).
+ *  Every edge becomes a degenerate triangle (a, b, b), so a wireframe material draws exactly the segment a-b. Null when not applicable. */
+function quadEdgeIndex(geo) {
+  const n = geo?.userData?.oas_quad_pairs | 0, idx = geo?.index?.array;
+  if (n <= 0 || !idx || !geo.attributes?.position) return null;
+  const N = geo.attributes.position.count, seen = new Set(), out = [];
+  const add = (a, b) => { const k = Math.min(a, b) * N + Math.max(a, b); if (!seen.has(k)) { seen.add(k); out.push(a, b, b); } };
+  for (let t = 0, T = idx.length / 3; t < T; t++) {
+    const a = idx[3 * t], b = idx[3 * t + 1], c = idx[3 * t + 2];
+    if (t >= 2 * n) { add(a, b); add(b, c); add(c, a); }
+    else if (t % 2 === 0) { add(a, b); add(b, c); }            // triangle (q0, q1, q2) of a pair: skip the diagonal q2-q0
+    else { add(b, c); add(c, a); }                             // triangle (q0, q2, q3): skip the diagonal q0-q2
+  }
+  return out;
+}
+
+/** Draw the mesh's triangle edges on a loaded <model-viewer> (quad edges only for a retopo mesh, see quadEdgeIndex). view: 'edges' (over the surface) | 'wire' (lines only, see-through).
  *  model-viewer has no wireframe option, so this reaches into its three.js scene (internal symbol); returns false if unavailable. */
-function applyWire(mv, view) {
+export function applyWire(mv, view) {
   const sym = Object.getOwnPropertySymbols(mv).find(k => k.description === 'scene');
   const scene = sym && mv[sym], root = scene && (scene.model || scene._model);
   if (!root) return false;
@@ -125,7 +142,10 @@ function applyWire(mv, view) {
     // unlit flat lines: black albedo, no environment reflection, colour comes only from emissive
     wm.color?.set(0x000000); wm.emissive?.set(line); wm.envMapIntensity = 0; wm.toneMapped = false;
     wm.needsUpdate = true;
-    const w = m.clone(false); w.material = wm; w.castShadow = w.receiveShadow = false;
+    const w = m.clone(false); w.material = wm;
+    const qi = quadEdgeIndex(m.geometry);
+    if (qi) { const g = m.geometry.clone(); g.setIndex(qi); w.geometry = g; }
+    w.castShadow = w.receiveShadow = false;
     w.position.set(0, 0, 0); w.rotation.set(0, 0, 0); w.scale.set(1, 1, 1); w.userData.i3dWire = true;
     m.add(w);
   }
@@ -294,9 +314,11 @@ export function meshViewer({ height = 420, empty: emptyText = 'Generate or pick 
       box.replaceChildren(mv);
       el._mv = mv;
     }).catch(() => box.replaceChildren(h('div.empty', 'The 3D viewer could not be loaded.')));
-    const I = a.info || {};
+    const I = a.info || {}, RT = a.worker?.retopo;     // a retopo result: quads are the unit, not triangles
     stats.replaceChildren(h('span.ellipsis', { style: { fontWeight: 600, color: 'var(--text)' } }, a.name || a.id),
-      I.faces ? h('span', `${I.faces.toLocaleString()} faces`) : null, I.vertices ? h('span', `${I.vertices.toLocaleString()} verts`) : null,
+      RT ? h('span', `${RT.faces.toLocaleString()} polys (${RT.quad_pct}% quads) · ${RT.triangles.toLocaleString()} tris · ${RT.vertices.toLocaleString()} verts · ${RT.tex_size}² maps`)
+        : I.faces ? h('span', `${I.faces.toLocaleString()} faces`) : null,
+      !RT && I.vertices ? h('span', `${I.vertices.toLocaleString()} verts`) : null,
       I.textures != null ? h('span', `${I.textures} texture(s)`) : null, a.worker?.stats?.time?.total ? h('span', `made in ${S.fmtDur(a.worker.stats.time.total)}`) : null);
     bar.replaceChildren(
       S.seg([{ value: 'textured', label: 'Textured' }, hasWhite(a) ? { value: 'white', label: 'Shape' } : null,

@@ -4,6 +4,7 @@
 // Image → 3D job uses the Texture tab's settings). Big model-viewer preview, automatic mesh thumbnails.
 import * as S from '../core/sdk.js';
 import { css, meshViewer, autoThumb, runJob } from './i3d/common.js';
+import { attachSourcePanel, retopoBeforeSubmit, retopoCompare } from './i3d/retopo.js';
 const { h, ic, btn } = S;
 
 const TASKS = [
@@ -17,6 +18,9 @@ const TASKS = [
   { id: 'multiview', label: 'Multi-view', result: 'image', prompt: false, receives: ['multiview'],
     inputs: [{ key: 'image', label: 'Object image', types: ['image'], role: 'image', required: true,
       hint: 'One object, fully visible, plain or transparent background. Result: the same object from other sides (sheet + one image per view; SV3D also attaches an orbit video).' }] },
+  { id: 'retopo', label: 'Retopo', result: 'mesh', prompt: false, receives: ['retopo'],
+    inputs: [{ key: 'mesh', label: 'Dense mesh', types: ['mesh'], role: 'mesh', required: true,
+      hint: 'A generated or imported model (not rigged). Result: a clean low-poly copy with UVs and baked textures (normal, colour, AO), ready for Rig.' }] },
   { id: 'rig', label: 'Rig', result: 'mesh', prompt: false, receives: ['rig'],
     inputs: [{ key: 'mesh', label: 'Mesh to rig', types: ['mesh'], role: 'mesh', required: true,
       hint: 'A character or creature in a neutral pose (A- or T-pose) works best. Result: a GLB with a skeleton, skin weights and two preview animations (flex test, wiggle).' }] },
@@ -37,6 +41,7 @@ export default S.defineStudio({
     { action: 'shape', label: 'Make 3D', icon: 'cuboid', types: ['image'] },
     { action: 'retexture', label: 'Retexture', icon: 'palette', types: ['mesh'] },
     { action: 'export', label: 'Export mesh', icon: 'package', types: ['mesh'] },
+    { action: 'retopo', label: 'Retopo + bake', icon: 'layers', types: ['mesh'] },
     { action: 'rig', label: 'Auto-rig', icon: 'bot', types: ['mesh'] },
     { action: 'reskin', label: 'Re-skin (keep the skeleton)', icon: 'bot', types: ['mesh'] },
     { action: 'motion', label: 'Animate (text to motion)', icon: 'wand-sparkles', types: ['mesh'] },
@@ -47,6 +52,8 @@ export default S.defineStudio({
     el.style.height = '100%';
     const viewer = meshViewer({ height: 440, actions: a => [
       btn('Retexture', { size: 'sm', icon: 'palette', onClick: () => receive({ action: 'retexture', assets: [a] }) }),
+      !isRigged(a) ? btn('Retopo', { size: 'sm', icon: 'layers', title: 'Make a clean low-poly copy with baked textures (before rigging)', onClick: () => receive({ action: 'retopo', assets: [a] }) }) : null,
+      a.task === 'retopo' && a.parents?.[0] ? btn('Compare', { size: 'sm', icon: 'columns-2', title: 'Before / after: the source model next to this retopo result', onClick: () => retopoCompare(a.parents[0], a) }) : null,
       btn('Rig', { size: 'sm', icon: 'bot', onClick: () => receive({ action: 'rig', assets: [a] }) }),
       isRigged(a) ? btn('Motion', { size: 'sm', icon: 'wand-sparkles', title: 'Describe a movement in words and animate this rigged character (text to motion)', onClick: () => receive({ action: 'motion', assets: [a] }) }) : null,
       needsReskin(a) ? btn('Re-skin', { size: 'sm', icon: 'bot', kind: 'primary', title: 'This rig has bones without skin weight (it was edited). Recompute the weights for its skeleton.', onClick: () => receive({ action: 'reskin', assets: [a] }) }) : null,
@@ -55,7 +62,7 @@ export default S.defineStudio({
     ] });
     const kit = new S.TaskStudio({
       studio: '3d',
-      tasks: TASKS.filter(t => t.id !== 'reskin' || S.modelsFor('reskin').length),    // an older core has no task reskin: no tab
+      tasks: TASKS.filter(t => (t.id !== 'reskin' || S.modelsFor('reskin').length) && (t.id !== 'retopo' || S.modelsFor('retopo').length)),    // an older core has no task reskin / retopo: no tab
       extraPanel: (k, t) => extraPanel(k, t),
       beforeSubmit: (spec, k) => beforeSubmit(spec, k),
     });
@@ -74,7 +81,9 @@ export default S.defineStudio({
       const meshes = kit.grid.assets().filter(a => a.type === 'mesh');
       autoThumb(meshes);
       const cur = viewer.current();
-      if (!cur || !meshes.find(a => a.id === cur.id)) viewer.set(meshes[0] || null);
+      // Retopo: the source mesh was just sent to the viewer and the task has no results yet (the grid reload must not blank it)
+      const keepSource = cur && kit.cur().id === 'retopo' && cur.id === kit.slots.mesh?.ids?.[0];
+      if (!keepSource && (!cur || !meshes.find(a => a.id === cur.id))) viewer.set(meshes[0] || null);
     };
     kit.grid.onChange(() => setTimeout(showLatest, 0));
     S.bus.on('asset', ev => {
@@ -90,6 +99,8 @@ export default S.defineStudio({
       if (p.action === 'shape' && img) { kit.setTask('shape'); await kit.slots.image.set([img.id]); S.toast('Image loaded: check the settings and press Generate.', { kind: 'info' }); return; }
       if (p.action === 'retexture' && meshes[0]) { kit.setTask('texture'); await kit.slots.mesh.set([meshes[0].id]); if (img) await kit.slots.image.set([img.id]); viewer.set(meshes[0]); return; }
       if (p.action === 'multiview' && img) { kit.setTask('multiview'); await kit.slots.image.set([img.id]); S.toast('Image loaded: pick a model and press Generate.', { kind: 'info' }); return; }
+      if (p.action === 'retopo' && meshes[0]) { if (!kit.tasks.find(t => t.id === 'retopo')) { S.toast('Retopo needs the newest core: restart Open Asset Studio.', { kind: 'warn' }); return; }
+        kit.setTask('retopo'); await kit.slots.mesh.set([meshes[0].id]); viewer.set(meshes[0]); return; }
       if (p.action === 'rig' && meshes[0]) { kit.setTask('rig'); await kit.slots.mesh.set([meshes[0].id]); viewer.set(meshes[0]); return; }
       if (p.action === 'reskin' && meshes[0]) { if (!kit.tasks.find(t => t.id === 'reskin')) { S.toast('Re-skin needs the newest core: restart Open Asset Studio.', { kind: 'warn' }); return; }
         kit.setTask('reskin'); await kit.slots.mesh.set([meshes[0].id]); viewer.set(meshes[0]); S.toast('Press Generate to recompute the skin weights for this skeleton.', { kind: 'info' }); return; }
@@ -135,6 +146,10 @@ function extraPanel(kit, t) {
   if (t.id === 'multiview') {
     return h('div.field-help', ic('info', 13), ' Open an image result and use “Make 3D” on a view, or feed several views to a multi-view shape model. Orbit models (SV3D) attach an orbit.mp4 to the sheet.');
   }
+  if (t.id === 'retopo') {
+    attachSourcePanel(kit);
+    return h('div', h('div.field-help', ic('info', 13), ' Rebuilds a dense model as a clean, mostly-quad low poly (Instant Meshes), unwraps UVs and bakes the detail, colour and ambient occlusion of the original into PBR textures. CPU only, 6-40 s; the original is not changed. Order: shape, texture, retopo, rig, motion. The result keeps the licence of the source. Presets: mobile 2.5k faces, pc 12k, hero 30k. Edges in the viewer shows the quads; Compare shows before / after.'));
+  }
   if (t.id === 'rig') {
     return h('div.field-help', ic('info', 13), ' The rigged GLB keeps the mesh and adds a skeleton with skin weights. Bones have generic names (bone_0, bone_1, …); there is no skeleton template or Mixamo / VRM retargeting. The result also plays two preview animations in the viewer: “flex” bends every joint in turn so you can check the skinning, “wiggle” moves all joints a little. “rigged_plain.glb” is the same file without them. Open it in Blender, Godot or Unity.');
   }
@@ -156,6 +171,7 @@ function beforeSubmit(spec, kit) {
     const all = kit.form.allValues();
     for (const [k, v] of Object.entries(all)) if (k.startsWith('tex_') || ['super_res', 'sr_tile', 'bake_exp', 'bake_angle', 'vertex_inpaint', 'uv_padding', 'metallic_scale', 'roughness_scale'].includes(k)) spec.params[k] = v;
   }
+  if (t.id === 'retopo') return retopoBeforeSubmit(spec, kit);
   const first = spec.inputs[0];
   if (t.id === 'mesh_export') { spec.params.batch = spec.inputs.length; spec.title = `Export ${spec.params.export_type?.toUpperCase() || ''} · ${spec.inputs.length} mesh(es)`; }
   if (t.id === 'shape') spec.title = `3D from ${kit.slots.image?.metas.get(first?.asset)?.name || 'image'}`.slice(0, 60);
