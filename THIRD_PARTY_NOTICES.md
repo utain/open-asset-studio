@@ -124,6 +124,16 @@ gated terms). Each model's licence, with a commercial yes/no flag, is in its reg
 3D models (image to mesh, rigging, multi-view; Stability AI Community License weights are gated) are indexed in
 [docs/research/3d_more.md](docs/research/3d_more.md).
 
+## Seamless PBR materials (`workers/span_lite.py`, `scripts/fetch_pbrify.py`)
+
+- **PBRify_Remix** by Kim2091: the four SPAN checkpoints that estimate normal, height and roughness maps (`PBRify_NormalV3`, `PBRify_Height`, `PBRify_Roughness`, `PBRify_UpscalerSPAN_Small_x4`). Licence **CC0-1.0**
+  (public domain dedication, [Kim2091/PBRify_Remix](https://github.com/Kim2091/PBRify_Remix)). They are not in this repository: `scripts/fetch_pbrify.py` downloads the release
+  [v1.7.2_ComfyOnly](https://github.com/Kim2091/PBRify_Remix/releases/tag/v1.7.2_ComfyOnly) (`PBRify_Remix_1.7.2_ComfyUI_ONLY.zip`) into `~/.cache/pbrify/1.7.2` and checks the sha256 of the archive and of each file.
+- **SPAN architecture** (`workers/span_lite.py`): a short re-implementation of the network, written after [spandrel](https://github.com/chaiNNer-org/spandrel) (MIT) and the original SPAN code by
+  hongyuanyu ([hongyuanyu/SPAN](https://github.com/hongyuanyu/SPAN), Apache-2.0; paper: Wan et al., "Swift Parameter-free Attention Network for Efficient Super-Resolution", CVPR-W 2024).
+  The `Conv3XC` re-parametrisation is rebuilt from the stored `conv1/conv2/conv3` weights, because the checkpoints carry stale `eval_conv` tensors (`docs/research/materials.md`).
+- **Z-Image Turbo** (Apache-2.0) generates the base colour; it is the model already listed on the Models page.
+
 Some outputs carry watermarks added by upstream code (for example Chatterbox's Perth watermark).
 
 ## Optional cloud providers

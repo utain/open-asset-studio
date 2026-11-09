@@ -26,9 +26,12 @@ from . import config, media
 PROJECT_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,47}$")
 ASSET_RE = re.compile(r"^[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$")
 FILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
-TYPES = ("image", "audio", "mesh", "voice", "video", "text", "other")
-MAIN_BASENAME = {"image": "image", "audio": "audio", "voice": "voice", "mesh": "mesh", "video": "video", "text": "text", "other": "file"}
+TYPES = ("image", "audio", "mesh", "voice", "video", "text", "material", "other")
+MAIN_BASENAME = {"material": "basecolor", "image": "image", "audio": "audio", "voice": "voice", "mesh": "mesh", "video": "video", "text": "text", "other": "file"}
 META_VERSION = 1
+# Per-type export hooks (plugins register here in setup(core)): fn(meta, asset_dir, convert, tmpdir, base) ->
+# ([(source_path, archive_name)], report). A type with an exporter is zipped by it instead of the default main + attachments loop.
+EXPORTERS: dict[str, Callable] = {}
 
 
 class AssetError(Exception):
@@ -331,6 +334,11 @@ class AssetStore:
                 info, wf = media.analyze_audio(main)
                 _write_json(d / "waveform.json", wf)
                 preview["waveform"] = "waveform.json"
+            elif type == "material":      # the card shows the sphere preview when the material has one, else the base colour
+                info = media.image_info(main)
+                src = d / "preview.png"
+                media.make_thumb(src if src.is_file() else main, d / "thumb.webp")
+                preview["thumb"] = "thumb.webp"
             elif type == "mesh" and main.suffix.lower() == ".glb":
                 info = media.glb_info(main)
             elif type == "video":
@@ -523,7 +531,8 @@ class AssetStore:
             for m in metas:
                 d = self.asset_dir(m["project"], m["id"])
                 stem = slug(m.get("name") or m["id"]) if naming == "name" else m["id"]
-                folder = {"voice": "voices", "audio": "audio", "image": "images", "mesh": "models", "video": "video"}.get(m["type"], "other")
+                folder = {"voice": "voices", "audio": "audio", "image": "images", "mesh": "models", "video": "video",
+                          "material": "materials"}.get(m["type"], "other")
                 base = f"{folder}/{stem}"
                 n = 2
                 while base in used:
@@ -535,6 +544,20 @@ class AssetStore:
                          "seed": m.get("seed"), "params": m.get("params"), "parents": m.get("parents"),
                          "tags": m.get("tags"), "rating": m.get("rating"), "info": m.get("info")}
                 conv = None
+                exporter = EXPORTERS.get(m["type"])
+                if exporter is not None:       # e.g. materials: packed maps per engine layout, written as derived files
+                    try:
+                        files, report = exporter(m, d, (convert or {}).get(m["type"]) or {}, Path(tmp.name) / m["id"], base)
+                    except ValueError as e:
+                        raise AssetError(f"{m.get('name') or m['id']}: {e}") from None
+                    for src, arc in files:
+                        z.write(src, arc)
+                        entry["files"].append(arc)
+                    entry[m["type"]] = report
+                    if include_meta:
+                        z.writestr(f"{base}.meta.json", json.dumps(m, indent=1, ensure_ascii=False, default=str))
+                    manifest["assets"].append(entry)
+                    continue
                 if convert:
                     try:
                         conv = self.convert_main(m, convert, Path(tmp.name) / m["id"], "converted")

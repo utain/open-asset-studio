@@ -23,6 +23,7 @@ export class ParamForm {
     this.renderers = renderers;
     this.mem = prefs.get(`params.${memoryKey}`, {});     // shared values by param name (survive model switches)
     this.vals = {};
+    this.inputKeys = new Set();          // slot keys that currently hold an asset (for show_if: {has_input: <slot key>})
     this.userPresets = {};
     this.advOpen = prefs.get('params.advOpen', false);
     this.el = h('div.pf');
@@ -39,7 +40,7 @@ export class ParamForm {
   }
   params() {
     return (this.model?.params || []).filter(p => !this.exclude.has(p.name) && (!p.tasks || !this.task || p.tasks.includes(this.task))
-      && (!p.show_if || Object.entries(p.show_if).every(([k, v]) => this.vals[k] === v)));
+      && (!p.show_if || Object.entries(p.show_if).every(([k, v]) => (k === 'has_input' ? this.inputKeys.has(v) : this.vals[k] === v))));
   }
   _valid(p, v) {
     if (v === undefined || v === null || v === '') return false;
@@ -73,6 +74,13 @@ export class ParamForm {
     this._changed(false);
   }
   setTask(task) { this.task = task; this.render(); }
+  /** Slot keys that hold an asset; a param with show_if {has_input: key} is shown only then (docs/CONTRACTS.md section 1). */
+  setInputs(keys) {
+    const next = new Set(keys || []);
+    if (next.size === this.inputKeys.size && [...next].every(k => this.inputKeys.has(k))) return;
+    this.inputKeys = next;
+    if ((this.model?.params || []).some(p => p.show_if && 'has_input' in p.show_if)) { this.render(); this._changed(false); }
+  }
   values() { const out = {}; for (const p of this.params()) out[p.name] = this.vals[p.name]; return out; }
   allValues() { return { ...this.vals }; }
   setValues(obj, { silent = false } = {}) {

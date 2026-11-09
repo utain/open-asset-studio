@@ -16,7 +16,7 @@ export { UI_INFO, uiInfo, slotInfo } from './uiinfo.js';
 export { PromptBox, promptMeta, improveStyles, profileChips, registerPromptAddon } from './components/promptbox.js';
 export { registerSelectionAction, selectionActions } from './selection.js';
 export { ResultsGrid, assetCard, assetSubtitle } from './components/results.js';
-export { openAsset, closeAsset, exportAssets, currentAsset, loadModelViewer } from './components/drawer.js';
+export { openAsset, closeAsset, exportAssets, currentAsset, loadModelViewer, registerPreview } from './components/drawer.js';
 export { exportDialog, downloadConverted } from './components/exportdialog.js';
 export { compare, pickAndCompare } from './components/compare.js';
 export { pickAssets, AssetSlot } from './components/assetpicker.js';

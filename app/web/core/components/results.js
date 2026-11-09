@@ -22,6 +22,11 @@ export function assetCard(asset, opts = {}) {
       el.append(th);
       const tl = h('div.tl');
       if (a.type === 'mesh') tl.append(h('span.badge.ov', 'GLB'));
+      if (a.type === 'material') {
+        const X = a.x_material || {}, worst = X.seam ? Math.max(...Object.values(X.seam).map(Number)) : null;
+        if (X.size) tl.append(h('span.badge.ov', X.size >= 1024 ? `${X.size / 1024}K` : X.size));
+        if (worst != null && !isNaN(worst)) tl.append(h(`span.badge.${worst <= 1.05 ? 'ok' : worst <= 1.25 ? 'warn' : 'err'}`, { title: 'Seam score: how visible the join is when tiled (1.0 = seamless)' }, `seam ${worst.toFixed(2)}`));
+      }
       if (a.type === 'video') tl.append(h('span.badge.ov', ic('video', 11), a.info?.duration ? fmtDur(a.info.duration) : 'VIDEO'));
       if (a.info?.has_alpha) tl.append(h('span.badge.ov', 'RGBA'));
       el.append(tl);
@@ -36,7 +41,7 @@ export function assetCard(asset, opts = {}) {
     el.append(tr);
     const info = a.type === 'audio' || a.type === 'voice'
       ? [a.info?.lufs != null ? `${a.info.lufs.toFixed(1)} LUFS` : null, a.info?.sample_rate ? `${(a.info.sample_rate / 1000).toFixed(1)} kHz` : null]
-      : a.type === 'image' ? [a.info?.width ? `${a.info.width}×${a.info.height}` : null] : a.type === 'mesh' ? [a.info?.faces ? `${(a.info.faces / 1000).toFixed(1)}k faces` : null]
+      : a.type === 'image' ? [a.info?.width ? `${a.info.width}×${a.info.height}` : null] : a.type === 'material' ? [a.x_material?.size ? `${a.x_material.size} px` : null] : a.type === 'mesh' ? [a.info?.faces ? `${(a.info.faces / 1000).toFixed(1)}k faces` : null]
         : a.type === 'video' ? [a.info?.width ? `${a.info.width}×${a.info.height}` : null, a.info?.bytes ? `${(a.info.bytes / 2 ** 20).toFixed(1)} MB` : null] : [];
     el.append(h('div.meta',
       h('div.row', h('div.name.ellipsis.grow', { title: a.name }, a.name || a.id),

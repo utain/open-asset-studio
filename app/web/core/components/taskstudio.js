@@ -90,7 +90,7 @@ export class TaskStudio {
     for (const s of Object.values(this.slots)) s.destroy();
     this.slots = {};
     for (const inp of t.inputs || []) {
-      const slot = new AssetSlot({ label: inp.label, types: inp.types, multiple: inp.multiple, max: inp.max || 10, role: inp.role || 'input', hint: inp.hint, task: t.id, info: inp.info, onChange: () => this._eta() });
+      const slot = new AssetSlot({ label: inp.label, types: inp.types, multiple: inp.multiple, max: inp.max || 10, role: inp.role || 'input', hint: inp.hint, task: t.id, info: inp.info, onChange: () => { this._syncInputs(); this._eta(); } });
       this.slots[inp.key || inp.role || 'input'] = slot;
       this.panelBody.append(slot.el);
     }
@@ -114,9 +114,12 @@ export class TaskStudio {
   _onModel(m, fromBuild = false) {
     // the pick itself is remembered by ModelPicker.set() (per project); silent re-resolves must not overwrite that memory
     this.form.setModel(m, this.task);
+    this._syncInputs();
     this.prompt.setModel(m, this.task);
     this._eta();
   }
+  /** Tell the parameter form which slots are filled (registry `show_if: {has_input: <slot key>}`). */
+  _syncInputs() { this.form?.setInputs(Object.entries(this.slots || {}).filter(([, s]) => s.ids.length).map(([k]) => k)); }
   _firstImageInput() {
     for (const s of Object.values(this.slots)) { const id = s.ids.find(i => s.metas.get(i)?.type === 'image'); if (id) return id; }
     return null;

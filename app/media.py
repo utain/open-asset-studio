@@ -29,7 +29,7 @@ MESH_EXT = {".glb": "model/gltf-binary"}
 VIDEO_EXT = {".mp4": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm", ".mkv": "video/x-matroska"}
 OTHER_EXT = {".json": "application/json", ".txt": "text/plain", ".obj": "text/plain", ".mtl": "text/plain",
              ".fbx": "application/octet-stream", ".npz": "application/octet-stream", ".csv": "text/csv",
-             ".srt": "application/x-subrip", ".vtt": "text/vtt"}
+             ".srt": "application/x-subrip", ".vtt": "text/vtt", ".gltf": "model/gltf+json"}
 MIME = {**IMAGE_EXT, **AUDIO_EXT, **MESH_EXT, **VIDEO_EXT, **OTHER_EXT}
 
 

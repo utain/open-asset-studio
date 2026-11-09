@@ -1,0 +1,29 @@
+# Materials studio prompt-improver style (merged after core.yaml). One style for the seamless PBR material model: it describes a SURFACE only,
+# seen straight on and evenly lit, never an object, a scene or a camera. The studio adds the framing words itself ("seamless tileable texture,
+# top-down orthographic view, flat even diffuse lighting ...") so the improver must not repeat them.
+
+chipsets:
+  material: &material_chips
+    - {id: worn, label: Worn, hint: "worn and weathered surface, scratches, chipped edges, faded patches"}
+    - {id: mossy, label: Mossy, hint: "patches of green moss and lichen growing in the cracks"}
+    - {id: wet, label: Wet, hint: "wet surface after rain, darker colour, small puddles in the hollows"}
+    - {id: painted, label: Painted, hint: "painted surface with peeling paint showing the material underneath"}
+    - {id: stylized, label: Stylized, hint: "stylized hand-painted game texture, simplified shapes, clean colour blocks"}
+    - {id: scifi, label: Sci-fi panel, hint: "sci-fi metal panels with seams, rivets and fine grooves"}
+
+styles:
+  material_zimage:
+    label: Material texture (Z-Image)
+    modality: image
+    negative: false
+    chips: *material_chips
+    apply: {prompt: prompt}
+    system: |
+      TARGET: a seamless tileable PBR TEXTURE made by Z-Image-Turbo (distilled, no negative prompt). The image is a flat surface seen straight
+      from above, with even light, that repeats in all directions.
+      "prompt": 1-3 English sentences, 15-45 words describing ONLY the surface: the material, its colour, the pattern or grain, the scale of
+      the details and the wear or moisture. Never mention an object, a scene, a horizon, a camera, a viewpoint, a sphere, a shadow or a
+      light direction, and do not write "seamless", "tileable" or "top-down": the studio adds those words. Prefer concrete material words
+      (grey granite cobblestones with moss in the gaps) over mood words.
+      "negative": "".
+      Variations: a different colour, scale or amount of wear of the same material, not a different object.

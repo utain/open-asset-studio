@@ -74,8 +74,15 @@ function render() {
   renderMetaOnly();
 }
 
+/** Preview renderers registered by studios for an asset type (docs/CONTRACTS.md section 6): registerPreview('material', a => element). */
+const PREVIEWS = {};
+export function registerPreview(type, fn) { PREVIEWS[type] = fn; }
+
 function preview(a) {
-  if (a.type === 'image') return imagePreview(a);
+  if (PREVIEWS[a.type]) {
+    try { const el = PREVIEWS[a.type](a); if (el) return el; } catch (e) { console.error('preview', a.type, e); }
+  }
+  if (a.type === 'image' || a.type === 'material') return imagePreview(a);
   if (a.type === 'mesh') return meshPreview(a);
   if (a.type === 'audio' || a.type === 'voice') return audioPreview(a);
   if (a.type === 'video') return videoBox(a);
@@ -149,11 +156,11 @@ function renderMetaOnly() {
   for (const s of acts.slice(0, 6)) actRow.append(btn(s.label, { size: 'sm', icon: s.icon || 'send', onClick: () => { sendTo(s.studio, a.id, { action: s.action }); closeAsset(); } }));
   const origin = originStudio(a);
   if (origin && a.model && a.source !== 'upload') actRow.append(btn('Regenerate', { size: 'sm', icon: 'refresh-cw', title: 'Open the studio with exactly these settings', onClick: () => { sendTo(origin, a.id, { action: 'regenerate', params: a.params }); closeAsset(); } }));
-  actRow.append(btn('', { size: 'sm', icon: 'download', title: 'Download', onClick: () => { location.href = fileUrl(a, a.main, true); } }),
+  actRow.append(btn('', { size: 'sm', icon: 'download', title: 'Download', onClick: () => { if (a.type === 'material') exportAssets([a.id], { options: true }); else location.href = fileUrl(a, a.main, true); } }),
     btn('', { size: 'sm', icon: 'more-horizontal', title: 'More', onClick: e => menu(e.currentTarget, [
       { label: 'Compare with…', icon: 'columns-2', onClick: () => import('./compare.js').then(m => m.pickAndCompare(a)) },
       { label: 'Export as zip', icon: 'package', onClick: () => exportAssets([a.id]) },
-      ['audio', 'voice', 'image'].includes(a.type) ? { label: 'Export / convert…', icon: 'sliders-horizontal', onClick: () => exportAssets([a.id], { options: true }) } : null,
+      ['audio', 'voice', 'image', 'material'].includes(a.type) ? { label: 'Export / convert…', icon: 'sliders-horizontal', onClick: () => exportAssets([a.id], { options: true }) } : null,
       { label: 'Copy asset id', icon: 'copy', onClick: () => copyText(a.id) },
       { sep: true },
       { label: 'Delete', icon: 'trash-2', danger: true, onClick: async () => {
@@ -218,6 +225,7 @@ function renderMetaOnly() {
   // file info
   const inf = h('dl.kv'); const I = a.info || {};
   const ikv = (k, v) => { if (v !== undefined && v !== null && v !== '') inf.append(h('dt', k), h('dd', v)); };
+  if (a.type === 'material') { const X = a.x_material || {}; ikv('Maps', X.size ? `${X.size} × ${X.size} px${X.map_res && X.map_res !== X.size ? ` (estimated at ${X.map_res})` : ''}` : (I.width ? `${I.width} × ${I.height} px` : null)); ikv('Tiling', X.tiling?.method?.replace(/_/g, ' ')); ikv('Seam', X.seam ? Object.entries(X.seam).map(([k, v]) => `${k} ${v}`).join(' · ') : null); ikv('Normal map', X.normal); }
   if (a.type === 'image') { ikv('Size', I.width ? `${I.width} × ${I.height} px` : null); ikv('Alpha', I.has_alpha ? `yes (${Math.round((I.transparent_fraction || 0) * 100)}% transparent)` : 'no'); }
   if (a.type === 'audio' || a.type === 'voice') { ikv('Duration', fmtDur(I.duration)); ikv('Format', I.sample_rate ? `${I.sample_rate} Hz · ${I.channels} ch` : null); ikv('Loudness', I.lufs != null ? `${I.lufs} LUFS` : null); ikv('Peak', I.peak_db != null ? `${I.peak_db} dBFS${I.clipped ? ' (clipped)' : ''}` : null); ikv('Silence', I.silence_fraction != null ? `${Math.round(I.silence_fraction * 100)}%` : null); }
   if (a.type === 'video') { ikv('Duration', fmtDur(I.duration)); ikv('Size', I.width ? `${I.width} × ${I.height} px${I.fps ? ` · ${I.fps} fps` : ''}` : null); ikv('Codec', [I.codec, I.has_audio ? `audio ${I.audio_codec || ''}`.trim() : 'no audio'].filter(Boolean).join(' · ')); }

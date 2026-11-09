@@ -160,7 +160,7 @@ class Registry:
             seen.add(p["name"])
         Registry._normalize_slots(m, errors)
 
-    SLOT_TYPES = ("audio", "voice", "video", "image", "mesh")
+    SLOT_TYPES = ("audio", "voice", "video", "image", "mesh", "material")
 
     @staticmethod
     def _normalize_slots(m: dict, errors: list):

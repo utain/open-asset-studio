@@ -143,4 +143,6 @@ def resolve_export(spec: dict | None, settings=None) -> dict:
             out[kind] = None            # explicit "do not convert this kind"
         else:
             out[kind] = {**(base[kind] or {}), **o}
+    mat = spec.get("material")          # per-type options for material assets (layout / normal / size / glb); never part of a preset
+    out["material"] = dict(mat) if isinstance(mat, dict) and mat else None
     return out

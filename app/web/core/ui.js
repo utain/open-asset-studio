@@ -68,7 +68,7 @@ export async function copyText(t) {
   try { await navigator.clipboard.writeText(t); } catch { const a = h('textarea', { value: t, style: { position: 'fixed', opacity: 0 } }); document.body.append(a); a.select(); document.execCommand('copy'); a.remove(); }
   toast('Copied to clipboard', { kind: 'ok', timeout: 1600 });
 }
-export const MOD_ICON = { image: 'image', mesh: 'cuboid', audio: 'audio-lines', voice: 'mic', video: 'video', text: 'type', other: 'package' };
+export const MOD_ICON = { image: 'image', material: 'layers', mesh: 'cuboid', audio: 'audio-lines', voice: 'mic', video: 'video', text: 'type', other: 'package' };
 export const isThai = s => /[฀-๿]/.test(s || '');
 
 // ------------------------------------------------------------------ toasts

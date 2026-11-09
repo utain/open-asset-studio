@@ -207,6 +207,64 @@ def transformer_from_sd(cls, base_path: str, sd: dict):
     return m.to(device="cuda", dtype=torch.bfloat16).eval()
 
 
+# ====================================================================== tileable generation (Z-Image)
+class TileMode:
+    """Seamless (wrap-around) generation for the Z-Image family: latent rolling + a circular-padding VAE (docs/research/materials.md).
+
+    * latent rolling: `transformer.forward` is wrapped. Every call rolls each latent of the list by a random EVEN offset (whole 2x2 patches)
+      drawn from random.Random(seed), calls the original, and un-rolls the predictions. The transformer never sees a fixed border, so no
+      seam can form there.
+    * circular VAE: padding_mode="circular" on every Conv2d with padding in vae.decoder (and vae.encoder for the img2img task), so the
+      decoder does not invent an edge.
+    The two must always be switched together: rolling alone is WORSE than plain generation (seam p95 1.96-3.16 vs 1.32-2.63), roll +
+    circular VAE gives 0.83-1.17. The pipeline is shared with plain jobs, so __exit__ restores forward and zero padding, also on errors."""
+
+    def __init__(self, pipe, seed, encoder: bool = False):
+        self.pipe, self.seed, self.encoder = pipe, int(seed), encoder
+        self._orig = None
+        self._convs: list = []
+
+    @staticmethod
+    def circular_convs(module):
+        return [m for m in module.modules() if m.__class__.__name__ == "Conv2d"
+                and any(int(x) > 0 for x in (m.padding if isinstance(m.padding, tuple) else (1,)))]
+
+    def __enter__(self):
+        import torch
+        tr = self.pipe.transformer
+        self._orig = tr.forward
+        rng = random.Random(self.seed)
+        orig = self._orig
+
+        def rolled(x, *a, **kw):
+            H, W = x[0].shape[-2:]
+            sy, sx = rng.randrange(0, H, 2), rng.randrange(0, W, 2)
+            xs = [torch.roll(xi, (sy, sx), (-2, -1)) for xi in x]
+            out = orig(xs, *a, **kw)
+            lst = out[0] if isinstance(out, tuple) else out.sample
+            lst = [torch.roll(o, (-sy, -sx), (-2, -1)) for o in lst]
+            return (lst,) + tuple(out[1:]) if isinstance(out, tuple) else type(out)(sample=lst)
+
+        tr.forward = rolled
+        self._convs = self.circular_convs(self.pipe.vae.decoder) + (self.circular_convs(self.pipe.vae.encoder) if self.encoder else [])
+        for m in self._convs:
+            m.padding_mode = "circular"
+        return self
+
+    def __exit__(self, *exc):
+        if self._orig is not None:
+            self.pipe.transformer.forward = self._orig
+        for m in self._convs:
+            m.padding_mode = "zeros"
+        return False
+
+
+def tile_meta(img) -> dict:
+    import numpy as np
+    import material_common as mc
+    return {"tileable": True, "tile_method": "latent_roll+circular_vae", "seam": mc.seam_score(np.asarray(img.convert("RGB")))["score"]}
+
+
 # ====================================================================== image helpers
 def _imgtools():
     import imgtools  # engines/hy3d/app/imgtools.py (alpha stats / clean-up)
@@ -356,6 +414,10 @@ class DiffusersBackend(Backend):
         grid = GRID[fam]
         inputs = self._inputs(job)
         needs_image = task in ("edit", "multi_ref", "extract")
+        if task == "tileable":
+            if fam != "zimage":
+                raise InputError(f"{job.model.get('name')} cannot make an image tileable (Z-Image Turbo only).")
+            return self._tileable(job, ctx, h, inputs)
         if needs_image and not inputs:
             raise InputError("Add the image to edit first.")
         if task == "t2i" and fam == "kontext":
@@ -363,6 +425,9 @@ class DiffusersBackend(Backend):
         max_refs = int((job.model.get("features") or {}).get("max_refs") or 1)
         if needs_image and len(inputs) > max_refs:
             raise InputError(f"{job.model.get('name')} takes at most {max_refs} image(s); remove {len(inputs) - max_refs}.")
+        tileable = bool(p.get("tileable")) and task == "t2i" and fam == "zimage"
+        if tileable:
+            p = dict(p, threed_ready=False)       # a seamless texture has no single object to frame
         final, transparent = compose_prompt(task, fam, p)
         n = 1 if task == "extract" else max(1, int(p.get("batch", 1)))
         steps = int(p.get("steps") or 25)
@@ -424,7 +489,11 @@ class DiffusersBackend(Backend):
             call = dict(kw, generator=torch.Generator("cuda").manual_seed(seed))
             if cb_ok:
                 call["callback_on_step_end"] = ctx.step_callback(steps, "denoising", label)
-            out = pipe(**call).images[0]
+            if tileable:
+                with TileMode(pipe, seed):
+                    out = pipe(**call).images[0]
+            else:
+                out = pipe(**call).images[0]
             if not isinstance(out, Image.Image):
                 import numpy as np
                 out = Image.fromarray(np.asarray(out))
@@ -443,12 +512,89 @@ class DiffusersBackend(Backend):
             name = None
             if task == "extract":
                 name = f"Cut-out: {(p.get('prompt') or 'main subject').strip()[:50]}"
+            extra = tile_meta(out) if tileable else {}
             ctx.output(f, "image", seed=seed, index=i, final_prompt=final, name=name, seconds=dt,
-                       size=[out.width, out.height], transparent_fraction=round(frac, 4))
+                       size=[out.width, out.height], transparent_fraction=round(frac, 4), **extra)
             ctx.progress(steps, steps, "saving", f"{label}saved ({dt:.0f} s)")
         peak = round(torch.cuda.max_memory_allocated() / 2**30, 2)
         ctx.log(f"{n} image(s) at {w}x{hgt}: {', '.join(f'{x:.1f}s' for x in times)} (peak {peak} GB)")
         return {"meta": {"family": fam, "width": w, "height": hgt, "final_prompt": final, "seconds": times, "peak_gpu_gb": peak}}
+
+    def _tileable(self, job, ctx, h, inputs):
+        """Task `tileable`: Z-Image img2img at low strength with latent rolling + circular VAE (encoder and decoder) makes an image wrap
+        around. The result is a redraw (mean abs difference to the source 0.05-0.14 at strength 0.35), not the original pixels."""
+        import numpy as np
+        import torch
+        import diffusers
+        import material_common as mc
+
+        if not inputs:
+            raise InputError("Add the image to make tileable first.")
+        p = job.params
+        pipe = h["pipe"]
+        if "i2i" not in h:                      # shares every module with the t2i pipeline: no extra memory
+            # from_pipe defaults to torch_dtype=float32 and casts the SHARED modules in place (4x slower, +20 GB, and it would slow every later
+            # t2i job in this worker): pass the dtype the modules already have.
+            h["i2i"] = diffusers.ZImageImg2ImgPipeline.from_pipe(pipe, torch_dtype=torch.bfloat16)
+            h["i2i"].set_progress_bar_config(disable=True)
+            h["i2i_accepts"] = set(inspect.signature(h["i2i"].__call__).parameters)
+        i2i = h["i2i"]
+        src = inputs[0][1].convert("RGB")
+        side = int(p.get("size") or 1024)
+        k = side / max(src.size)
+        w, hgt = (max(16, int(round(v * k / 16)) * 16) for v in src.size)
+        src = mc.resize_wrap(src, (w, hgt)) if (w, hgt) != src.size else src
+        prompt = (p.get("prompt") or "").strip() or "seamless tileable texture"
+        steps = int(p.get("steps") or 9)
+        strength = float(p.get("strength") or 0.35)
+        seed = int(p.get("seed", -1))
+        if seed < 0:
+            seed = random.randrange(2**31)
+        kw = dict(prompt=prompt, image=src, strength=strength, width=w, height=hgt, num_inference_steps=steps, guidance_scale=0.0,
+                  generator=torch.Generator("cuda").manual_seed(seed))
+        if "callback_on_step_end" in h["i2i_accepts"]:
+            kw["callback_on_step_end"] = ctx.step_callback(max(1, int(steps * strength)), "denoising", "")
+        before = mc.seam_score(np.asarray(src))["score"]
+        torch.cuda.reset_peak_memory_stats()
+        ctx.check()
+        ctx.progress(0, steps, "encoding", "encoding the image")
+        t = time.time()
+        phases: dict = {}
+        hooks = []
+
+        def watch(mod, name):
+            def pre(*_):
+                torch.cuda.synchronize()
+                phases.setdefault(name, [0, 0.0, 0.0])[2] = time.time()
+
+            def post(*_):
+                torch.cuda.synchronize()
+                ph = phases[name]
+                ph[0] += 1
+                ph[1] += time.time() - ph[2]
+            hooks.append(mod.register_forward_pre_hook(pre))
+            hooks.append(mod.register_forward_hook(post))
+        for mod, name in ((pipe.vae.encoder, "vae_encode"), (pipe.transformer, "transformer"), (pipe.vae.decoder, "vae_decode")):
+            watch(mod, name)
+        try:
+            with TileMode(pipe, seed, encoder=True):
+                out = i2i(**kw).images[0]
+        finally:
+            for hk in hooks:
+                hk.remove()
+        torch.cuda.synchronize()
+        dt = round(time.time() - t, 2)
+        ctx.log("tileable phases: " + ", ".join(f"{k} {v[1]:.1f}s/{v[0]}" for k, v in phases.items()))
+        out = out.convert("RGB")
+        f = job.out_dir / "image_1.png"
+        out.save(f)
+        diff = float(np.abs(mc.to_float(np.asarray(out)) - mc.to_float(np.asarray(src.resize(out.size)))).mean())
+        peak = round(torch.cuda.max_memory_allocated() / 2**30, 2)
+        ctx.output(f, "image", seed=seed, index=0, final_prompt=prompt, seconds=dt, size=[out.width, out.height],
+                   tileable=True, tile_method="regenerate", strength=strength, seam_before=before,
+                   seam=mc.seam_score(np.asarray(out))["score"], diff_from_source=round(diff, 4))
+        ctx.log(f"tileable {w}x{hgt}, strength {strength}: {dt:.1f} s (peak {peak} GB)")
+        return {"meta": {"family": "zimage", "width": w, "height": hgt, "seconds": [dt], "peak_gpu_gb": peak}}
 
 
 if __name__ == "__main__":

@@ -1091,6 +1091,52 @@ Export dialog (`core/components/exportdialog.js`): a hint row for mesh selection
 
 ---
 
+## 13. Seamless PBR materials (`app/plugins/material.py`, `workers/material_*.py`, `workers/span_lite.py`, `web/studios/material.js`, `web/studios/mat/`)
+
+Design, measurements and the licence of every model: `docs/research/materials.md`.
+
+### 13.1 Tasks, models, assets
+
+Tasks `material` (studio `material`) and `tileable`. Models: `material-zimage` (handler `material.make`, `default_for: [material]`; chains Z-Image Turbo + the PBRify estimators; backend `material`, which shares `envs/qwen`),
+`tileable-blend` (handler `material.tileable`, CPU), and the tool `material.sample_glb` (CPU). `z-image-turbo` gained the task `tileable` (img2img, low strength) and the param `tileable` (t2i, the "Seamless" switch).
+Inputs of `material.make` (registry slots, role based): `image` (a photo, optional), `base` (a `material` or `image` to vary, optional). Modes: text, photo (`photo_tiling`: `blend` | `regenerate` | `none`), variation (`variation_strength`).
+
+A material is one asset of **type `material`** (`TYPES`, `MAIN_BASENAME = basecolor`), folder `materials/` in exports, Library filter "Materials", icon `layers`. Files: `basecolor.png` (sRGB, main), `normal.png` (**OpenGL**, Y+),
+`height.png` (16-bit, 0 = deepest), `roughness.png`, `metallic.png`, `ao.png`, `orm.png` (R occlusion, G roughness, B metallic, linear), `preview.png` (sphere, 360 px, also the card thumbnail),
+`preview_{sphere,cube,plane}.gltf` (analytic meshes with tangents; the textures are referenced by relative URL and repeated by the viewer), `material.json`. Maps are 1024, 2048 or 4096 px square (`x_material.size`; 4096 = a 2x SPAN / wrap-safe upscale of normal, height, roughness, AO).
+
+`meta.x_material = {version: 1, size, map_res, maps: {name: file}, normal: "opengl", height_bits: 16, orm, color_space, source: text | photo | variation, tiling: {method, strength, seam_source, seam_base},
+seam: {basecolor, normal, height}, generator, estimators, params, previews, physical_size_m: null, timings}`. `seam` is the seam score (the ratio of the pixel jump across the wrap-around edge to the typical jump
+inside the image; 1.0 = indistinguishable): `<= 1.05` seamless, `<= 1.25` acceptable, above that visible (`warnings` gets a line and the web shows a red badge). `x_style.map = "basecolor"` marks the base colour as the only map the project style guide touches
+(section 11: the task is registered as `STYLE_TASKS["material"] = "texture"`, the palette is applied to the base colour only, the handler does it itself because the style output hook acts on type `image`).
+`parents` hold the photo / base material; the licence is the most restrictive of the models used and the parents. An image made by `tileable` carries `x_tileable = {method, band, keep_contrast, seam_before, seam_after}`.
+
+### 13.2 Export (new hook `assets.EXPORTERS`)
+
+`assets.EXPORTERS[type] = fn(meta, asset_dir, convert, tmpdir, base) -> ([(source_path, archive_name)], report)`. `AssetStore.export` calls it for every asset of that type, with `convert[type]` from the request
+(`ValueError` -> `AssetError`), writes the files under `<folder>/<stem>/...`, stores `report` as `manifest.assets[i][<type>]` and skips the default main + attachments loop. Only `material` registers one (in `setup(core)`).
+Request: `POST /api/export {ids, ..., convert: {material: {layout, normal, size, height_bits, glb}}}`: `layout` gltf (default) | unreal | unity_urp | unity_hdrp | godot | separate, `normal` gl | dx (default per layout),
+`size` 0 (original) | 256 | 512 | 1024 | 2048 | 4096 (**never upscaled**), `height_bits` 8 | 16, `glb` (default true: adds `<stem>_sample.glb`, a sphere at <= 1024 px; `false` leaves it out). Layouts reuse `workers/engine_common.pack_textures` (the game-engine export,
+section 12), so the file names and channel conventions are the same as there. `profiles.resolve_export` passes `material` through (never part of a preset). The export dialog (`core/components/exportdialog.js`) shows a Materials card when a selection holds materials.
+
+### 13.3 API (`/api/x/material`)
+
+`GET /layouts` -> `{default, layouts: [{id, label, packed, summary, normal}], sizes, normals}` · `POST /repack {id, layout?, normal?, size?, glb?}` -> `{url, name, bytes, count}` (a zip through `CORE.assets.export`).
+
+### 13.4 Web
+
+`studios/material.js` (id `material`, order 15, desktop only): `S.TaskStudio` with tasks Material and Make tileable. `studios/mat/viewer.js` is the drawer preview of a `material` asset, registered with `S.registerPreview('material', fn)`
+(new, `core/components/drawer.js`: `registerPreview(type, fn(asset) -> Element)`): 3D with live tiling (the texture repeat of the loaded model-viewer scene is changed, `mvScene` is exported from `studios/i3d/common.js`),
+a flat Tile 3x3 view of any map, the map strip, seam badges, Download (export dialog), Variations, Sample GLB. `paramform.js` understands `show_if: {has_input: <slot key>}` (fed by `TaskStudio`, which also
+re-evaluates it when a slot changes). Image > Generate shows the Seamless switch from the registry param `tileable`.
+
+### 13.5 Packs
+
+`install/material.yaml` (no new venv: `backend: material` runs in `envs/qwen`), `scripts/fetch_pbrify.py` (the four PBRify_Remix checkpoints, verified by sha256, into `~/.cache/pbrify/1.7.2`), pack `materials` in `install/packs.yaml`.
+MCP: `get_asset` shows the maps for a material, `submit_job` documents `material` / `tileable` / `material.sample_glb`, `export_assets` takes `material: {...}`; the in-app Assistant gets the same read-only hints.
+
+---
+
 ## Changelog
 - 0.1.0: initial core.
 - 0.1.1 (image/3D studio): `app/main.py` keeps the catch-all static mount last after `load_plugins()`, so plugin routers
@@ -1190,3 +1236,10 @@ Export dialog (`core/components/exportdialog.js`): a hint row for mesh selection
   is refused by `editable: false`), `web/core/components/exportdialog.js` (mesh hint), `web/core/uiinfo.js` (`engine_*` balloons), `param_info.py`. Result assets: mesh with `meta.worker.engine` and the attachments of 12.1.
   MCP: 2 new public tools (30): `engine_destinations`, `deliver_engine_export`; `get_settings` hides destination paths from remote callers. Frontend extension point: `viewerHooks` (`i3d/common.js`).
   Security: delivery only into folders named in settings.json, by id, local-only unless `allow_lan`, origin-checked, no symlink following, never overwrites an edited file, never deletes.
+- (n) seamless PBR materials (section 13; additive): new drop-ins `app/plugins/material.py`, `workers/material_worker.py` + `material_common.py` + `span_lite.py`, `models.d/material.yaml`, `install/material.yaml`, `scripts/fetch_pbrify.py`,
+  `prompts/material.yaml`, `web/studios/material.js` + `web/studios/mat/`, `tests/test_material.py`; `z-image-turbo` gets the task `tileable` + the param `tileable` (`models.d/image.yaml`, `workers/qwen_worker.py`: `TileMode`, `_tileable`).
+  Core-owned files touched with small, backwards-compatible hooks: `registry.py` (`SLOT_TYPES` += `material`), `assets.py` (asset type `material`, thumbnail from `preview.png`, export folder `materials/`, the `EXPORTERS` registry and its call in `export`),
+  `profiles.py` (`resolve_export` passes `material` through), `main.py` (`_export_spec` forwards it), `media.py` (`.gltf` MIME), `param_info.py` + `web/core/uiinfo.js` (balloons), `web/core/ui.js` (`MOD_ICON.material`), `web/app.css` (`.mod-material`, the seam badge colours on a card thumbnail, and the phone layout `.studio { grid-template-columns: minmax(0, 1fr) }` so a long model summary cannot widen the page),
+  `web/core/sdk.js` + `components/drawer.js` (`registerPreview`, material info rows, Download opens the export dialog), `components/exportdialog.js` (Materials card, `convert.material`), `components/results.js` (size and seam badges),
+  `components/paramform.js` + `components/taskstudio.js` (`show_if: {has_input: <slot key>}`), `studios/library.js` (Materials filter), `studios/i3d/common.js` (`export function mvScene`).
+  MCP: `material_view`-style previews in `get_asset`, `submit_job` / `export_assets` / `get_info` topics for materials (`scripts/mcp_server.py`, read-only hints in `workers/studio_mcp.py`, `app/plugins/assistant.py`).

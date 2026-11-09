@@ -557,13 +557,14 @@ class RenderReq(BaseModel):
 
 
 def _export_spec(spec: dict | None) -> dict | None:
-    """Request body -> {audio, image} option dicts (None for 'original')."""
+    """Request body -> {audio, image, material} option dicts (None for 'original')."""
     from . import profiles
 
     if spec is None:
         return None
     r = profiles.resolve_export(spec, C().settings)
-    return {"audio": r["audio"], "image": r["image"], "preset": r["preset"]} if (r["audio"] or r["image"]) else None
+    return ({"audio": r["audio"], "image": r["image"], "material": r.get("material"), "preset": r["preset"]}
+            if (r["audio"] or r["image"] or r.get("material")) else None)
 
 
 @app.post("/api/export")

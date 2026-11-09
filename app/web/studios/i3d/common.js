@@ -101,7 +101,7 @@ async function pumpThumbs() {
 /** The app theme is `data-theme` on <html> (dark unless set to light). */
 const isDark = () => document.documentElement.dataset.theme !== 'light';
 /** The scene of a <model-viewer> (internal symbol) and its model root, or null while they are not ready. */
-function mvScene(mv) {
+export function mvScene(mv) {
   const sym = Object.getOwnPropertySymbols(mv).find(k => k.description === 'scene');
   const scene = sym && mv[sym], root = scene && (scene.model || scene._model);
   return root ? { scene, root } : null;

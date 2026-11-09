@@ -1,0 +1,82 @@
+# Seamless PBR materials: Z-Image Turbo (tileable) -> PBRify SPAN maps -> CPU post. docs/research/materials.md has the measurements;
+# app/plugins/material.py the pipeline, workers/material_worker.py (maps) + workers/material_common.py (pure helpers).
+tasks:
+  material: {label: PBR material,       modality: image, studio: material}
+  tileable: {label: Make tileable,      modality: image, studio: material}
+
+backends:
+  material:
+    label: envs/qwen (PBRify SPAN map nets)
+    python: envs/qwen/bin/python
+    script: workers/material_worker.py
+    device: gpu
+    lock: qwen
+    max_loaded: 4
+
+models:
+  - id: material-zimage
+    name: PBR material (Z-Image + PBRify)
+    modality: image
+    tasks: [material]
+    default_for: [material]
+    order: 15
+    tags: [tileable, pbr, commercial, fast]
+    summary: "A seamless, game-ready PBR material from a description, a photo or an existing material: base colour, OpenGL normal, 16-bit height, roughness, metallic, AO and an ORM pack at 1k / 2k / 4k. Tileable Z-Image Turbo (latent rolling + circular VAE) makes the base colour, PBRify SPAN networks (CC0) estimate the maps, CPU steps finish them. Previews as a sphere, cube or plane that tiles live."
+    features: {pbr: true, tileable: true, input: [text, image, material], export: [gltf, unreal, unity_urp, unity_hdrp, godot]}
+    backend: material
+    handler: material.make
+    weights:
+      - {hf: unsloth/Z-Image-Turbo, files: ["text_encoder/*.safetensors", "vae/*.safetensors"]}
+      - {hf: unsloth/Z-Image-Turbo-FP8, files: [Z-Image-Turbo-INT8.safetensors]}
+      - {path: "~/.cache/pbrify/1.7.2/1x-PBRify_NormalV3.pth", label: PBRify NormalV3, size_bytes: 72500000, fix: "./install.sh model material-zimage   # or: envs/core/bin/python scripts/fetch_pbrify.py", download_cmd: [envs/core/bin/python, scripts/fetch_pbrify.py]}
+      - {path: "~/.cache/pbrify/1.7.2/1x-PBRify_Height.pth", label: PBRify Height, download_cmd: [envs/core/bin/python, scripts/fetch_pbrify.py]}
+      - {path: "~/.cache/pbrify/1.7.2/1x-PBRify_RoughnessV2.pth", label: PBRify RoughnessV2, download_cmd: [envs/core/bin/python, scripts/fetch_pbrify.py]}
+      - {path: "~/.cache/pbrify/1.7.2/4x-PBRify_UpscalerSPANV4.pth", label: PBRify UpscalerSPANV4, download_cmd: [envs/core/bin/python, scripts/fetch_pbrify.py]}
+    license: {name: "Apache-2.0 (Z-Image Turbo) + CC0-1.0 (PBRify_Remix models)", commercial: true}
+    memory_gb: 30
+    speed: "about 20 s for a 1k material (Z-Image 15 s + maps < 1 s + CPU post); 2k / 4k add 1-5 s"
+    est: {load_s: 14, run_s: 22}
+    prompt_style: material_zimage
+    input_slots:
+      - {key: image, role: image, types: [image], label: Photo, multiple: false, required: false, tasks: [material], info: slot.photo, hint: "Optional: a photo of a surface. It is cropped square and made tileable."}
+      - {key: base, role: base, types: [material, image], label: Base material, multiple: false, required: false, tasks: [material], info: slot.base, hint: "Optional: make variations of an existing material or image."}
+    params:
+      - {name: size, label: Map size, type: choice, choices: [1024, 2048, 4096], default: 1024, unit: px, group: basic, tasks: [material]}
+      - {name: batch, label: Materials, type: int, min: 1, max: 4, default: 1, group: basic}
+      - {name: metallic, label: Metallic, type: float, min: 0, max: 1, step: 0.05, default: 0, group: basic}
+      - {name: photo_tiling, label: Photo seams, type: choice, choices: [blend, regenerate, none], default: blend, group: basic, show_if: {has_input: image}}
+      - {name: variation_strength, label: Variation, type: float, min: 0.2, max: 0.8, step: 0.05, default: 0.5, group: basic, show_if: {has_input: base}}
+      - {name: delight, label: Remove baked light, type: float, min: 0, max: 1, step: 0.05, default: 0.5, group: advanced}
+      - {name: normal_strength, label: Normal strength, type: float, min: 0.25, max: 3, step: 0.05, default: 1.0, group: advanced}
+      - {name: roughness_bias, label: Roughness bias, type: float, min: -0.5, max: 0.5, step: 0.05, default: 0, group: advanced}
+      - {name: height_contrast, label: Height contrast, type: float, min: 0.25, max: 2, step: 0.05, default: 1.0, group: advanced}
+      - {name: ao_strength, label: AO strength, type: float, min: 0, max: 2, step: 0.05, default: 1.0, group: advanced}
+      - {name: steps, type: int, min: 6, max: 12, default: 9, group: advanced, help: "9 steps = 8 function evaluations (distilled)."}
+      - {name: seed, type: seed, default: -1}
+    presets:
+      fast: {steps: 7, size: 1024}
+      balanced: {steps: 9, size: 1024}
+      quality: {steps: 12, size: 2048}
+
+  - id: tileable-blend
+    name: Make tileable (blend)
+    modality: image
+    tasks: [tileable]
+    default_for: [tileable]
+    order: 16
+    tags: [tool, cpu, tileable]
+    summary: "Makes an image or photo tile without a visible seam: an offset blend along the wrap-around edges, CPU only, no weights, about 0.1 s per megapixel. Use Make tileable (regenerate) in Image for a heavier AI redraw."
+    features: {input: image, tileable: true}
+    backend: material
+    handler: material.tileable
+    device: cpu
+    weights: []
+    license: {name: "Own code (no model)", commercial: true, note: "The result keeps the licence of the source image."}
+    memory_gb: 1
+    speed: "about 0.1 s per megapixel"
+    est: {load_s: 0, run_s: 1}
+    input_slots:
+      - {key: images, role: input, types: [image], label: Images, multiple: true, max: 16, required: true, tasks: [tileable]}
+    params:
+      - {name: band, label: Blend band, type: float, min: 0.1, max: 0.5, step: 0.05, default: 0.25, group: basic}
+      - {name: keep_contrast, label: Keep contrast, type: bool, default: true, group: basic}

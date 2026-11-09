@@ -95,11 +95,35 @@ def asset_view(a: dict, full: bool = False) -> dict:
                       **({"path": str(p)} if p.is_file() else {})})
     keys = ["id", "project", "type", "name", "main", "model", "task", "prompt", "seed", "tags", "rating", "created", "license", "info"]
     if full:
-        keys += ["params", "improved_prompt", "final_prompt", "negative", "parents", "job", "studio", "notes", "source", "worker", "x_style"]
+        keys += ["params", "improved_prompt", "final_prompt", "negative", "parents", "job", "studio", "notes", "source", "worker", "x_style", "x_tileable"]
     out = {k: a[k] for k in keys if a.get(k) not in (None, "", [], {})}
     out["files"] = files
     if a.get("type") == "mesh":
         out["mesh3d"] = mesh_view(a, files, full)
+    elif a.get("type") == "material":
+        out["material"] = material_view(a, files, full)
+    return out
+
+
+MATERIAL_MAP_FILES = {"basecolor": "basecolor.png", "normal": "normal.png", "height": "height.png", "roughness": "roughness.png",
+                      "metallic": "metallic.png", "ao": "ao.png", "orm": "orm.png"}
+
+
+def material_view(a: dict, files: list, full: bool = False) -> dict:
+    """Facts of a seamless PBR material: size, normal convention, the map files (path + url), seam scores, how it tiles."""
+    x = a.get("x_material") or {}
+    byname = {f["name"]: f for f in files}
+    maps = {k: {kk: byname[fn][kk] for kk in ("path", "url") if kk in byname[fn]} for k, fn in MATERIAL_MAP_FILES.items() if fn in byname}
+    out = {"size": x.get("size"), "map_res": x.get("map_res"), "normal": x.get("normal", "opengl"), "maps": maps, "seam": x.get("seam"),
+           "tiling": x.get("tiling"), "source": x.get("source"), "layout_hint": "gltf"}
+    out = {k: v for k, v in out.items() if v not in (None, {}, [])}
+    if full:
+        out["notes"] = ("Stored normal map is OpenGL (Y+); height is a 16-bit PNG; orm.png = R occlusion, G roughness, B metallic (linear). Seam score "
+                        "<= 1.05 is seamless, <= 1.25 acceptable, above that a seam can show. Export for an engine: export_assets(ids, material={layout: "
+                        "gltf|unreal|unity_urp|unity_hdrp|godot|separate, normal: gl|dx, size: 0|1024|2048|4096, glb: bool}) (studio_info topic=materials); "
+                        "variations: submit_job(task='material', inputs=[{asset: <this id>, role: 'base'}]); a sample GLB: tool 'material.sample_glb'.")
+        if a.get("warnings"):
+            out["warnings"] = a["warnings"]
     return out
 
 
@@ -279,6 +303,8 @@ TOOL_PARAMS = {
     "audio.resample": {"in": "audio", "params": {"sample_rate": "Hz (default 44100)", **AUDIO_OUT}},
     "audio.make_voice": {"in": "1 audio asset", "params": {"name": "voice name", "ref_text": "transcript of the clip", "language": "language code", "design_prompt": "text", "character": "text"},
                          "note": "Saves a trimmed, -20 LUFS mono copy (max 30 s) as a voice asset, the reference for task voice_clone."},
+    "material.sample_glb": {"in": "1+ material assets", "params": {"shape": "sphere (default) | cube | plane", "tiles": "texture repeats across the shape, 1..8 (default 2)", "size": "texture size embedded in the GLB, 512 | 1024 (default 1024)"},
+                            "note": "Writes a NEW mesh asset (GLB) with the material's base colour, normal and ORM maps embedded: a quick check in any viewer or engine."},
     "style.palette": {"in": "1+ image assets", "params": {"mode": "tint | lock (default tint)", "strength": "0.1..0.8, tint only (default: the guide's tint_strength)", "colors": "list of #rrggbb (default: the project style guide's palette)"},
                       "note": "Writes NEW derived images coloured with the palette; originals untouched. Generated images get this automatically when the guide's palette post is tint / lock."},
     "video.frame": {"in": "1+ video assets", "params": {"at": "'last' (default) | 'first' | seconds"}, "note": "Writes an image asset (e.g. the start frame for i2v)."},
@@ -584,19 +610,35 @@ def t_get_asset(a, _ctx):
     return out
 
 
-def preview_blocks(asset: dict) -> list:
-    """The image (or its thumbnail) as MCP image content, so the client can look at it. Images only, max 4 MB."""
+def preview_blocks(asset: dict, both: bool = True) -> list:
+    """The image (or its thumbnail) as MCP image content, so the client can look at it. Images only, max 4 MB.
+    A material gives its sphere preview and then its base colour (`both`; only the sphere when False)."""
+    if asset.get("type") == "material":
+        blocks = []
+        for name in ["preview.png", asset.get("main")][: 2 if both else 1]:
+            blocks += _image_block(asset, name)
+        return blocks
     names = [(asset.get("preview") or {}).get("thumb")] if asset.get("type") != "image" else [asset.get("main"), (asset.get("preview") or {}).get("thumb")]
     for name in filter(None, names):
-        url = f"/files/{asset['project']}/{asset['id']}/{urllib.parse.quote(name)}"
-        try:
-            with urllib.request.urlopen(API + url, timeout=30) as r:  # noqa: S310
-                blob = r.read(4_000_001)
-                mime = r.headers.get_content_type()
-        except (urllib.error.URLError, OSError):
-            continue
-        if len(blob) <= 4_000_000 and mime in ("image/png", "image/jpeg", "image/webp", "image/gif"):
-            return [{"type": "image", "data": base64.b64encode(blob).decode(), "mimeType": mime}]
+        b = _image_block(asset, name)
+        if b:
+            return b
+    return []
+
+
+def _image_block(asset: dict, name) -> list:
+    """One file of the asset as an MCP image block ([] when it is missing, too big or not an image)."""
+    if not name:
+        return []
+    url = f"/files/{asset['project']}/{asset['id']}/{urllib.parse.quote(name)}"
+    try:
+        with urllib.request.urlopen(API + url, timeout=30) as r:  # noqa: S310
+            blob = r.read(4_000_001)
+            mime = r.headers.get_content_type()
+    except (urllib.error.URLError, OSError):
+        return []
+    if len(blob) <= 4_000_000 and mime in ("image/png", "image/jpeg", "image/webp", "image/gif"):
+        return [{"type": "image", "data": base64.b64encode(blob).decode(), "mimeType": mime}]
     return []
 
 
@@ -624,7 +666,7 @@ def finished(j: dict, preview: bool) -> list:
         out.pop("outputs", None)
         if preview:
             for x in items[:4]:
-                blocks += preview_blocks(x)
+                blocks += preview_blocks(x, both=False)
     elif j.get("status") not in TERMINAL:
         out["hint"] = "Still running: call get_job(id, wait_s=...) to keep waiting, or cancel_job(id)."
     return [{"type": "text", "text": json.dumps(out, ensure_ascii=False)}] + blocks
@@ -762,7 +804,9 @@ def t_export_assets(a, _ctx):
     ids = a.get("ids") or []
     if not ids:
         raise StudioError("Give the asset ids to export.", "input")
-    spec = {k: a[k] for k in ("preset", "audio", "image") if a.get(k)}
+    spec = {k: a[k] for k in ("preset", "audio", "image", "material") if a.get(k)}
+    if a.get("material") and not a.get("zip"):
+        a = {**a, "zip": True}          # material options pack the maps for an engine: a zip with one folder per material
     if a.get("game_audio") is not None:
         g = dict(a["game_audio"] or {})
         d = http("POST", "/api/x/sound/export", {"ids": ids, **g}, timeout=600)
@@ -825,6 +869,7 @@ INFO_TOPICS = {
     "llm": ("the local prompt-improver LLM: running or stopped, model", lambda a: http("GET", "/api/improve/status")),
     "comfyui": ("whether the optional ComfyUI server is reachable", lambda a: http("GET", "/api/x/image/comfyui")),
     "downloads": ("model weight downloads in progress", lambda a: http("GET", "/api/downloads")),
+    "materials": ("export layouts for seamless PBR materials (gltf, unreal, unity_urp, unity_hdrp, godot, separate) with their normal convention and packing", lambda a: http("GET", "/api/x/material/layouts")),
     "logs": ("tail of a studio log (name: studio, worker-<backend>, ...; lines up to 300)", _info_logs),
 }
 
@@ -841,7 +886,7 @@ PROJECT = {"type": "string", "description": "project id (default: default)"}
 INPUTS = {"type": "array", "description": "input assets, e.g. [{asset: '<id>', role: 'ref'}] (roles per model: get_model -> input_slots)",
           "items": {"type": "object", "properties": {"asset": S, "role": S}, "required": ["asset"]}}
 RO = {"readOnlyHint": True, "openWorldHint": False}
-TASKS_HELP = 'Tasks: image (t2i, edit, multi_ref, inpaint, rgba, extract, rmbg, upscale, recenter), 3D (multiview, text3d, shape, texture, retopo = rebuild a dense mesh as a clean quad low poly with a face budget and baked normal / colour / AO maps (CPU, 6-40 s; before rig), rig = auto-rig a mesh, reskin = recompute the skin weights of a rigged mesh after editing its skeleton with tool rig.edit, motion = text to motion for a rigged humanoid, mesh_export, engine_export = package a mesh for Unreal / Unity / Godot / glTF: LOD chain sharing the textures, collision hulls (UCX_ / -convcolonly), engine texture packing and naming (CPU, 3-12 s; rigged meshes stay GLB; then deliver_engine_export copies it into the game project)), audio (sfx, ambience, music, song, tts, voice_design, voice_clone, voice_convert, sing, s2s, v2a, separate, dub, qa_clap, qa_asr), text (transcribe, subtitles, audio_ask), video (t2v, i2v, flf2v, interpolate).'
+TASKS_HELP = 'Tasks: image (t2i, edit, multi_ref, inpaint, rgba, extract, rmbg, upscale, recenter; t2i on z-image-turbo has a `tileable` param for seamless wrap-around textures), materials (material = a seamless PBR material from params.prompt describing the SURFACE, or inputs role image = a photo, or role base = a material / image to vary: writes a `material` asset with basecolor, OpenGL normal, 16-bit height, roughness, metallic, AO and ORM maps at params.size 1024 | 2048 | 4096, GPU ~20 s; tileable = make existing images tile, CPU model tileable-blend, or z-image-turbo to redraw them), 3D (multiview, text3d, shape, texture, retopo = rebuild a dense mesh as a clean quad low poly with a face budget and baked normal / colour / AO maps (CPU, 6-40 s; before rig), rig = auto-rig a mesh, reskin = recompute the skin weights of a rigged mesh after editing its skeleton with tool rig.edit, motion = text to motion for a rigged humanoid, mesh_export, engine_export = package a mesh for Unreal / Unity / Godot / glTF: LOD chain sharing the textures, collision hulls (UCX_ / -convcolonly), engine texture packing and naming (CPU, 3-12 s; rigged meshes stay GLB; then deliver_engine_export copies it into the game project)), audio (sfx, ambience, music, song, tts, voice_design, voice_clone, voice_convert, sing, s2s, v2a, separate, dub, qa_clap, qa_asr), text (transcribe, subtitles, audio_ask), video (t2v, i2v, flf2v, interpolate).'
 TOOLS = [
     {"name": "studio_status", "description": "Studio health, queue (running / queued jobs), free memory, loaded models, profile and licence filter.",
      "inputSchema": {"type": "object", "properties": {}}, "annotations": RO, "fn": t_status},
@@ -866,12 +911,13 @@ TOOLS = [
     {"name": "create_project", "description": "Create a project (id: lowercase letters, digits, - and _), or with update=true change the title / description of an existing one.",
      "inputSchema": {"type": "object", "properties": {"id": S, "title": S, "description": S, "update": B}, "required": ["id"]}, "fn": t_create_project},
     {"name": "search_assets", "description": "Search a project's assets (newest first). Results include file URLs and local paths.",
-     "inputSchema": {"type": "object", "properties": {"project": PROJECT, "q": S, "type": {"type": "string", "description": "image | audio | voice | mesh | video | text (comma list ok)"},
+     "inputSchema": {"type": "object", "properties": {"project": PROJECT, "q": S, "type": {"type": "string", "description": "image | material | audio | voice | mesh | video | text (comma list ok)"},
                                                       "tag": S, "model": S, "task": S, "sort": {"type": "string", "enum": ["new", "old", "rating", "name"]}, "limit": I}},
      "annotations": RO, "fn": t_search_assets},
     {"name": "get_asset", "description": ("One asset: prompt, model, params, seed, info (size / duration / LUFS ...), files with local paths. Meshes add mesh3d: "
                                                      "rigged, joints, animation clip names, textured, attachments (skeleton.json, rigged_plain.glb, motion.npz ...). "
-                                                     "lineage=true adds ancestors / derived assets / batch siblings. preview=true also returns the image."),
+                                                     "Materials add `material`: size, normal convention, the map files (path + url), seam scores, tiling. "
+                                                     "lineage=true adds ancestors / derived assets / batch siblings. preview=true also returns the image (a material: its sphere preview, then the base colour)."),
      "inputSchema": {"type": "object", "properties": {"id": S, "preview": B, "lineage": B}, "required": ["id"]}, "annotations": RO, "fn": t_get_asset},
     {"name": "submit_job", "description": (
         "Generate assets: run a model on a task (or a CPU tool on existing assets) through the studio's queue. One GPU job runs at a time. "
@@ -880,6 +926,8 @@ TOOLS = [
         "3D chain: t2i / rgba -> recenter -> shape -> texture -> [retopo (inputs=[{asset: mesh, role: 'mesh'}], params.target_faces / tex_size or a preset: mobile | pc | hero)] -> rig (inputs=[{asset: mesh}]) -> motion (inputs=[{asset: rigged mesh, role: 'mesh'}], params.prompt); "
         "or tool 'mesh.flex_preview' on a rigged mesh for test clips. "
         "For a game engine: task 'engine_export' (CPU, inputs=[{asset: mesh, role: 'mesh'}], params.target unreal | unity | godot | gltf, lods, collision, size_mode / height_m, tex_max; get_model has the rest) writes a NEW mesh asset with an engine_<target>.zip attachment (FBX/GLB, LODs, collision, engine-named textures); use deliver_engine_export to copy it into the user's game project. "
+        "Seamless PBR materials: task 'material' (GPU, ~20 s for 1k; params.prompt describes the surface only, e.g. 'mossy cobblestone, wet'; params.size 1024 | 2048 | 4096, metallic 0..1, batch 1..4; inputs=[{asset: <photo>, role: 'image'}] with params.photo_tiling blend | regenerate | none, "
+        "or inputs=[{asset: <material or image>, role: 'base'}] with params.variation_strength 0.2..0.8 for variations) writes a `material` asset (get_asset -> material); task 'tileable' (model tileable-blend, CPU) makes images tile; tool 'material.sample_glb' writes a GLB with the textures; export_assets(material={layout, normal, size}) packs it for Unreal / Unity / Godot / glTF. "
         "Edit a rig: get_rig(asset) to see the bones, preview_rig_edit(asset, ops) to check the ops without writing, then tool 'rig.edit' with params.ops (add_chain / add_bone / move_joint / delete_bone / rename / rename_standard / reparent; list_tools has the full syntax), "
         "e.g. submit_job(tool='rig.edit', params={ops:[{op:'add_chain', parent:'hips', count:5, direction:'back', length:0.08, name_prefix:'tail'}]}, inputs=[{asset:'<rigged mesh>', role:'mesh'}]); "
         "the result is a NEW asset; if it reports needs_reskin (new bones have no weights) run submit_job(task='reskin', inputs=[{asset:'<edited mesh>', role:'mesh'}]) (GPU, ~35 s, keeps the skeleton, recomputes the weights). "
@@ -938,8 +986,10 @@ TOOLS = [
     {"name": "export_assets", "description": (
         "Package assets for delivery as DERIVED files (originals are never modified). One asset with an export preset gives one converted file; several give a zip "
         "(files + meta.json + attachments such as skeleton.json). preset ids: studio_info(topic=profiles). game_audio={format, folder, sample_rate, channels, normalize_lufs, by_character} "
-        "instead builds an engine-ready sound folder zip with a manifest. Returns url (+ local path)."),
-     "inputSchema": {"type": "object", "properties": {"ids": {"type": "array", "items": S}, "preset": S, "audio": O, "image": O, "zip": {**B, "description": "force a zip for one asset"},
+        "instead builds an engine-ready sound folder zip with a manifest. Materials: material={layout, normal, size, glb} packs the maps for an engine (zip, folder per material). Returns url (+ local path)."),
+     "inputSchema": {"type": "object", "properties": {"ids": {"type": "array", "items": S}, "preset": S, "audio": O, "image": O,
+                                                      "material": {**O, "description": "material assets: {layout: gltf | unreal | unity_urp | unity_hdrp | godot | separate, normal: gl | dx, size: 0 (keep) | 256 | 512 | 1024 | 2048 | 4096 (never upscaled), height_bits: 16 | 8, glb: bool (sample GLB)}; see studio_info topic=materials"},
+                                                      "zip": {**B, "description": "force a zip for one asset"},
                                                       "naming": {"type": "string", "enum": ["name", "id"]}, "include_meta": B, "include_attachments": B, "game_audio": O},
                      "required": ["ids"]},
      "annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False}, "fn": t_export_assets},
@@ -1037,7 +1087,7 @@ def handle(msg: dict, emit=None, allow_paths=True) -> dict | None:
             "capabilities": {"tools": {"listChanged": False}}, "serverInfo": {"name": "open-asset-studio", "version": "1.0"},
             "instructions": ("Open Asset Studio makes images, 3D models, sound and video with local open-weight models. "
                              "Typical flow: list_models(task=...) -> get_model(id) -> [improve_prompt] -> submit_job(...) -> use the returned file paths; "
-                             "export_assets packages results. 3D: shape -> texture -> [retopo for a game-ready low poly with baked maps] -> rig -> motion (get_asset shows mesh3d: rigged, joints, animation clips); edit a rig with get_rig -> preview_rig_edit -> submit_job(tool='rig.edit') -> task 'reskin'. get_settings / update_settings read and change the studio settings (system or per project). A project can have a style guide (get_style_guide / set_style_guide / style_from_assets / preview_style) that the server adds to every image / texture / video / sound job: never paste the style into prompts yourself, and use submit_job style='off' to skip it for one job. "
+                             "export_assets packages results. 3D: shape -> texture -> [retopo for a game-ready low poly with baked maps] -> rig -> motion (get_asset shows mesh3d: rigged, joints, animation clips); edit a rig with get_rig -> preview_rig_edit -> submit_job(tool='rig.edit') -> task 'reskin'. Seamless PBR materials: submit_job(task='material', params.prompt = the surface) -> get_asset (material: map files, seam scores) -> export_assets(material={layout: unreal | unity_urp | unity_hdrp | godot | gltf}). get_settings / update_settings read and change the studio settings (system or per project). A project can have a style guide (get_style_guide / set_style_guide / style_from_assets / preview_style) that the server adds to every image / texture / video / sound job: never paste the style into prompts yourself, and use submit_job style='off' to skip it for one job. "
                              "Check each model's licence before commercial use; many are non-commercial. "
                              "Never delete, spend cloud money or upload files without the user's explicit OK.")}}
     if method == "ping":

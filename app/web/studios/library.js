@@ -16,7 +16,7 @@ export default S.defineStudio({
     const countEl = h('span.dim');
     const q = h('input.input', { type: 'search', placeholder: 'Search name, prompt, tag, model…', value: f.q, style: { maxWidth: '320px' }, 'aria-label': 'Search' });
     q.addEventListener('input', S.debounce(() => { f.q = q.value; reload(); }, 250));
-    const typeSeg = S.seg([{ value: '', label: 'All' }, { value: 'image', label: 'Images' }, { value: 'mesh', label: '3D' }, { value: 'audio', label: 'Audio' }, { value: 'voice', label: 'Voices' }, { value: 'video', label: 'Video' }], f.type, v => { f.type = v; reload(); });
+    const typeSeg = S.seg([{ value: '', label: 'All' }, { value: 'image', label: 'Images' }, { value: 'material', label: 'Materials' }, { value: 'mesh', label: '3D' }, { value: 'audio', label: 'Audio' }, { value: 'voice', label: 'Voices' }, { value: 'video', label: 'Video' }], f.type, v => { f.type = v; reload(); });
     const modelSel = h('select.select', { style: { width: 'auto', maxWidth: '220px' }, 'aria-label': 'Model', on: { change: e => { f.model = e.target.value; reload(); } } });
     const tagSel = h('select.select', { style: { width: 'auto', maxWidth: '180px' }, 'aria-label': 'Tag', on: { change: e => { f.tag = e.target.value; reload(); } } });
     const ratingSel = h('select.select', { style: { width: 'auto' }, 'aria-label': 'Rating', on: { change: e => { f.rating_min = e.target.value; reload(); } } },

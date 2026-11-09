@@ -31,6 +31,13 @@ packs:
       - lumina-image-2.0        # [25 GB]
       - qwen-image-2.1          # [56 GB] best text rendering, RGBA, edits
 
+  materials:
+    title: Materials
+    description: "seamless PBR materials (base colour, normal, height, roughness, metallic, AO) for games: tileable Z-Image + PBRify map networks, CC0"
+    models:
+      - material-zimage         # [30 GB] shares the Z-Image weights with the image pack; PBRify networks 0.07 GB
+      - tileable-blend          # [1 GB] CPU: make any image tile (offset blend)
+
   3d:
     title: 3D
     description: "image to 3D shape (TripoSR, TripoSG, Hunyuan3D 2mini, TRELLIS) and Hunyuan3D 2.1 with textures"

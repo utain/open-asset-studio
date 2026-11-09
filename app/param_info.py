@@ -553,6 +553,18 @@ PARAM_INFO: dict[str, str] = {
     "collision_quality": "How closely the collision pieces follow the shape. Fast makes a few rough pieces, detailed makes more and tighter ones but takes longer to compute and costs more physics time in the game. Balanced is right for most props.",
     "max_hulls": "The most separate convex pieces the collision may use. More pieces fit the shape better but make physics slower in the game; hollow shapes like chairs or arches need more than blocks do.",
     "hull_max_verts": "The most corner points each collision piece may have. Lower is faster for the engine's physics; 64 is within Unity's limit for convex colliders, so pieces import without being simplified again.",
+    "tileable": "Makes the picture wrap around: the left edge continues into the right edge and the top into the bottom, so it repeats on a floor or wall without a visible seam. Use it with a flat, top-down prompt such as a surface or pattern; for objects and scenes leave it off.",
+    "metallic": "How metal the surface is, from 0 (stone, wood, plastic, cloth) to 1 (bare metal). It is one value for the whole material, because the AI cannot tell metal from non-metal reliably. Keep 0 for most surfaces, 1 for clean metal, and use 0.2 to 0.5 only for painted or dirty metal.",
+    "photo_tiling": "How a photo is made to repeat without a seam. Blend mixes the edges with the opposite side on the computer and keeps your pixels in the middle. Regenerate lets the AI redraw the picture so it wraps around, which fixes strong patterns but changes details. None uses the photo as it is.",
+    "strength": "How much of the starting picture is redrawn. Low values keep it almost unchanged, high values keep little more than its general layout and colours. Start in the middle and move towards what you need.",
+    "variation_strength": "How far the new materials may drift from the base material. Low values keep its layout and colours and only change details, high values keep little more than the general kind of surface. Start at the middle and go lower if the results stray too far.",
+    "delight": "Removes light and shadow that are painted into the colour (a bright side, a dark corner), so the material looks right under any light in your game. 0 keeps the colour as generated; the middle suits most results; 1 flattens the strongest.",
+    "normal_strength": "Scales how steep the small bumps look in the normal map. Above 1 makes grooves and grain stand out more, below 1 smooths them. Check it on the sphere in the viewer under a side light before you export.",
+    "roughness_bias": "Shifts the whole roughness map. Positive values make the surface duller and more matte, negative values make it shinier. Use a small step, such as 0.1, to correct a material that looks too glossy or too flat.",
+    "height_contrast": "Scales the depth range of the height map around its middle. Higher gives deeper cracks and higher ridges when a game uses it for parallax or displacement; lower gives a shallower relief. The normal map is not changed.",
+    "ao_strength": "How dark the soft shadow in cracks and hollows (ambient occlusion) is. 0 switches it off, 1 is a natural amount, higher exaggerates the crevices. It is estimated from the height map.",
+    "band": "How wide the strip along each edge is that is blended with the opposite side, as a fraction of the picture. A wider band hides the seam better but changes more of the picture. Start at 0.25 and widen it only if a seam still shows.",
+    "keep_contrast": "Blends the edges in a way that keeps the texture as grainy as the rest, instead of a smooth, washed-out zone. Leave it on; switch it off only for smooth gradients.",
     "size_mode": "Keep leaves the model at the size it has now. Height scales it so it is a real-world height in metres, which is the easiest way to get a character or prop the right size in the engine.",
     "height_m": "The real-world height in metres the model is scaled to when Size is set to Height. 1.8 is an adult person, 0.9 a chair, 2.1 a door.",
     "pivot": "The point the model turns and scales around in the engine. Bottom centre puts it on the floor under the middle, which is right for things that stand on the ground. Keep leaves it as it is.",
@@ -820,6 +832,11 @@ PARAM_INFO_BY_TASK: dict[tuple[str, str], str] = {
     # alpha_clean
     ("rmbg", "alpha_clean"): "Makes nearly invisible pixels at the cut-out edge fully transparent, which removes the faint "
                              "haze that background removal can leave. Raise it if you still see a ghost halo.",
+    # tileable / material
+    ("tileable", "size"): "The longest side in pixels of the redrawn picture. The AI works at this size, so 1024 is a good start; bigger takes longer and uses more memory. The result is a new picture, your original is kept.",
+    ("material", "size"): "The size of every map in pixels. 1024 is quickest. 2048 and 4096 first enlarge the base colour with a texture upscaler (4096 estimates the other maps at 2048 and enlarges them), which takes a few seconds more but not a new generation.",
+    ("material", "batch"): "How many materials to make in one go. Each one is a separate run with the next seed, so you get different takes to choose from. Keep it at 1 for a quick check and use 4 to explore.",
+    ("tileable", "strength"): "How much of the picture the AI redraws to make it wrap around. Low keeps your picture almost unchanged but may leave a seam, high fixes it better but drifts further from the original. 0.35 is a good start.",
     # quality
     ("t2i", "quality"): "Trades price and speed for detail. Low is quick and cheap, high gives the finest detail and text "
                         "but takes longer and costs more. Use low for tests.",

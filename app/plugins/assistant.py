@@ -308,6 +308,9 @@ def tool_get_asset(project: str, args: dict) -> dict:
         if isinstance(w.get("engine"), dict):
             e = w["engine"]
             out["mesh3d"]["engine"] = {k: e.get(k) for k in ("target", "name", "hulls", "collision", "package") if e.get(k) is not None}
+    elif a.get("type") == "material":   # seamless PBR material: size, maps, seam scores (read-only, like the rest)
+        x = a.get("x_material") or {}
+        out["material"] = {k: x.get(k) for k in ("size", "map_res", "normal", "maps", "seam", "tiling", "source") if x.get(k) is not None}
     return out
 
 
@@ -595,6 +598,9 @@ Rules:
   ambience then tool audio.loop; voice_design then tts; thumbnail or b-roll stills (t2i at 16:9 or 9:16); podcast or video
   intro stings and music beds (music, short); asset.export to deliver loudness-normalised audio or platform-sized images. Write prompts in English, in the target model's style
   (Stable Audio: comma-separated sound tags; images: concrete visual description, plain background for 3D).
+- Seamless PBR materials: task material (params.prompt describes the SURFACE only, e.g. "mossy cobblestone, wet"; params.size 1024 | 2048 | 4096; optional inputs
+  {"asset": "<photo>", "role": "image"} or {"asset": "<material or image>", "role": "base"} for variations) writes a material asset (basecolor, normal, height, roughness, metallic,
+  AO, ORM); task tileable makes images tile. The user exports materials for Unreal / Unity / Godot from the Download button.
 - Never retopo a rigged mesh (the skeleton and skin would be lost): retopo the unrigged one, then rig.
 - For a game engine, the last step can be task engine_export (CPU; params.target unreal | unity | godot | gltf) on the finished mesh: LOD chain, collision and engine-named
   files in a zip. A plan never delivers into a game project folder; the user does that in the 3D studio.

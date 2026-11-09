@@ -259,7 +259,7 @@ def test_get_rig_reads_the_skeleton_and_documents_the_edit_flow(mcp, monkeypatch
 
 def test_tool_params_table_matches_registered_handlers():
     from app.jobs import HANDLERS
-    from app.plugins import core_tools, mesh, rig, sound, style, video  # noqa: F401  (importing registers the handlers)
+    from app.plugins import core_tools, material, mesh, rig, sound, style, video  # noqa: F401  (importing registers the handlers)
 
     import importlib.util
     spec = importlib.util.spec_from_file_location("mcp_server3", config.STUDIO / "scripts" / "mcp_server.py")

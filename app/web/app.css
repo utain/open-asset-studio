@@ -253,7 +253,7 @@ input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border-radius: 
 .badge.accent { background: var(--accent-soft); color: var(--accent); }
 .badge.outline { background: transparent; border: 1px solid var(--line); }
 .badge .ic { width: 12px; height: 12px; }
-.mod-image { --mc: var(--c-image); } .mod-mesh { --mc: var(--c-3d); } .mod-audio, .mod-voice, .mod-video { --mc: var(--c-sound); } .mod-text { --mc: var(--c-text); } .mod-other { --mc: var(--c-other); }
+.mod-image, .mod-material { --mc: var(--c-image); } .mod-mesh { --mc: var(--c-3d); } .mod-audio, .mod-voice, .mod-video { --mc: var(--c-sound); } .mod-text { --mc: var(--c-text); } .mod-other { --mc: var(--c-other); }
 .badge.mod { background: color-mix(in srgb, var(--mc) 15%, transparent); color: var(--mc); }
 
 .status-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--text-3); }
@@ -444,6 +444,10 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 .acard .selbox { width: 22px; height: 22px; border-radius: 6px; border: 1.5px solid rgba(255,255,255,.7); background: rgba(0,0,0,.35); display: grid; place-items: center; color: #fff; }
 .acard.sel .selbox { background: var(--accent); border-color: var(--accent); }
 .acard .ov { background: rgba(10, 12, 16, .62); color: #fff; backdrop-filter: blur(4px); }
+.acard .tl .badge.ok, .acard .tl .badge.warn, .acard .tl .badge.err { background: rgba(10, 12, 16, .72); backdrop-filter: blur(4px); font-weight: 600; }  /* seam badge over a thumbnail */
+.acard .tl .badge.ok { color: #6ee7a0; }
+.acard .tl .badge.warn { color: #fcd34d; }
+.acard .tl .badge.err { color: #fca5a5; }
 .acard.pending { cursor: default; }
 .acard.pending .thumb { background: var(--panel-2); }
 .acard.audio .wave-row { display: flex; align-items: center; gap: 10px; padding: 12px 12px 4px; }
@@ -560,7 +564,7 @@ model-viewer { width: 100%; height: 340px; background: radial-gradient(circle at
   .home-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 900px) {
-  .studio { grid-template-columns: 1fr; height: auto; }
+  .studio { grid-template-columns: minmax(0, 1fr); height: auto; }
   .studio-panel { border-right: 0; border-bottom: 1px solid var(--line-soft); overflow: visible; }
   .studio-center { overflow: visible; }
   .mem-meter { display: none; }

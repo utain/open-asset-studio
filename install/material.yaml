@@ -1,0 +1,18 @@
+# Seamless PBR materials: the PBRify SPAN map networks run in the qwen venv (torch, numpy, Pillow) as their own worker (workers/material_worker.py).
+# The venv itself is envs/qwen (install/qwen.yaml); this recipe adds nothing to it. The four PBRify weight files (CC0-1.0, 72 MB zip) are fetched
+# by scripts/fetch_pbrify.py into ~/.cache/pbrify/1.7.2 (the Models page and `./install.sh model material-zimage --weights` run it).
+backend: material
+env: qwen
+python: "3.12"
+torch: []
+lock: null
+lock_flags: []
+vendor: []
+steps: []
+check: "import torch, numpy, PIL"
+manual:
+  - "The base colour comes from Z-Image Turbo (model z-image-turbo, 14.5 GB, Apache-2.0): material-zimage lists its files too, so one install gets both."
+  - "PBRify weights: envs/core/bin/python scripts/fetch_pbrify.py (verifies the sha256 of the archive and of the four files; nothing is executed from it)."
+tested: [linux-aarch64]
+size_gb: 0.05
+shares_env_with: qwen

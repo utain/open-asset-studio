@@ -33,6 +33,19 @@ export const UI_INFO = {
   'engine_export.mesh': { title: 'Models for the game engine', text: 'The 3D models (GLB) to package for a game engine. A model with a skeleton stays a GLB; a static model also gets an FBX for Unreal or Unity. Several models are packaged one after the other, each into its own result. The originals are not changed.' },
   'motion.mesh': { title: 'Rigged character', text: 'The character to animate: a rigged two-legged, two-armed model from the Rig tab, standing upright in a T- or A-pose. Other skeletons are refused with a reason.' },
 
+  'slot.base': { title: 'Base material', text: 'An existing material or image to make variations of. The new materials keep its overall look and colours, and Variation sets how far they drift. Leave it empty to start from a description or a photo.' },
+  'material.image': { title: 'Photo', text: 'Optional photo of a surface (wall, wood, fabric). It is cropped to a square and made tileable; the maps are then estimated from it. Flat, evenly lit photos taken straight on work best.' },
+  'tileable.input': { title: 'Images to make tileable', text: 'The pictures that should repeat without a visible seam. Several can be added; each becomes a new image and the original is kept.' },
+
+  // ------------------------------------------------------------- materials (viewer and studio)
+  'material.view': { title: '3D and tile view', text: '3D shows the material on a shape you can turn with the mouse. Tile 3x3 repeats the base colour nine times flat, which is the quickest way to see whether the edges join without a seam.' },
+  'material.shape': { title: 'Shape', text: 'The shape the material is shown on: a sphere for overall look and shine, a cube for flat faces and edges, a plane for how it looks as a floor or wall.' },
+  'material.tiling': { title: 'Tiling', text: 'How many times the texture repeats across the shape. Higher numbers make the pattern smaller and show repetition; 1 shows the texture once.' },
+  'material.maps': { title: 'Maps', text: 'The images that together describe the surface: base colour, normal (fine bumps), height, roughness, metallic and AO (soft shadow in crevices). ORM packs AO, roughness and metallic into one image for game engines. Click one to look at it.' },
+  'material.seam': { title: 'Seam score', text: 'How visible the join is when the texture repeats. Up to 1.05 is seamless, up to 1.25 is acceptable, above that a seam can show. Patterns with strong straight lines can score higher without a visible seam: check with the 3x3 view.' },
+  'material.normal_convention': { title: 'Normal map convention', text: 'OpenGL (green points up) is used by Blender, Unity, Godot and glTF. DirectX (green flipped) is used by Unreal. The studio stores OpenGL and only flips the green channel in the export, so pick the one your engine expects.' },
+  export_materials: { title: 'Material export', text: 'Packs the maps the way your game engine expects them (names, channel packing and normal convention) and puts them in a folder per material. A small sample GLB with the textures built in lets you check the result in any viewer. Your library files are not changed.' },
+
   // ------------------------------------------------------------- export dialog
   export_preset: { title: 'Export preset', text: 'A ready-made set of conversion options for a target such as a game, a podcast or social media. Choosing one fills in the fields below, and you can still adjust them.' },
   export_audio: { title: 'Convert audio', text: 'When on, audio files are converted with the options below. When off, the original audio files are exported unchanged.' },

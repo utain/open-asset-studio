@@ -33,6 +33,8 @@ function specOf(st) {
     ...(i.quality ? { quality: i.quality } : {}) } : null;
   return { audio, image };
 }
+/** `material` options of the request (layout / normal / size / glb); only sent when a material is selected. */
+const matSpec = m => ({ layout: m.layout, ...(m.normal ? { normal: m.normal } : {}), size: Number(m.size) || 0, glb: !!m.glb });
 
 function triggerDownload(url, name) { const a = document.createElement('a'); a.href = url; a.download = name; document.body.append(a); a.click(); a.remove(); }
 
@@ -42,7 +44,11 @@ export async function exportDialog(ids, { title = 'Export' } = {}) {
   try { metas = (await api.assets({ ids: ids.join(','), limit: 200 })).items; } catch (e) { toastError(e); return; }
   const audioN = metas.filter(m => m.type === 'audio' || m.type === 'voice').length;
   const imageN = metas.filter(m => m.type === 'image').length;
-  const otherN = metas.length - audioN - imageN;
+  const matN = metas.filter(m => m.type === 'material').length;
+  const otherN = metas.length - audioN - imageN - matN;
+  let layouts = null;      // material export layouts (GET /api/x/material/layouts), loaded only when a material is selected
+  let mat = { layout: '', normal: '', size: '0', glb: true, ...prefs.get('export.material', {}) };
+  if (matN) { try { layouts = await api.get('/api/x/material/layouts'); } catch { layouts = null; } if (layouts && !layouts.layouts.some(l => l.id === mat.layout)) mat.layout = layouts.default; }
   const prof = getProfile();
   const order = [...new Set([...(prof.export_presets || []), ...Object.keys(store.exportPresets)])].filter(id => store.exportPresets[id]);
   // 1. the preset picked before in this project, 2. the project's own export preset, 3. the old global pick, 4. the default
@@ -84,6 +90,18 @@ export async function exportDialog(ids, { title = 'Export' } = {}) {
         i.on ? grid : h('div.dim', { style: { fontSize: '12.5px' } }, 'Original image files.'),
         i.on && i.format === 'jpeg' ? h('div.dim', { style: { fontSize: '12px' } }, 'JPEG has no transparency: transparent areas are flattened onto white.') : null));
     }
+    if (matN && layouts) {
+      const L = layouts.layouts.find(l => l.id === mat.layout) || layouts.layouts[0];
+      const nrm = mat.normal || L.normal;
+      parts.push(h('section.card.card-pad.col', { style: { gap: '10px' } },
+        h('div.row', { style: { gap: '8px' } }, h('b', ic('layers', 15), ` Materials (${matN})`), uiInfo('export_materials')),
+        h('div.export-grid',
+          field('Layout', sel(layouts.layouts.map(l => [l.id, l.label]), mat.layout, v => { mat.layout = v; mat.normal = ''; prefs.set('export.material', mat); draw(); }), 'export_materials'),
+          field('Normal map', seg([{ value: 'gl', label: 'OpenGL' }, { value: 'dx', label: 'DirectX' }], nrm, v => { mat.normal = v; prefs.set('export.material', mat); draw(); }), 'material.normal_convention'),
+          field('Size', sel(layouts.sizes.map(s => [String(s), s ? `${s} px (never upscaled)` : 'Keep size']), mat.size, v => { mat.size = v; prefs.set('export.material', mat); }), 'export_size'),
+          field('Sample GLB', h('label.row', { style: { gap: '8px' } }, h('input', { type: 'checkbox', checked: mat.glb, on: { change: e => { mat.glb = e.target.checked; prefs.set('export.material', mat); } } }), 'Sphere with the textures embedded'))),
+        h('div.dim', { style: { fontSize: '12.5px' } }, L.summary, ' Packed: ', L.packed, '. Height is always a separate 16-bit PNG.')));
+    }
     if (otherN) parts.push(h('div.dim', { style: { fontSize: '12.5px' } }, `${otherN} other asset(s) (3D, video…) are included unchanged.`));
     if (metas.some(m => m.type === 'mesh')) parts.push(h('div.dim', { style: { fontSize: '12.5px' } }, 'For Unreal, Unity or Godot packages (LOD levels, collision, engine textures) use 3D › Export › Game engine. Engine packages you already made are included as attachments.'));
     parts.push(h('div.dim', { style: { fontSize: '12px' } }, ic('shield-check', 12), ' Your library files are never modified: conversions are written to new files.'));
@@ -92,9 +110,9 @@ export async function exportDialog(ids, { title = 'Export' } = {}) {
   draw();
 
   const busyBtn = async (b, fn) => { b.disabled = true; const t = b.textContent; b.querySelector('span') && (b.querySelector('span').textContent = 'Working…'); try { await fn(); } catch (e) { toastError(e, 'Export failed'); } b.disabled = false; b.querySelector('span') && (b.querySelector('span').textContent = t); };
-  const single = metas.length === 1 && (audioN + imageN) === 1;
+  const single = metas.length === 1 && (audioN + imageN) === 1 && !matN;
   const zipBtn = btn(single ? 'Download zip' : 'Export zip', { icon: 'package', kind: single ? '' : 'primary', onClick: () => busyBtn(zipBtn, async () => {
-    const r = await api.exportAssets(ids, { export: specOf(st) });
+    const r = await api.exportAssets(ids, { export: { ...specOf(st), ...(matN && layouts ? { material: matSpec(mat) } : {}) } });
     toast(`${r.count} asset(s) · ${fmtBytes(r.bytes)}`, { kind: 'ok', title: 'Export ready' });
     triggerDownload(r.url, r.name); md.close();
   }) });

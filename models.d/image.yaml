@@ -49,11 +49,11 @@ models:
   - id: z-image-turbo
     name: Z-Image Turbo
     modality: image
-    tasks: [t2i]
+    tasks: [t2i, tileable]
     order: 20
     tags: [fastest, text, commercial]
     summary: "Fastest draft model (about 18 s per 1024 image); clean product-render look, very good text. No negative prompt."
-    features: {rgba: false, text_render: true, negative: false, languages: [en, zh], low_seed_diversity: true}
+    features: {rgba: false, text_render: true, negative: false, languages: [en, zh], low_seed_diversity: true, tileable: true}
     backend: qwen
     weights:
       - {hf: unsloth/Z-Image-Turbo, files: ["text_encoder/*.safetensors", "vae/*.safetensors"]}
@@ -63,12 +63,16 @@ models:
     speed: "1.9 s/step, 9 steps: ~19 s per 1024 image"
     est: {load_s: 12, run_s: 19}
     prompt_style: zimage
+    input_slots:
+      - {key: images, role: input, types: [image], label: Image, multiple: false, required: true, tasks: [tileable]}
     params:
-      - {name: aspect, type: choice, choices: ["1:1", "4:3", "3:4", "3:2", "2:3", "16:9", "9:16"], default: "1:1", group: basic}
-      - {name: size, label: Long side, type: choice, choices: [512, 768, 1024, 1280, 1536, 2048], default: 1024, unit: px, group: basic}
+      - {name: aspect, type: choice, choices: ["1:1", "4:3", "3:4", "3:2", "2:3", "16:9", "9:16"], default: "1:1", group: basic, tasks: [t2i]}
+      - {name: size, label: Long side, type: choice, choices: [512, 768, 1024, 1280, 1536, 2048], default: 1024, unit: px, group: basic, tasks: [t2i, tileable]}
       - {name: steps, type: int, min: 6, max: 12, default: 9, group: basic, help: "9 steps = 8 function evaluations (distilled)."}
-      - {name: batch, label: Images, type: int, min: 1, max: 4, default: 4, group: basic}
-      - {name: threed_ready, label: 3D-ready framing, type: bool, default: false, group: basic, help: "Appends single-object, fully visible, plain white background framing (input for Hunyuan3D)."}
+      - {name: batch, label: Images, type: int, min: 1, max: 4, default: 4, group: basic, tasks: [t2i]}
+      - {name: threed_ready, label: 3D-ready framing, type: bool, default: false, group: basic, help: "Appends single-object, fully visible, plain white background framing (input for Hunyuan3D).", tasks: [t2i]}
+      - {name: tileable, label: Seamless (tileable), type: bool, default: false, group: basic, tasks: [t2i], help: "Wrap-around texture: no visible seam when tiled (latent rolling + circular VAE). Use with a top-down, flat-lit prompt."}
+      - {name: strength, label: Change amount, type: float, min: 0.2, max: 0.7, step: 0.05, default: 0.35, group: basic, tasks: [tileable], help: "How much of the image is redrawn to make it seamless. 0.35 keeps the look; higher drifts further."}
       - {name: seed, type: seed, default: -1}
     presets:
       fast: {steps: 7, size: 768}
