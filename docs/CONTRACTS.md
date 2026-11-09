@@ -75,7 +75,9 @@ models:
 **Known `features` keys** (badges + studio logic): `rgba`, `max_refs`, `mask`, `text_render`, `negative`
 (`true` | `false` | `cfg` = only with CFG > 1), `languages`, `thai` (`true` | `false` | `weak` | `untested`),
 `needs_ref` (`true` | `clone` = only for voice_clone), `lyrics`, `instruct`, `tags`, `vision`, `pbr`, `inpaint`,
-`native_size`, `remote`, `max_seconds`, `sample_rate`, `channels`, `speakers`, `voices`, `export`.
+`native_size`, `remote`, `max_seconds`, `sample_rate`, `channels`, `speakers`, `voices`, `export`, `style_ref`
+(list of tasks for which the model takes reference images that fix the *style* of the output, e.g. `[t2i, rgba, multi_ref]`; read by the project
+style guide, section 11; never honoured for `backend: cloud`).
 
 **Input slots** (`input_slots`, top level of a model entry; `features.input_slots` is accepted as an alias). A worker
 that reads extra input roles declares them so the Sound studio renders one `AssetSlot` per slot instead of the
@@ -352,6 +354,23 @@ def setup(core):                                           # optional: keep a re
 `asset_meta(file_meta, index)`, `add_output(path, type, meta=None, attach=None)`, `ingest_worker_files(files)`.
 Raise `JobError(message, kind, fix)` for clean failures. Reference: `app/plugins/core_tools.py`.
 
+**Job hooks** (`app/jobs.py`, module-level lists a plugin appends to in `setup(core)`; both are no-ops unless the job carries the plugin's own
+meta flag, must not depend on each other's order, and must be tagged/replaced on every `setup` so a second `Core` in one process (tests) does
+not leave stale hooks):
+
+```python
+SUBMIT_HOOKS: list[Callable[[dict], None]]   # fn(sub), model jobs only, in JobManager.submit() after the handler is resolved and BEFORE the inputs
+                                             # are validated / the cloud precheck runs. sub = {spec, model, task, project, settings, params, inputs, meta, jobs}
+                                             # (jobs = the JobManager: compare with `core.jobs`). Edit sub["params" | "inputs" | "meta"] in place.
+                                             # JobError propagates (HTTP 400/403 ...); any other exception is logged, the hook's half-done edits are
+                                             # dropped and the job runs as submitted. Retry / regenerate / Pipelines / the Assistant / MCP all pass here.
+OUTPUT_HOOKS: list[Callable]                 # fn(ctx, path, type, meta, attach) -> None | (path, meta, attach), at the top of JobContext.add_output();
+                                             # return a replacement triple (e.g. a recoloured file plus the raw one as an attachment). Exceptions are
+                                             # logged and the original output is kept.
+```
+Plugins that need a custom prompt step (LOD / collision / engine export, seamless PBR materials) use these two lists instead of patching `JobManager`.
+Reference implementation: `app/plugins/style.py` (section 11).
+
 ---
 
 ## 4. Projects and assets
@@ -583,6 +602,8 @@ Actions used today: `prompt`, `regenerate` (core); stubs declare `edit`, `extrac
 | `S.assetCard(asset, opts)` | one card (image with checkerboard / mesh / audio waveform + play) |
 | `new AssetSlot({label, types, multiple, max, role, onChange})` | input picker (drop, library, upload); `.inputs()` -> job `inputs` |
 | `S.videoBox(asset, {name, poster, compact})`, `S.videoAttachments(asset)` | `<video controls>` + download link for a video asset or one of its attached `.mp4/.webm/.mov/.mkv` files; one player at a time |
+| `S.registerPromptAddon({id, mount(box) -> {el?, meta?(), improve?(), setModel?(model, task), destroy?()}})` | extend every `PromptBox`: `el` is put at the START of its tool row, `meta()` is merged into the job meta by `S.promptMeta(box)`, `improve()` into the Improve request body, `setModel` is forwarded; `box.o.memoryKey / params() / inputs()` are readable. An addon returns `{}` when it has nothing to say. Used by the project style chip |
+| `S.registerSelectionAction({id, label, icon, types?, min?, max?, run(ids, assets)})`, `S.selectionActions(assets)` | buttons in the Library's multi-select bar after Export, filtered by the types / count of the selection (used by "Style guide from selection"; an engine export can use it) |
 | `S.pickAssets({types, multiple, title})` | modal library picker -> `Promise<ids \| null>` |
 | `S.openAsset(idOrMeta, {list})`, `S.closeAsset()` | detail drawer (preview, prompts, lineage, rate / tag / notes, send-to, export, delete) |
 | `S.compare(a, b)` | A/B modal (image wipe / side by side, audio A/B with synced position, 2-up GLB) |
@@ -937,7 +958,7 @@ export / ui / prompt / textgen / defaults changed) and, when defaults change, `m
 apply the payload: a system event can carry values the current project overrides. `store.js` ignores `scope: "project"` events of other
 projects and calls `refreshEffective()` (`GET /api/projects/{store.project}/settings`), which updates `store.effective`,
 `store.overridden` (a `Set` of dotted keys), `store.defaults`, then emits the existing `profile` / `license` / `export` / `models`
-events and a new bus event `settings`. New `sdk.js` exports: `getSetting('prompt.context.image')`, `isOverridden(key)`,
+events and a new bus event `settings`. The style guide (section 11) also publishes `settings` with an additive `style: {version}` key (`null` after a delete) and `scope: "project"`; clients ignore it like any other payload and refetch. New `sdk.js` exports: `getSetting('prompt.context.image')`, `isOverridden(key)`,
 `patchEffective(patch)` (each leaf goes to the project when the project overrides it, else to settings.json; `patchProfileSettings`
 is an alias), `setProjectSettings(patch)`, `refreshEffective()`. `setProject(id)` refreshes the effective settings and the model list
 (`api.models({project})`). Pickers: `ModelPicker` resolves per-project pick (`prefs model.<project>.<task>`) > project default >
@@ -952,6 +973,74 @@ only: allow switch, limits and spend through `/api/x/providers`; no key fields),
 Every field, group title and environment entry has an (i) icon button: hover (250 ms) or click / tap / Enter / Space opens a balloon
 (`S.popover`, one at a time; click pins it, Esc or a click outside closes it) with the `info` text and a footer of facts (default, range,
 when it takes effect, scope, the settings key).
+
+---
+
+## 11. Project style guide (`app/plugins/style.py`, `app/style_common.py`, `web/studios/style.js`)
+
+One style guide per project keeps every image, texture, video and sound of the project looking and sounding like one set. It is applied **on the
+server at submit time** (`jobs.SUBMIT_HOOKS`), so Retry, Regenerate, Pipelines, the Assistant and MCP all get it without changes. Design and
+measurements: `docs/research/style_guide.md`.
+
+### 11.1 Data (`data/projects/<p>/style/`)
+
+`guide.json` (the current guide) and `versions/vNNNN.json` (one snapshot per save, written first). The content hash is `sha256` of the canonical
+JSON of the content keys (everything but `version, hash, saved, saved_by`), 12 hex characters; a save that leaves the hash unchanged creates no version.
+
+```jsonc
+{ "schema": 1, "name": "Project style", "enabled": true, "strength": "light|normal|strong",
+  "positive": "<=400 chars: medium, line work, shading, light; never a subject",  "background": "<=160 chars",
+  "avoid": ["<=16 terms of <=40 chars"],
+  "palette": {"colors": ["#rrggbb" x<=12], "source": "<asset id>|null", "in_prompt": false, "post": "off|tint|lock", "tint_strength": 0.35, "weights": [..]},
+  "refs": [{"asset": "<image asset of this project>", "sha256": "", "name": "", "note": ""}],      // <=4
+  "variants": { "image|texture|sprite|ui_icon|video|audio": {"enabled": true, "positive": "", "background": null /*inherit*/ | "" /*none*/ | "text",
+                "avoid": [], "mode": "extend|replace", "refs": true, "palette_post": null|"off"|"tint"|"lock"} },
+  "version": 3, "hash": "a1b2c3d4e5f6", "saved": "2026-11-09T21:00:00", "saved_by": "ui|mcp|assistant|restore|api" }
+```
+Variant defaults: `texture` background none, avoid `perspective, shadows`, refs off; `video` refs off; `audio` off, mode replace, refs off.
+
+### 11.2 Per job
+
+* Request (optional, job `meta.style`): `"auto"` (default) | `"off"` | `{apply?: false, variant?, strength?, version?}`. A bad value is `JobError(input)`.
+* Which tasks are styled (`style_common.TASK_POLICY`): `t2i`, `rgba`, `multi_ref` -> image; `text3d` -> texture; `t2v`, `i2v`, `flf2v` -> video;
+  `sfx`, `ambience`, `music`, `song` -> audio. Everything else (edit, inpaint, extract, rmbg, upscale, shape, texture, retopo, rig, motion, tts, ...) is **skipped**
+  and records why. Other plugins add theirs: `core.style.register_task(task, variant, sep=". ", prompt_key="prompt", refs=False)` (also
+  `style_common.register_task`) or a module-level `STYLE_TASKS = {"material": "texture"}` in the plugin file (read by `style.setup` and `GET /policy`).
+* Composition (`style_common.compose`, pure, deterministic): the user's prompt first, then `sep`, the reference clause, the style text (SUFFIX, never a
+  prefix: the Qwen RGBA trigger sentence and truncating encoders). The style text is skipped when it is already in the prompt. The avoid list is added only to
+  a real negative prompt (`features.negative` true, or `"cfg"` with `true_cfg` / `cfg` / `guidance_scale` > 1); `BASE_NEGATIVE` keeps a quality-only base for
+  Wan / LTX / Lumina. Reference images are attached with role `style_ref` only for models declaring `features.style_ref: [tasks]` that are not cloud, at
+  strength `normal` (<= 2) or `strong` (<= 4), within `max_refs` minus the user's images, skipping non-commercial refs under the commercial-only filter;
+  estimated extra time 20 s per image. The palette goes into the prompt only with `in_prompt` or at `strong`. Background is dropped for rgba / transparent / 3D-ready.
+* **Idempotence**: step 1 restores `user_prompt` / `user_negative` from `meta.asset_extra.x_style` and drops `style_ref` inputs, so a retry or regenerate never stacks.
+* Palette post-process (`tint` / `lock`) runs in `OUTPUT_HOOKS` on image outputs only: the raw file stays as the attachment `<stem>_raw<suffix>`, and **only base-colour
+  maps** are touched (`meta.x_material.map` absent or `basecolor` / `albedo`). Manual: tool `style.palette` (`mode`, `strength?`, `colors?`) writes derived assets.
+* Record on every output asset: `x_style = {applied, reason?, name, version, hash, variant, strength, user_prompt, user_negative, added: {prompt, ref_clause, negative, refs, base_negative},
+  skipped: [{what, why}], post}`; the job meta also gets `style_applied` (summary). The asset's `prompt` stays what the user typed, `final_prompt` is what was sent.
+  **Export manifests** (LOD / collision / engine export) should copy `x_style.{name, version, hash}` per asset and may ship `style/versions/vNNNN.json`.
+
+### 11.3 API (`/api/x/style`)
+
+| call | |
+|---|---|
+| `GET /guide?project=` | `{guide \| null, warnings, missing_refs, refs_info}` |
+| `PUT /guide {project, guide, base_version?, by?}` / `PATCH /guide {project, patch, base_version?, by?}` | validate + save; `{guide, created_version, warnings, ...}`; `400` on a bad guide; `409 {kind: "conflict", current_version}` for a stale `base_version` |
+| `DELETE /guide?project=` | remove the current guide (versions stay) |
+| `GET /versions?project=`, `GET /versions/{n}?project=`, `POST /restore {project, version}` | history; restore saves the old content as a new version (`saved_by: restore`) |
+| `GET /summary` | `{projects: {id: {name, version, enabled} \| null}}` |
+| `POST /compose {project, task, model?, params, inputs?, style?, guide?}` | dry run: `{applied, reason, prompt, user_prompt, negative, refs, skipped, notes, extra_seconds_est, variant, strength, version, post}`; `guide` previews an unsaved draft |
+| `POST /palette/extract {project, asset, n?}`, `POST /draft {project, assets, describe?}` | colours of an image; an unsaved guide from 1-4 images (`describe` asks the prompt LLM) |
+| `GET /policy`, `GET /info` | task -> variant and style-capable models; the (i) balloon texts of the Style page |
+
+`POST /api/improve` gains an optional `style` (same shape as `meta.style`); `Core.improve_context_hooks` lets a plugin add a context line (the style plugin adds
+the look so the improver does not repeat it). MCP: `get_style_guide`, `set_style_guide`, `style_from_assets`, `preview_style`, `submit_job(style=)`, `x_style` in `get_asset`;
+the Assistant gets a read-only `get_style_guide` and an optional per-step `style`.
+
+### 11.4 Web
+
+`web/studios/style.js` registers the page (`#/style`, Workspace section, `receives` action `style_from`), the **Style chip** (`registerPromptAddon`: on / off for this job /
+n/a / hidden; the per-job choice is stored in `prefs style.job.<project>.<studio>` and sent as `meta.style`; "off" resets when the guide version changes) and the Library action
+"Style guide from selection" (`registerSelectionAction`). The asset drawer shows `Style: <name> v<n> · <variant> · <strength>` with a link `#/style?v=<n>`.
 
 ---
 
@@ -1038,3 +1127,12 @@ when it takes effect, scope, the settings key).
   `web/app.css` gains `.task-tabs.grouped .tg-*`, the sidebar icon rail (`#app.sb-collapsed`, replaces the old `max-width: 1100px` rule) and `core/shell.js`
   a toggle at the bottom of the sidebar (pref `sidebar` = collapsed | expanded; automatic icon rail up to 1280 px unless expanded explicitly), icons
   `chevrons-left` / `chevrons-right`. Studios: 3D (Create / Refine / Animate / Export, numbered), Image (Create / Edit / Finish), Sound (Make / Voice / Tools).
+- (l) project style guide (section 11; additive and backwards-compatible hooks, each a no-op when no plugin uses it):
+  H1 `jobs.SUBMIT_HOOKS` (model jobs, in `submit()` before the inputs check; `JobError` propagates, other errors are logged and rolled back);
+  H2 `jobs.OUTPUT_HOOKS` (top of `JobContext.add_output`, may replace path / meta / attachments); H3 `Core.improve_context_hooks` + `ImproveReq.style` (extra context line
+  for `POST /api/improve`); H4 `registerPromptAddon` in `web/core/components/promptbox.js` (+ `sdk.js`); H5 `taskstudio.js` and `sound.js` regenerate from
+  `x_style.user_prompt` / `user_negative` and never take style references as parents, PromptBox gets `params()` / `inputs()` callbacks; H6 `registerSelectionAction` / `selectionActions`
+  (`web/core/selection.js`) used by the Library bar; H7 `drawer.js` "Style" line. Registry: free-form `features.style_ref` (qwen-image-2.1 declares it). SSE `settings` gains the
+  optional `style: {version}` key. Drop-ins: `app/style_common.py`, `app/plugins/style.py` (tool `style.palette`), `prompts/style.yaml` (`style_describe`), `web/studios/style.js`.
+  MCP: 4 new public tools (28), `submit_job.style`, `x_style` in `get_asset`, `style` in `studio_status` / `list_projects` / job results; the Assistant server gets `get_style_guide` and a step `style`.
+  Integration points for later work: `core.style.register_task` / `STYLE_TASKS`, `x_material.map`, `x_style.{name,version,hash}` in export manifests, the two hook lists. Tests: `tests/test_style.py`.

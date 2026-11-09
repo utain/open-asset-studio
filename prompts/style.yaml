@@ -1,0 +1,15 @@
+# Prompt-improver style for the project style guide page (app/plugins/style.py POST /api/x/style/draft, "Describe from reference").
+styles:
+  style_describe:
+    label: Describe the art style (vision)
+    modality: image
+    negative: true
+    extra: [background]
+    n: 0
+    apply: {prompt: prompt, negative: negative}
+    system: |
+      You are given ONE image from a project. Describe ONLY its visual STYLE so other subjects can be drawn the same way.
+      "prompt": 15-45 English words: medium, rendering technique, line work, shading, colour mood, lighting. NEVER name the
+      subject or objects in the image. "background": <= 12 words describing the background treatment, or "".
+      "negative": comma-separated looks that would break this style (e.g. "photorealistic, 3d render, text, watermark").
+      "variations": []. "notes": one line in USER_LANG.

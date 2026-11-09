@@ -16,6 +16,18 @@ export function profileChips(chips, profile = store.profile) {
   return chips.map((c, i) => [c, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(x => x[0]);
 }
 
+const addons = [];
+/**
+ * Extensions of every PromptBox (docs/CONTRACTS.md 6.3). registerPromptAddon({id, mount(box) -> {el?, meta?() -> object, improve?() -> object,
+ * setModel?(model, task), destroy?()}}): each PromptBox mounts every registered addon in its constructor and puts `el` at the START of its tool
+ * row; setModel() is forwarded; promptMeta(box) merges the addons' meta() into the job meta and the Improve request merges improve() into its body.
+ * An addon returns {} when it has nothing to say. `box.o.memoryKey` (the studio id), `box.o.params()` and `box.o.inputs()` (the current form values /
+ * input slots, when the owner passes them) are readable by addons. Used by the project style chip (studios/style.js).
+ */
+export function registerPromptAddon(addon) {
+  if (addon?.id && addon.mount && !addons.some(a => a.id === addon.id)) addons.push(addon);
+}
+
 let stylesP = null;
 export function improveStyles() { if (!stylesP) stylesP = api.improveStyles().catch(e => { stylesP = null; throw e; }); return stylesP; }
 
@@ -48,6 +60,11 @@ export class PromptBox {
         btn('', { icon: 'eraser', size: 'sm', kind: 'ghost', title: 'Clear', onClick: () => { this.set(''); this.ta.focus(); } }),
         uiInfo('improve'), this.impBtn)),
       this.panel, this.negWrap);
+    this.addons = [];
+    for (const a of addons) {
+      try { const inst = a.mount(this); if (inst) this.addons.push(inst); } catch (e) { console.error(`[promptbox] addon ${a.id} failed`, e); }
+    }
+    this.el.querySelector('.pb-tools').prepend(...this.addons.map(a => a.el).filter(Boolean));    // addons sit at the START of the tool row, in registration order
     this.setModel(this.model, this.task);
     this._count();
     bus.on('profile', () => { if (!this.panel.classList.contains('hidden')) this._renderPanel(this.lastResult); });
@@ -63,6 +80,7 @@ export class PromptBox {
     const f = model?.features || {};
     const neg = f.negative === true || f.negative === 'cfg';
     this.negWrap.classList.toggle('hidden', !neg || this.o.negative === false);
+    for (const a of this.addons || []) { try { a.setModel?.(model, task); } catch (e) { console.error('[promptbox] addon setModel failed', e); } }
     if (!this.panel.classList.contains('hidden')) this._renderPanel();
   }
   targetStyle() { return this.style || promptStyleOf(this.model, this.task); }
@@ -147,7 +165,8 @@ export class PromptBox {
     this._renderPanel(this.lastResult, 'busy');
     try {
       const body = { text: this.improved && text === this.improved.applied ? this.improved.original : text, target_style: this.style || undefined,
-        model_id: this.model?.id, task: this.task, n: this.n, chips: [...this.chips], context: [store.profiles[store.profile]?.context, this.o.context?.()].filter(Boolean).join(' '), image_asset: img || undefined, backend: this.backend || undefined, project: store.project };
+        model_id: this.model?.id, task: this.task, n: this.n, chips: [...this.chips], context: [store.profiles[store.profile]?.context, this.o.context?.()].filter(Boolean).join(' '), image_asset: img || undefined, backend: this.backend || undefined, project: store.project,
+        ...Object.assign({}, ...this.addons.map(a => { try { return a.improve?.() || {}; } catch { return {}; } })) };
       const r = await api.improve(body);
       this.lastResult = r;
       this._renderPanel(r);
@@ -161,6 +180,7 @@ export class PromptBox {
 /** Job meta for a prompt box: what the user typed vs what was sent (DESIGN 4.4 prompt / improved_prompt). */
 export function promptMeta(box) {
   const imp = box.improved;
-  if (imp && box.value === imp.applied.trim()) return { prompt: imp.original, improved_prompt: box.value, improve_style: imp.style };
-  return { prompt: box.value };
+  const extra = Object.assign({}, ...(box.addons || []).map(a => { try { return a.meta?.() || {}; } catch { return {}; } }));   // e.g. {style: {apply: false}}
+  if (imp && box.value === imp.applied.trim()) return { ...extra, prompt: imp.original, improved_prompt: box.value, improve_style: imp.style };
+  return { ...extra, prompt: box.value };
 }

@@ -38,6 +38,7 @@ from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from .. import config, licensing, profiles
+from .. import style_common as sc
 from ..assets import AssetError, check_project
 from ..jobs import HANDLERS, TERMINAL, JobError
 from ..textgen import CLI_INFO, TOS_NOTE, TextGenError, parse_backend
@@ -51,7 +52,7 @@ _LOCK = threading.RLock()
 RUNS_BY_TOKEN: dict[str, dict] = {}       # MCP token -> {chat, project, proposals: [], tools: []}
 TURNS: dict[str, threading.Event] = {}    # chat id -> cancel event of the turn in flight
 PLAN_RUNS: dict[str, dict] = {}           # run id -> {cancel, thread}
-MCP_TOOLS = ["list_models", "search_assets", "get_asset", "get_rig", "preview_rig_edit", "get_settings", "propose_plan"]
+MCP_TOOLS = ["list_models", "search_assets", "get_asset", "get_rig", "preview_rig_edit", "get_settings", "get_style_guide", "propose_plan"]
 ALLOWED_MCP = [f"mcp__studio__{n}" for n in MCP_TOOLS]
 
 SHARED_PARAMS = {"prompt", "negative", "batch", "seed"}       # accepted by every model job (not always in params:)
@@ -68,8 +69,9 @@ TOOL_PARAMS = {
     "image.convert": {"format", "max_side", "square"},
     "asset.export": {"preset", "audio", "image"},       # export preset: loudness / sample rate / format / crop; derived copies
     "rig.edit": {"ops", "clips"},                       # edit the skeleton of a rigged mesh (workers/rig_edit.py); ops is a list of objects
+    "style.palette": {"mode", "strength", "colors"},    # recolour images with the project style palette (app/plugins/style.py)
 }
-JSON_TOOL_PARAMS = {"rig.edit": {"ops"}}                 # tool params that may be lists / objects (all others must be scalars)
+JSON_TOOL_PARAMS = {"rig.edit": {"ops"}, "style.palette": {"colors"}}                 # tool params that may be lists / objects (all others must be scalars)
 
 
 def setup(core):
@@ -218,6 +220,22 @@ def tool_preview_rig_edit(project: str, args: dict) -> dict:
     rep["hint"] = ("Nothing was changed. If it is what the user asked for, propose the rig.edit step with these ops"
                    + (" and then a reskin step (new bones have no skin weight)." if rep.get("needs_reskin") or rep.get("zero_weight_bones") else "."))
     return rep
+
+
+def tool_get_style_guide(project: str, args: dict) -> dict:
+    """Read-only: the project's style guide (look, avoid list, palette, variants). The studio adds it to the prompt of image / texture / video /
+    sound jobs on its own, so a plan must NOT repeat it in prompts; a step may carry style 'off' or {variant, strength} to override it."""
+    c = _core()
+    svc = getattr(c, "style", None)
+    g = svc.get(project) if svc else None
+    if not g:
+        return {"guide": None, "hint": "This project has no style guide; write prompts as usual."}
+    keep = ("name", "version", "enabled", "strength", "positive", "background", "avoid", "palette", "variants")
+    out = {k: g[k] for k in keep if k in g}
+    out["refs"] = [r.get("name") or r.get("asset") for r in g.get("refs") or []]
+    out["hint"] = ("The studio appends this to the prompt of every image / texture / video / sound step by itself: do not copy it into prompts. "
+                   "A step may add style: 'off' (skip it) or {variant: image|texture|sprite|ui_icon|video|audio, strength: light|normal|strong}.")
+    return out
 
 
 def tool_get_settings(project: str, args: dict) -> dict:
@@ -457,6 +475,14 @@ def validate_plan(plan: dict, project: str, *, registry=None, assets=None, inclu
         elif tool:
             st["est_s"], st["est_usd"], st["cloud"] = 2.0, 0.0, False
             tot_s += 2
+        sty = s.get("style")
+        if sty not in (None, "", "auto"):
+            if sty == "off" or (isinstance(sty, dict) and not set(sty) - {"apply", "variant", "strength"}
+                                and sty.get("variant", "image") in sc.VARIANTS and sty.get("strength", "normal") in sc.STRENGTHS
+                                and isinstance(sty.get("apply", True), bool)):
+                st["style"] = sty
+            else:
+                err(sid, "style must be 'auto', 'off' or {apply, variant, strength} (variant: " + ", ".join(sc.VARIANTS) + "; strength: " + ", ".join(sc.STRENGTHS) + ").")
         seen[sid] = st
         out_steps.append(st)
     norm = {"title": str(plan.get("title") or "Plan")[:120], "summary": str(plan.get("summary") or "")[:1200], "steps": out_steps}
@@ -492,6 +518,8 @@ def execute_tool(run: dict, name: str, args: dict) -> dict:
             return tool_preview_rig_edit(run["project"], args)
         if name == "get_settings":
             return tool_get_settings(run["project"], args)
+        if name == "get_style_guide":
+            return tool_get_style_guide(run["project"], args)
         if name == "propose_plan":
             return tool_propose_plan(run, args)
     except (ValueError, TypeError, AssetError) as e:
@@ -582,6 +610,8 @@ Rules:
   {"op":"reparent","bone":B,"parent":B2}. Example 5-bone tail: [{"op":"add_chain","parent":"hips","count":5,"direction":"back","length":0.1,"name_prefix":"tail"}].
   New bones start with no skin weight: when the edit adds bones (or the user says re-skin) add a second step {"task": "reskin",
   "inputs": [{"step": "<edit step id>"}]} (keeps the skeleton, recomputes the weights, GPU ~35 s). A rename or a move does not need it.
+- The project may have a style guide (get_style_guide). The studio appends it to the prompt of every image, texture, video and sound step by
+  itself, so describe only the subject in prompts and never copy the style in. Add "style": "off" to a step that must not be styled.
 - Reply briefly in the user's language. If something cannot be done with the ready models, say what is missing.
 """
 
@@ -791,6 +821,8 @@ def _step_spec(step: dict, plan: dict, project: str, chat_id: str, run_id: str, 
     title = step.get("title") or step["id"]
     if step.get("tool"):
         return {"tool": step["tool"], "params": dict(step.get("params") or {}), "inputs": inputs, "project": project, "title": title, "meta": meta}
+    if step.get("style"):
+        meta["style"] = step["style"]                 # per-step override of the project style guide (applied by the core at submit time)
     return {"task": step["task"], "model": step["model"], "params": dict(step.get("params") or {}), "inputs": inputs,
             "project": project, "title": title, "meta": meta}
 

@@ -1052,7 +1052,7 @@ class SoundStudio {
     const p = { ...(a.params || {}) };
     if (a.task === 'dub') { this.dub = { ...this.dub, target: p.target_language || this.dub.target, source: p.source_language || 'auto', tts: p.tts_model || this.dub.tts, translate: p.translate_backend || '' }; prefs.set('sound.dub', this.dub); this._buildPanel(); }
     this.form.setValues({ ...p, seed: newSeed ? -1 : (a.seed ?? p.seed) });
-    if (this.showPrompt) { this.prompt.set(p[this.promptParam] || a.improved_prompt || a.prompt || ''); this.prompt.setNegative(a.negative || p.negative || ''); }
+    if (this.showPrompt) { this.prompt.set((this.promptParam === 'prompt' && a.x_style?.user_prompt) || p[this.promptParam] || a.improved_prompt || a.prompt || ''); this.prompt.setNegative(a.x_style?.user_negative ?? (a.negative || p.negative || '')); }
     if (Array.isArray(a.x_inputs)) {   // saved with the take: restore every slot by role
       const byRole = new Map();
       for (const i of a.x_inputs) byRole.set(i.role, [...(byRole.get(i.role) || []), i.asset]);

@@ -60,7 +60,8 @@ export class TaskStudio {
     this.picker = new ModelPicker({ task: this.task, includeTest: o.includeTest, onChange: m => this._onModel(m) });
     this.form = new ParamForm({ memoryKey: o.studio, onChange: () => this._eta() });
     this.prompt = new PromptBox({ memoryKey: o.studio, label: 'Prompt', onSubmit: () => this.generate(),
-      onApply: extras => this.form.setValues(extras), imageAsset: () => this._firstImageInput(), context: () => this.o.context?.(this) || '' });
+      onApply: extras => this.form.setValues(extras), imageAsset: () => this._firstImageInput(), context: () => this.o.context?.(this) || '',
+      params: () => this.form.allValues(), inputs: () => Object.values(this.slots || {}).flatMap(s => s.inputs()) });
     this.prompt.ta?.addEventListener('input', () => { clearTimeout(this._etaT); this._etaT = setTimeout(() => this._eta(), 350); });
     this._buildCenter();
     this._buildPanel();
@@ -217,8 +218,9 @@ export class TaskStudio {
       if (a.task && this.tasks.find(t => t.id === a.task)) this.setTask(a.task);
       if (a.model && store.modelsById.get(a.model)?.tasks.includes(this.task)) this.picker.set(a.model, true), this._onModel(this.picker.model);
       this.form.setValues({ ...(a.params || {}), seed: a.seed ?? a.params?.seed });
-      if (this.promptOn) { this.prompt.set(a.improved_prompt || a.prompt || a.params?.prompt || ''); this.prompt.setNegative(a.negative || ''); }
-      const parents = a.parents || [];
+      if (this.promptOn) { this.prompt.set(a.improved_prompt || a.prompt || a.x_style?.user_prompt || a.params?.prompt || ''); this.prompt.setNegative(a.x_style?.user_negative ?? a.negative ?? ''); }
+      const styleRefs = a.x_style?.added?.refs || [];     // reference images the project style attached are not inputs of the user's recipe
+      const parents = (a.parents || []).filter(id => !styleRefs.includes(id));
       const slots = Object.values(this.slots);
       if (parents.length && slots[0]) slots[0].set(parents.slice(0, slots[0].multiple ? slots[0].max : 1));
       toast('Settings restored from the asset: tweak and generate.', { kind: 'info' });

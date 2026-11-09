@@ -95,7 +95,7 @@ def asset_view(a: dict, full: bool = False) -> dict:
                       **({"path": str(p)} if p.is_file() else {})})
     keys = ["id", "project", "type", "name", "main", "model", "task", "prompt", "seed", "tags", "rating", "created", "license", "info"]
     if full:
-        keys += ["params", "improved_prompt", "final_prompt", "negative", "parents", "job", "studio", "notes", "source", "worker"]
+        keys += ["params", "improved_prompt", "final_prompt", "negative", "parents", "job", "studio", "notes", "source", "worker", "x_style"]
     out = {k: a[k] for k in keys if a.get(k) not in (None, "", [], {})}
     out["files"] = files
     if a.get("type") == "mesh":
@@ -157,6 +157,11 @@ def job_view(j: dict) -> dict:
     out = {k: j[k] for k in keys if j.get(k) not in (None, "", [])}
     if j.get("status") != "done":
         out["log_tail"] = (j.get("log") or [])[-5:]
+    x = ((j.get("meta") or {}).get("asset_extra") or {}).get("x_style")
+    if x:        # the project style guide as applied to this job (set at submit time); the full record is on the asset (get_asset -> x_style)
+        out["style"] = {k: x[k] for k in ("applied", "reason", "name", "version", "hash", "variant", "strength") if x.get(k) not in (None, "")}
+        if x.get("applied"):
+            out["style"]["added"] = (x.get("added") or {}).get("prompt")
     return out
 
 
@@ -191,6 +196,14 @@ def model_view(m: dict, detail: bool) -> dict:
 
 
 # ------------------------------------------------------------------ tools
+def _style_summary() -> dict:
+    """{project: {name, version, enabled}} for the projects that have a style guide (get_style_guide shows one)."""
+    try:
+        return {k: v for k, v in (http("GET", "/api/x/style/summary").get("projects") or {}).items() if v}
+    except StudioError:
+        return {}
+
+
 def t_status(_a, _ctx):
     sysinfo = http("GET", "/api/system")
     mem = sysinfo.get("memory") or {}
@@ -200,7 +213,7 @@ def t_status(_a, _ctx):
             "active_jobs": [job_view(j) for j in jobs.get("jobs", [])],
             "memory": {k: mem.get(k) for k in ("available_gb", "total_gb", "ours_gb")},
             "loaded_models": [x.get("label") for x in mem.get("loaded", [])],
-            "profile": settings.get("profile"), "license_filter": settings.get("license")}
+            "profile": settings.get("profile"), "license_filter": settings.get("license"), "style": _style_summary()}
 
 
 def t_list_models(a, _ctx):
@@ -253,6 +266,8 @@ TOOL_PARAMS = {
     "audio.resample": {"in": "audio", "params": {"sample_rate": "Hz (default 44100)", **AUDIO_OUT}},
     "audio.make_voice": {"in": "1 audio asset", "params": {"name": "voice name", "ref_text": "transcript of the clip", "language": "language code", "design_prompt": "text", "character": "text"},
                          "note": "Saves a trimmed, -20 LUFS mono copy (max 30 s) as a voice asset, the reference for task voice_clone."},
+    "style.palette": {"in": "1+ image assets", "params": {"mode": "tint | lock (default tint)", "strength": "0.1..0.8, tint only (default: the guide's tint_strength)", "colors": "list of #rrggbb (default: the project style guide's palette)"},
+                      "note": "Writes NEW derived images coloured with the palette; originals untouched. Generated images get this automatically when the guide's palette post is tint / lock."},
     "video.frame": {"in": "1+ video assets", "params": {"at": "'last' (default) | 'first' | seconds"}, "note": "Writes an image asset (e.g. the start frame for i2v)."},
     "video.trim": {"in": "video", "params": {"start": "seconds (default 0)", "end": "seconds, 0 = to the end"}},
     "video.loop": {"in": "video", "params": {"mode": "pingpong (default, clips < 60 s) | repeat", "times": "2..8 (default 2)"}},
@@ -464,7 +479,68 @@ def t_update_settings(a, _ctx):
 
 
 def t_list_projects(_a, _ctx):
-    return http("GET", "/api/projects")
+    d = http("GET", "/api/projects")
+    sm = _style_summary()
+    rows = d.get("projects") if isinstance(d, dict) else d
+    for p in rows if isinstance(rows, list) else []:
+        if isinstance(p, dict):
+            p["style"] = sm.get(p.get("id"))           # {name, version, enabled} or null
+    return d
+
+
+# ---- project style guide (docs/CONTRACTS.md section 11)
+def t_get_style_guide(a, _ctx):
+    project = a.get("project", "default")
+    if a.get("version"):
+        g = http("GET", f"/api/x/style/versions/{int(a['version'])}", query={"project": project})
+        return {"project": project, "version": g.get("version"), "guide": g}
+    r = http("GET", "/api/x/style/guide", query={"project": project})
+    out = {"project": project, "guide": r.get("guide"), "warnings": r.get("warnings"), "missing_refs": r.get("missing_refs")}
+    if r.get("guide") is None:
+        out["hint"] = "This project has no style guide. Create one with set_style_guide, or style_from_assets from finished images."
+    if a.get("history"):
+        out["versions"] = http("GET", "/api/x/style/versions", query={"project": project}).get("versions")
+    return out
+
+
+def t_set_style_guide(a, _ctx):
+    project = a.get("project", "default")
+    if a.get("restore_version"):
+        r = http("POST", "/api/x/style/restore", {"project": project, "version": int(a["restore_version"])})
+    elif a.get("guide") is not None:
+        r = http("PUT", "/api/x/style/guide", {"project": project, "guide": a["guide"], "base_version": a.get("base_version"), "by": "mcp"})
+    elif a.get("patch") is not None:
+        r = http("PATCH", "/api/x/style/guide", {"project": project, "patch": a["patch"], "base_version": a.get("base_version"), "by": "mcp"})
+    else:
+        raise StudioError("Give `guide` (the whole guide), `patch` (fields to change) or `restore_version`.", "input")
+    g = r.get("guide") or {}
+    return {"project": project, "version": g.get("version"), "hash": g.get("hash"), "created_version": r.get("created_version"), "warnings": r.get("warnings"),
+            "guide": g, "hint": "New jobs of this project use it from now on. preview_style shows the exact prompt a model would get."}
+
+
+def t_style_from_assets(a, _ctx):
+    project = a.get("project", "default")
+    r = http("POST", "/api/x/style/draft", {"project": project, "assets": a.get("assets") or [], "describe": bool(a.get("describe"))}, timeout=300)
+    out = {"project": project, "draft": r.get("guide"), "warnings": r.get("warnings"), "describe": r.get("describe")}
+    if a.get("save"):
+        sv = http("PUT", "/api/x/style/guide", {"project": project, "guide": r["guide"], "base_version": a.get("base_version"), "by": "mcp"})
+        out["saved"] = {"version": (sv.get("guide") or {}).get("version"), "created_version": sv.get("created_version")}
+    else:
+        out["hint"] = "Nothing is saved yet: edit the draft, then set_style_guide(guide=...) (or call again with save=true)."
+    return out
+
+
+def t_preview_style(a, _ctx):
+    project = a.get("project", "default")
+    task = a.get("task", "t2i")
+    params = dict(a.get("params") or {})
+    if a.get("prompt"):
+        params["prompt"] = a["prompt"]
+    if a.get("negative"):
+        params["negative"] = a["negative"]
+    body = {"project": project, "task": task, "model": a.get("model"), "params": params, "inputs": a.get("inputs") or [],
+            "style": a.get("style") if isinstance(a.get("style"), dict) else ({"apply": False} if a.get("style") == "off" else None), "guide": a.get("guide")}
+    return http("POST", "/api/x/style/compose", {k: v for k, v in body.items() if v is not None})
 
 
 def t_create_project(a, _ctx):
@@ -552,6 +628,8 @@ def t_submit_job(a, ctx):
     params = dict(a.get("params") or {})
     if params.get("prompt") and "prompt" not in meta:
         meta["prompt"] = params["prompt"]
+    if a.get("style") not in (None, "", "auto"):
+        meta["style"] = a["style"]                # "off" | {apply, variant, strength, version}; the core applies the project style guide at submit time
     spec = {"task": a.get("task"), "model": a.get("model"), "tool": a.get("tool"), "params": params,
             "inputs": [{"asset": i["asset"], **({"role": i["role"]} if i.get("role") else {})} for i in a.get("inputs") or []],
             "project": a.get("project", "default"), "title": a.get("title", ""), "meta": meta,
@@ -773,11 +851,14 @@ TOOLS = [
         "Edit a rig: get_rig(asset) to see the bones, preview_rig_edit(asset, ops) to check the ops without writing, then tool 'rig.edit' with params.ops (add_chain / add_bone / move_joint / delete_bone / rename / rename_standard / reparent; list_tools has the full syntax), "
         "e.g. submit_job(tool='rig.edit', params={ops:[{op:'add_chain', parent:'hips', count:5, direction:'back', length:0.08, name_prefix:'tail'}]}, inputs=[{asset:'<rigged mesh>', role:'mesh'}]); "
         "the result is a NEW asset; if it reports needs_reskin (new bones have no weights) run submit_job(task='reskin', inputs=[{asset:'<edited mesh>', role:'mesh'}]) (GPU, ~35 s, keeps the skeleton, recomputes the weights). "
+        "Project style: if the project has a style guide (get_style_guide) it is added to the prompt of image / texture / video / sound jobs by the server, and the result's `style` says what was applied; pass style='off' (or {variant, strength}) to override it for one job. Do not paste the style into the prompt yourself. "
         "Cloud models: only set confirm_cost / confirm_upload after the user agreed to the cost / to uploading the inputs."),
      "inputSchema": {"type": "object", "properties": {
          "task": S, "model": {**S, "description": "model id (omit = the task's default)"}, "tool": {**S, "description": "CPU tool id instead of task/model"},
          "params": {**O, "description": "model params by name, e.g. {prompt, seconds, batch, seed, aspect, steps}"}, "inputs": INPUTS,
          "project": PROJECT, "title": S, "meta": {**O, "description": "optional asset meta (tags, asset_extra: {x_*})"},
+         "style": {"description": "project style guide for this job: omit / 'auto' = apply it; 'off' = do not; or {apply?: bool, variant?: image|texture|sprite|ui_icon|video|audio, strength?: light|normal|strong, version?: int}",
+                   "anyOf": [{"type": "string", "enum": ["auto", "off"]}, O]},
          "wait_s": {**I, "description": "seconds to wait for the result; 0 = return the queued job at once"},
          "preview": {**B, "description": "return image previews of the outputs (default true)"}, "confirm_cost": B, "confirm_upload": B},
      }, "annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False}, "fn": t_submit_job},
@@ -836,6 +917,28 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"scope": {"type": "string", "enum": ["system", "project"]}, "project": {**S, "description": "project id (scope project)"},
                                                       "values": {**O, "description": "{dotted.key: value}"}, "reset": {"type": "array", "items": S}, "confirm_upload": B}},
      "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}, "fn": t_update_settings},
+    {"name": "get_style_guide", "description": (
+        "The project's style guide: the look (text), avoid list, reference images, palette and per-kind variants (image, texture, sprite, ui_icon, video, audio) that the server adds to every image / texture / video / sound job of the project. "
+        "Returns guide=null when there is none. history=true also lists the saved versions; version=<n> reads an old one. Jobs record the version they used (get_asset -> x_style)."),
+     "inputSchema": {"type": "object", "properties": {"project": PROJECT, "history": B, "version": I}}, "annotations": RO, "fn": t_get_style_guide},
+    {"name": "set_style_guide", "description": (
+        "Save the project's style guide as a NEW version (the old one stays in the history). guide = the whole guide, or patch = only the fields to change (a JSON merge patch; null removes a key), or restore_version = n. "
+        "Fields: name, enabled, strength (light|normal|strong), positive (the look: medium, line work, shading, light; never a subject; max 400 chars), background, avoid [terms], "
+        "palette {colors:['#rrggbb'], in_prompt, post: off|tint|lock, tint_strength}, refs [{asset}] (up to 4 image assets of this project), variants {image|texture|sprite|ui_icon|video|audio: {enabled, positive, background, avoid, mode: extend|replace, refs, palette_post}}. "
+        "This changes every later job of the project, so change it only when the user asked. Pass base_version (from get_style_guide) so an edit made meanwhile is not overwritten (error kind 'conflict')."),
+     "inputSchema": {"type": "object", "properties": {"project": PROJECT, "guide": O, "patch": O, "restore_version": I, "base_version": I}},
+     "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}, "fn": t_set_style_guide},
+    {"name": "style_from_assets", "description": (
+        "Draft a style guide from 1 to 4 finished image assets of the project: they become the reference images and the palette is read from the first. describe=true also asks the prompt LLM to write the look, background and avoid list from the first image (a few seconds; the local LLM may load). "
+        "Returns an unsaved draft; save=true stores it as a new version at once, otherwise review it and call set_style_guide."),
+     "inputSchema": {"type": "object", "properties": {"project": PROJECT, "assets": {"type": "array", "items": S, "description": "1-4 image asset ids"}, "describe": B, "save": B, "base_version": I}, "required": ["assets"]},
+     "annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False}, "fn": t_style_from_assets},
+    {"name": "preview_style", "description": (
+        "Dry run: the exact prompt, negative prompt and reference images a model would receive for a sample prompt with the project's style guide (or an unsaved `guide` draft), plus what was skipped and why. Writes nothing and generates nothing. "
+        "Use it to check a guide before set_style_guide / submit_job. style = 'off' or {variant, strength} to try the per-job overrides."),
+     "inputSchema": {"type": "object", "properties": {"project": PROJECT, "task": {**S, "description": "default t2i"}, "model": S, "prompt": S, "negative": S, "params": O, "inputs": INPUTS,
+                                                      "style": {"description": "'off' or {apply, variant, strength, version}", "anyOf": [{"type": "string", "enum": ["off"]}, O]}, "guide": {**O, "description": "an unsaved guide to preview instead of the saved one"}}},
+     "annotations": RO, "fn": t_preview_style},
     {"name": "studio_info", "description": "Studio reference data. topic: " + "; ".join(f"{k} ({v[0]})" for k, v in INFO_TOPICS.items()) + ". Omit topic to list them.",
      "inputSchema": {"type": "object", "properties": {"topic": {"type": "string", "enum": list(INFO_TOPICS)}, "project": PROJECT, "id": {**S, "description": "flows: a flow id"},
                                                       "name": {**S, "description": "logs: log name"}, "lines": I}},
@@ -892,7 +995,7 @@ def handle(msg: dict, emit=None, allow_paths=True) -> dict | None:
             "capabilities": {"tools": {"listChanged": False}}, "serverInfo": {"name": "open-asset-studio", "version": "1.0"},
             "instructions": ("Open Asset Studio makes images, 3D models, sound and video with local open-weight models. "
                              "Typical flow: list_models(task=...) -> get_model(id) -> [improve_prompt] -> submit_job(...) -> use the returned file paths; "
-                             "export_assets packages results. 3D: shape -> texture -> [retopo for a game-ready low poly with baked maps] -> rig -> motion (get_asset shows mesh3d: rigged, joints, animation clips); edit a rig with get_rig -> preview_rig_edit -> submit_job(tool='rig.edit') -> task 'reskin'. get_settings / update_settings read and change the studio settings (system or per project). "
+                             "export_assets packages results. 3D: shape -> texture -> [retopo for a game-ready low poly with baked maps] -> rig -> motion (get_asset shows mesh3d: rigged, joints, animation clips); edit a rig with get_rig -> preview_rig_edit -> submit_job(tool='rig.edit') -> task 'reskin'. get_settings / update_settings read and change the studio settings (system or per project). A project can have a style guide (get_style_guide / set_style_guide / style_from_assets / preview_style) that the server adds to every image / texture / video / sound job: never paste the style into prompts yourself, and use submit_job style='off' to skip it for one job. "
                              "Check each model's licence before commercial use; many are non-commercial. "
                              "Never delete, spend cloud money or upload files without the user's explicit OK.")}}
     if method == "ping":

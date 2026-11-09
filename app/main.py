@@ -690,6 +690,7 @@ class ImproveReq(BaseModel):
     chips: list[str] = Field(default_factory=list)
     backend: str | None = None      # textgen backend id ("local", "cli:claude", "api:openrouter/<model>"); None = settings
     project: str | None = None      # None-valued backend / lang fall back to this project's settings
+    style: dict | None = None       # the run form's per-job style choice ({apply, variant, ...}, same shape as job meta.style); read by improve_context_hooks
 
 
 @app.post("/api/improve")
@@ -707,8 +708,18 @@ def improve(req: ImproveReq):
     view = c.settings_for(req.project)
     backend = req.backend or (c.textgen.default_for("improve", settings=view) if req.project else None)
     lang = req.lang if req.lang in ("th", "en") else (view.get("prompt", "lang") if view.get("prompt", "lang") in ("th", "en") else None)
+    extra = []
+    for fn in list(c.improve_context_hooks):        # plugins add a context line (e.g. the project style guide); a failing hook is skipped
+        try:
+            s = fn(req.project, req.model_id, req.task, req.style)
+        except Exception:  # noqa: BLE001
+            log.exception("improve context hook failed")
+            continue
+        if s:
+            extra.append(s)
+    context = " ".join([req.context, *extra]).strip()
     return c.improver.improve(req.text, target_style=style, model_id=req.model_id, lang=lang, n=req.n,
-                              image_path=image_path, context=req.context, chips=req.chips, backend=backend)
+                              image_path=image_path, context=context, chips=req.chips, backend=backend)
 
 
 @app.get("/api/improve/styles")

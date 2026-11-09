@@ -8,6 +8,7 @@ Tools (all read-only, except propose_plan, which only *records* a proposal; noth
   get_rig        the bones of a rigged mesh (name, index, parent, position, role, weight share), to plan a rig.edit step
   preview_rig_edit  dry run of a rig.edit step: what the ops would do (nothing is written)
   get_settings   the studio settings (system or this project's effective values), read-only
+  get_style_guide  the project style guide (look, avoid, palette, variants), read-only
   propose_plan   a structured plan (steps of task / model / params / inputs), validated by the studio
 
 Every call is forwarded to the studio core: POST $STUDIO_API/api/x/assistant/tools/<name> with the run token in
@@ -40,6 +41,8 @@ STEP = {
             "asset": {"type": "string", "description": "existing asset id"},
             "use": {"type": "string", "enum": ["first", "all"], "description": "which outputs of the step (default first)"},
             "role": {"type": "string"}}}},
+        "style": {"description": "project style guide for this step: omit = the studio applies it by itself; 'off' = skip it; or {variant, strength}",
+                  "anyOf": [{"type": "string", "enum": ["auto", "off"]}, {"type": "object"}]},
         "notes": {"type": "string"},
     },
     "required": ["id", "title", "params"],
@@ -59,6 +62,8 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "rigged mesh asset id"}, "ops": {"type": "array", "items": {"type": "object"}, "description": "rig edit operations"}}, "required": ["id", "ops"]}},
     {"name": "get_settings", "description": "Read the studio settings (read-only; you cannot change them). No arguments: setting groups and the values that differ from their defaults, for the current project (its overrides applied). group / q / keys: those settings with help, default and range (profile, commercial-only filter, default model per task, export preset, prompt language ...).",
      "inputSchema": {"type": "object", "properties": {"group": {"type": "string", "description": "general | models | prompts | memory | workers | llm"}, "q": {"type": "string"}, "keys": {"type": "array", "items": {"type": "string"}}}}},
+    {"name": "get_style_guide", "description": "Read the project's style guide (read-only): the look, avoid list, palette and variants the studio appends to the prompt of every image / texture / video / sound step by itself. Do not copy it into prompts; a step can opt out with style 'off'.",
+     "inputSchema": {"type": "object", "properties": {}}},
     {"name": "propose_plan", "description": "Propose a plan to the user. It is shown as an editable card; the USER approves and runs it. Returns validation errors to fix (call again with a corrected plan).",
      "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}, "summary": {"type": "string"},
                                                       "steps": {"type": "array", "items": STEP, "minItems": 1}},

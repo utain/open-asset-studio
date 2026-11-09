@@ -10,7 +10,9 @@ Job lifecycle: queued -> running -> done | failed | cancelled. Every change is p
 from __future__ import annotations
 
 import collections
+import copy
 import json
+import logging
 import secrets
 import shutil
 import threading
@@ -27,8 +29,14 @@ from .memory import InsufficientMemory, MemoryManager
 from .registry import Registry
 from .workers import WorkerCancelled, WorkerError, WorkerPool
 
+log = logging.getLogger("studio")
 TERMINAL = ("done", "failed", "cancelled")
 HANDLERS: dict[str, dict] = {}
+
+# Plugin hooks (docs/CONTRACTS.md section 3.3). Both lists are filled by plugins in setup(core); a hook must be a no-op for jobs it
+# does not own and must not depend on the order of the other hooks (it only touches its own meta key / prompt suffix / output file).
+SUBMIT_HOOKS: list[Callable[[dict], None]] = []   # fn(sub) for model jobs, in submit(), before inputs are checked; may edit sub["params" | "inputs" | "meta"]
+OUTPUT_HOOKS: list[Callable] = []                 # fn(ctx, path, type, meta, attach) -> None | (path, meta, attach), in JobContext.add_output()
 
 
 def handler(name: str, *, gpu: bool | None = None, label: str = "", precheck: Callable | None = None,
@@ -212,6 +220,18 @@ class JobContext:
         return meta
 
     def add_output(self, path, type: str, meta: dict | None = None, attach: list | None = None) -> dict:  # noqa: A002
+        path, attach = Path(path), list(attach or [])
+        if OUTPUT_HOOKS:
+            if meta is None:
+                meta = self.asset_meta()
+            for fn in list(OUTPUT_HOOKS):          # a failing hook keeps the original output
+                try:
+                    r = fn(self, path, type, meta, list(attach))
+                except Exception as e:  # noqa: BLE001
+                    self.log(f"output hook {getattr(fn, '__name__', fn)} failed: {e}")
+                    continue
+                if r is not None:
+                    path, meta, attach = r
         with self._outputs_lock:
             a = self.assets.ingest(self.job["project"], Path(path), type, meta if meta is not None else self.asset_meta(),
                                    attach=[Path(x) for x in attach or []])
@@ -382,6 +402,20 @@ class JobManager:
                 raise JobError(f"Unknown handler '{hname}'.", "input")
             g = HANDLERS[hname]["gpu"]
             gpu = self.registry.is_gpu(model_id) if g is None else bool(g)
+            if SUBMIT_HOOKS:        # plugins may edit params / inputs / meta (e.g. the project style guide); a JobError propagates
+                sub = {"spec": spec, "model": m, "task": task, "project": project, "settings": view, "params": params,
+                       "inputs": list(spec.get("inputs") or []), "meta": dict(spec.get("meta") or {}), "jobs": self}
+                for fn in list(SUBMIT_HOOKS):
+                    keep = copy.deepcopy((sub["params"], sub["inputs"], sub["meta"]))
+                    try:
+                        fn(sub)
+                    except JobError:
+                        raise
+                    except Exception:  # noqa: BLE001  a hook must never block a job: drop its half-done edits and run the job as it was
+                        log.exception("submit hook %s failed", getattr(fn, "__name__", fn))
+                        sub["params"], sub["inputs"], sub["meta"] = keep
+                params = sub["params"]
+                spec = {**spec, "inputs": sub["inputs"], "meta": sub["meta"]}
         inputs = []
         for inp in spec.get("inputs") or []:
             aid = inp.get("asset") if isinstance(inp, dict) else inp

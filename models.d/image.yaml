@@ -21,7 +21,7 @@ models:
     order: 10
     tags: [quality, text, rgba, bilingual]
     summary: "Best prompt adherence and text rendering (EN + ZH); real RGBA output; instruction edits with up to 10 references."
-    features: {rgba: true, max_refs: 10, mask: annotate, text_render: true, negative: cfg, languages: [en, zh], tileable: false}
+    features: {rgba: true, max_refs: 10, mask: annotate, text_render: true, negative: cfg, languages: [en, zh], tileable: false, style_ref: [t2i, rgba, multi_ref]}
     backend: qwen
     weights: [{hf: Qwen/Qwen-Image-2.1, files: ["transformer/*.safetensors", "text_encoder/*.safetensors"]}]
     license: {name: "Apache-2.0 (verify on the 2.1 model card)", commercial: true, verify: true}

@@ -76,6 +76,8 @@ class Core:
         self.presets = Presets(config.DATA / "presets.json")
         self.plugins: dict[str, object] = {}
         self.plugin_errors: dict[str, str] = {}
+        # plugin hooks for POST /api/improve: fn(project, model_id, task, style_req) -> str (extra context for the improver, "" for none)
+        self.improve_context_hooks: list = []
 
     def settings_for(self, project: str | None):
         """Effective settings for a project (system settings + the project's overrides); the system settings for

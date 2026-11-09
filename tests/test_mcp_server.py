@@ -180,8 +180,8 @@ PLAIN = {"id": "m1", "project": "default", "type": "mesh", "name": "knight", "ma
 
 def test_tool_count_stays_reasonable_and_names_unique(mcp):
     names = [t["name"] for t in mcp.TOOLS]
-    assert len(names) == len(set(names)) <= 24
-    assert {"retry_job", "delete_asset", "improve_prompt", "save_preset", "export_assets", "studio_info", "get_settings", "update_settings", "preview_rig_edit"} <= set(names)
+    assert len(names) == len(set(names)) <= 28
+    assert {"retry_job", "delete_asset", "improve_prompt", "save_preset", "export_assets", "studio_info", "get_settings", "update_settings", "preview_rig_edit", "get_style_guide", "set_style_guide", "style_from_assets", "preview_style"} <= set(names)
     desc = {t["name"]: t["description"] for t in mcp.TOOLS}
     assert "rig" in desc["list_models"] and "motion" in desc["list_models"] and "mesh.flex_preview" in desc["submit_job"]
 
@@ -259,7 +259,7 @@ def test_get_rig_reads_the_skeleton_and_documents_the_edit_flow(mcp, monkeypatch
 
 def test_tool_params_table_matches_registered_handlers():
     from app.jobs import HANDLERS
-    from app.plugins import core_tools, mesh, rig, sound, video  # noqa: F401  (importing registers the handlers)
+    from app.plugins import core_tools, mesh, rig, sound, style, video  # noqa: F401  (importing registers the handlers)
 
     import importlib.util
     spec = importlib.util.spec_from_file_location("mcp_server3", config.STUDIO / "scripts" / "mcp_server.py")
@@ -392,7 +392,7 @@ def test_create_project_update_mode(mcp, monkeypatch):
 
 
 def test_assistant_mcp_stays_read_propose_only(monkeypatch):
-    """workers/studio_mcp.py: the Assistant's server keeps its 7 read / propose tools (no submit / delete / update_settings), knows rig + motion, and its get_asset shows 3D info."""
+    """workers/studio_mcp.py: the Assistant's server keeps its 8 read / propose tools (no submit / delete / update_settings), knows rig + motion, reads the style guide, and its get_asset shows 3D info."""
     import sys
     sys.path.insert(0, str(config.STUDIO / "workers"))
     try:
@@ -400,7 +400,7 @@ def test_assistant_mcp_stays_read_propose_only(monkeypatch):
     finally:
         sys.path.pop(0)
     from app.plugins import assistant
-    assert {t["name"] for t in studio_mcp.TOOLS} == {"list_models", "search_assets", "get_asset", "get_rig", "preview_rig_edit", "get_settings", "propose_plan"}
+    assert {t["name"] for t in studio_mcp.TOOLS} == {"list_models", "search_assets", "get_asset", "get_rig", "preview_rig_edit", "get_settings", "get_style_guide", "propose_plan"}
     step = [t for t in studio_mcp.TOOLS if t["name"] == "propose_plan"][0]["inputSchema"]["properties"]["steps"]["items"]["properties"]
     assert "rig" in step["task"]["description"] and "motion" in step["task"]["description"] and "reskin" in step["task"]["description"]
 

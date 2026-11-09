@@ -175,7 +175,7 @@ def test_mcp_server_exposes_only_the_studio_tools(monkeypatch):
     import studio_mcp
     sys.path.pop(0)
     from app.plugins import assistant
-    assert {t["name"] for t in studio_mcp.TOOLS} == {"list_models", "search_assets", "get_asset", "get_rig", "preview_rig_edit", "get_settings", "propose_plan"}
+    assert {t["name"] for t in studio_mcp.TOOLS} == {"list_models", "search_assets", "get_asset", "get_rig", "preview_rig_edit", "get_settings", "get_style_guide", "propose_plan"}
     assert set(assistant.MCP_TOOLS) == {t["name"] for t in studio_mcp.TOOLS}
     assert assistant.ALLOWED_MCP == [f"mcp__studio__{n}" for n in assistant.MCP_TOOLS]
     r = studio_mcp.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})

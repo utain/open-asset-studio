@@ -13,7 +13,8 @@ export { ModelPicker, featureBadges, memBadge } from './components/modelpicker.j
 export { ParamForm, estimateSeconds } from './components/paramform.js';
 export { infoBtn, closeInfo, closeOrphanInfo, paramSpec } from './components/infotip.js';
 export { UI_INFO, uiInfo, slotInfo } from './uiinfo.js';
-export { PromptBox, promptMeta, improveStyles, profileChips } from './components/promptbox.js';
+export { PromptBox, promptMeta, improveStyles, profileChips, registerPromptAddon } from './components/promptbox.js';
+export { registerSelectionAction, selectionActions } from './selection.js';
 export { ResultsGrid, assetCard, assetSubtitle } from './components/results.js';
 export { openAsset, closeAsset, exportAssets, currentAsset, loadModelViewer } from './components/drawer.js';
 export { exportDialog, downloadConverted } from './components/exportdialog.js';

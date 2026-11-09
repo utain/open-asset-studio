@@ -181,6 +181,16 @@ function renderMetaOnly() {
     h('div.row', h('span.dim', { style: { fontSize: '12px' } }, k), h('span.spacer'), btn('', { size: 'sm', kind: 'ghost', icon: 'copy', title: 'Copy', onClick: () => copyText(v) })),
     h('div', { style: { fontSize: '13px', overflowWrap: 'anywhere' } }, v)))));
 
+  // project style guide (recorded by the style plugin in x_style, docs/CONTRACTS.md section 11)
+  if (a.x_style) {
+    const x = a.x_style;
+    const link = x.version ? h('a', { href: `#/style?v=${x.version}`, on: { click: () => closeAsset() }, style: { marginLeft: '8px' } }, 'View guide') : null;
+    root.append(h('div.drawer-sec', h('h4', 'Style'),
+      h('div', { style: { fontSize: '13px', overflowWrap: 'anywhere' } }, x.applied ? `${x.name || 'Style'} v${x.version} · ${x.variant} · ${x.strength}` : `Style off: ${x.reason || 'not applied'}`, link),
+      (x.skipped || []).length ? h('div.dim', { style: { fontSize: '12px', marginTop: '4px' } }, x.skipped.map(s => `${s.what}: ${s.why}`).join(' · ')) : null,
+      x.post ? h('div.dim', { style: { fontSize: '12px', marginTop: '4px' } }, `Palette ${x.post.palette}${x.post.raw ? ` · untouched image attached (${x.post.raw})` : ''}`) : null));
+  }
+
   // generation
   const gen = h('dl.kv');
   const kv = (k, v) => { if (v !== undefined && v !== null && v !== '') gen.append(h('dt', k), h('dd', v)); };
