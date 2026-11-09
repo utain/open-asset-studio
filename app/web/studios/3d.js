@@ -7,31 +7,38 @@ import { css, meshViewer, autoThumb, runJob } from './i3d/common.js';
 import { attachSourcePanel, retopoBeforeSubmit, retopoCompare } from './i3d/retopo.js';
 const { h, ic, btn } = S;
 
+// Workflow steps: the task tabs are grouped as 1 Create · 2 Refine · 3 Animate · 4 Export (task ids and routes are unchanged).
+const GROUPS = [
+  { id: 'create', label: 'Create', title: 'Make a mesh: from an image, from text, or other views of an image' },
+  { id: 'refine', label: 'Refine', title: 'Texture a mesh, or retopologise it into a clean low-poly copy' },
+  { id: 'animate', label: 'Animate', title: 'Rig a character, recompute its skin weights, or animate it from text' },
+  { id: 'export', label: 'Export', title: 'Clean up, decimate and export meshes as GLB / OBJ / PLY / STL' },
+];
 const TASKS = [
-  { id: 'shape', label: 'Image → 3D', result: 'mesh', prompt: false, receives: ['shape'],
+  { id: 'shape', group: 'create', label: 'Image → 3D', result: 'mesh', prompt: false, receives: ['shape'],
     inputs: [{ key: 'image', label: 'Concept image', types: ['image'], role: 'image', required: true,
       hint: 'Best: one centred object, fully visible, transparent or plain background (Image › 3D prep).' }] },
-  { id: 'text3d', label: 'Text → 3D', result: 'mesh', prompt: true, placeholder: 'A low-poly wooden treasure chest with iron bands, game prop… (cloud: Meshy / Tripo)' },
-  { id: 'texture', label: 'Texture', result: 'mesh', prompt: false, receives: ['retexture'],
+  { id: 'text3d', group: 'create', label: 'Text → 3D', result: 'mesh', prompt: true, placeholder: 'A low-poly wooden treasure chest with iron bands, game prop… (cloud: Meshy / Tripo)' },
+  { id: 'texture', group: 'refine', label: 'Texture', result: 'mesh', prompt: false, receives: ['retexture'],
     inputs: [{ key: 'mesh', label: 'Mesh to texture', types: ['mesh'], role: 'mesh', required: true },
       { key: 'image', label: 'Reference image (optional)', types: ['image'], role: 'image', hint: 'Empty = the image the shape was made from. Set Reference image to “current” to paint from this one.' }] },
-  { id: 'multiview', label: 'Multi-view', result: 'image', prompt: false, receives: ['multiview'],
+  { id: 'multiview', group: 'create', label: 'Multi-view', result: 'image', prompt: false, receives: ['multiview'],
     inputs: [{ key: 'image', label: 'Object image', types: ['image'], role: 'image', required: true,
       hint: 'One object, fully visible, plain or transparent background. Result: the same object from other sides (sheet + one image per view; SV3D also attaches an orbit video).' }] },
-  { id: 'retopo', label: 'Retopo', result: 'mesh', prompt: false, receives: ['retopo'],
+  { id: 'retopo', group: 'refine', label: 'Retopo', result: 'mesh', prompt: false, receives: ['retopo'],
     inputs: [{ key: 'mesh', label: 'Dense mesh', types: ['mesh'], role: 'mesh', required: true,
       hint: 'A generated or imported model (not rigged). Result: a clean low-poly copy with UVs and baked textures (normal, colour, AO), ready for Rig.' }] },
-  { id: 'rig', label: 'Rig', result: 'mesh', prompt: false, receives: ['rig'],
+  { id: 'rig', group: 'animate', label: 'Rig', result: 'mesh', prompt: false, receives: ['rig'],
     inputs: [{ key: 'mesh', label: 'Mesh to rig', types: ['mesh'], role: 'mesh', required: true,
       hint: 'A character or creature in a neutral pose (A- or T-pose) works best. Result: a GLB with a skeleton, skin weights and two preview animations (flex test, wiggle).' }] },
-  { id: 'reskin', label: 'Re-skin', result: 'mesh', prompt: false, receives: ['reskin'],
+  { id: 'reskin', group: 'animate', label: 'Re-skin', result: 'mesh', prompt: false, receives: ['reskin'],
     inputs: [{ key: 'mesh', label: 'Rigged mesh (edited skeleton)', types: ['mesh'], role: 'mesh', required: true,
       hint: 'A rigged GLB whose skeleton you edited (Edit rig in the viewer, or tool rig.edit). The skeleton is kept as it is; only the skin weights are recomputed, so new bones move the mesh.' }] },
-  { id: 'motion', label: 'Motion', result: 'mesh', prompt: true, receives: ['motion'],
+  { id: 'motion', group: 'animate', label: 'Motion', result: 'mesh', prompt: true, receives: ['motion'],
     placeholder: 'a person walks forward and waves…  (English, describe the body: walk, run, jump, wave the right hand, kick, dance, turn around)',
     inputs: [{ key: 'mesh', label: 'Rigged character', types: ['mesh'], role: 'mesh', required: true,
       hint: 'A rigged humanoid from the Rig tab, in a T- or A-pose (two legs, two arms). Result: a new mesh asset with the animation clip “motion”, retargeted onto its skeleton.' }] },
-  { id: 'mesh_export', label: 'Export', result: 'mesh', prompt: false, receives: ['export'],
+  { id: 'mesh_export', group: 'export', label: 'Export', result: 'mesh', prompt: false, receives: ['export'],
     inputs: [{ key: 'mesh', label: 'Meshes', types: ['mesh'], role: 'mesh', multiple: true, max: 12, required: true }] },
 ];
 
@@ -61,7 +68,7 @@ export default S.defineStudio({
       btn('Export', { size: 'sm', icon: 'package', onClick: () => receive({ action: 'export', assets: [a] }) }),
     ] });
     const kit = new S.TaskStudio({
-      studio: '3d',
+      studio: '3d', groups: GROUPS, numberedGroups: true,
       tasks: TASKS.filter(t => (t.id !== 'reskin' || S.modelsFor('reskin').length) && (t.id !== 'retopo' || S.modelsFor('retopo').length)),    // an older core has no task reskin / retopo: no tab
       extraPanel: (k, t) => extraPanel(k, t),
       beforeSubmit: (spec, k) => beforeSubmit(spec, k),

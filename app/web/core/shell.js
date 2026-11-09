@@ -27,17 +27,39 @@ export function buildShell(root) {
     if (!items.length) continue;
     if (label) sidebar.append(h('div.nav-sec', label));
     for (const s of items) {
-      const a = h('a.nav-item', { href: `#/${s.id}`, style: s.color ? { '--nav-c': s.color } : null, title: s.title },
+      const a = h('a.nav-item', { href: `#/${s.id}`, style: s.color ? { '--nav-c': s.color } : null, title: s.title, 'aria-label': s.title },
         ic(s.icon || 'circle-dot', 18), h('span.lbl', s.title), s.soon ? h('span.soon', 'soon') : null, h('span.count'));
       navEls.set(s.id, a);
       sidebar.append(a);
     }
   }
-  const themeBtn = h('button.nav-item', { type: 'button', on: { click: () => applyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light') } }, ic('sun', 18), h('span.lbl', 'Light / dark'));
+  const themeBtn = h('button.nav-item', { type: 'button', title: 'Light / dark', 'aria-label': 'Light / dark', on: { click: () => applyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light') } }, ic('sun', 18), h('span.lbl', 'Light / dark'));
   const sse = h('span.dim.lbl', { style: { fontSize: '11px', paddingLeft: '10px' } });
   const drawSse = () => { sse.textContent = `v${store.version} · ${store.sse === 'live' ? 'connected' : 'reconnecting…'}`; };
   bus.on('sse', drawSse); drawSse();
-  sidebar.append(h('div.sidebar-foot', themeBtn, sse));
+  // collapse / expand toggle at the bottom (icon rail <-> full sidebar)
+  const sbToggle = h('button.nav-item.sb-toggle', { type: 'button', on: { click: () => setSidebar(!sidebarCollapsed(), true) } });
+  sidebar.append(h('div.sidebar-foot', themeBtn, sbToggle, sse));
+  const appEl = root;
+  const sbMq = matchMedia('(max-width: 1280px)');
+  const sidebarCollapsed = () => appEl.classList.contains('sb-collapsed');
+  // preference: 'collapsed' | 'expanded' (explicit, remembered) | null (automatic: icon rail up to 1280 px wide)
+  const sbWanted = () => { const p = prefs.get('sidebar', null); return p === 'collapsed' ? true : p === 'expanded' ? false : sbMq.matches; };
+  const drawSb = () => {
+    const c = sidebarCollapsed();
+    sbToggle.replaceChildren(ic(c ? 'chevrons-right' : 'chevrons-left', 18), h('span.lbl', 'Collapse'));
+    sbToggle.title = c ? 'Expand the sidebar' : 'Collapse the sidebar to icons';
+    sbToggle.setAttribute('aria-label', sbToggle.title);
+    sbToggle.setAttribute('aria-expanded', String(!c));
+  };
+  function setSidebar(collapsed, explicit) {
+    if (explicit) prefs.set('sidebar', collapsed ? 'collapsed' : 'expanded');
+    appEl.classList.toggle('sb-collapsed', collapsed);
+    drawSb();
+  }
+  setSidebar(sbWanted(), false);
+  sbMq.addEventListener('change', () => setSidebar(sbWanted(), false));
+  requestAnimationFrame(() => requestAnimationFrame(() => appEl.classList.add('sb-anim')));   // no width animation on first paint
 
   // ----- top bar
   titleEl = h('div.title');

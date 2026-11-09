@@ -24,15 +24,18 @@ const MEDIA_MODES = [
   { value: 'dub', label: 'Dub', icon: 'film' },
 ];
 // tabs with `modes` hold several tasks behind a mode switch (pref key per tab); the others have one task
+// the tab row is grouped (Make · Voice · Tools) so all eight fit; ids and routes are unchanged
+const TAB_GROUPS = [{ id: 'make', label: 'Make', title: 'Sound effects, ambience, music and songs' }, { id: 'voice', label: 'Voice', title: 'Speech: preset voices, voice design, cloning, conversion, speech-to-speech' },
+  { id: 'tools', label: 'Tools', title: 'Video to sound, subtitles / stems / dub, take sheets' }];
 const TABS = [
-  { id: 'sfx', label: 'SFX', icon: 'zap', tasks: ['sfx'] },
-  { id: 'ambience', label: 'Ambience & loops', short: 'Ambience', icon: 'trees', tasks: ['ambience'] },
-  { id: 'music', label: 'Music', icon: 'music', tasks: ['music'] },
-  { id: 'song', label: 'Song', icon: 'drum', tasks: ['song', 'sing'], modes: SONG_MODES, pref: 'sound.songMode' },
-  { id: 'voice', label: 'Voice', icon: 'mic', tasks: ['tts', 'voice_design', 'voice_clone', 'voice_convert', 's2s'], modes: VOICE_MODES, pref: 'sound.voiceMode' },
-  { id: 'v2a', label: 'Video to sound', short: 'Video', icon: 'clapperboard', tasks: ['v2a'] },
-  { id: 'media', label: 'Subtitles, stems & dub', short: 'Media', icon: 'film', tasks: ['subtitles', 'separate', 'dub'], modes: MEDIA_MODES, pref: 'sound.mediaMode' },
-  { id: 'sheets', label: 'Sheets', icon: 'list-checks', tasks: [] },
+  { id: 'sfx', group: 'make', label: 'SFX', icon: 'zap', tasks: ['sfx'] },
+  { id: 'ambience', group: 'make', label: 'Ambience & loops', short: 'Ambience', icon: 'trees', tasks: ['ambience'] },
+  { id: 'music', group: 'make', label: 'Music', icon: 'music', tasks: ['music'] },
+  { id: 'song', group: 'make', label: 'Song', icon: 'drum', tasks: ['song', 'sing'], modes: SONG_MODES, pref: 'sound.songMode' },
+  { id: 'voice', group: 'voice', label: 'Voice', icon: 'mic', tasks: ['tts', 'voice_design', 'voice_clone', 'voice_convert', 's2s'], modes: VOICE_MODES, pref: 'sound.voiceMode' },
+  { id: 'v2a', group: 'tools', label: 'Video to sound', short: 'Video', icon: 'clapperboard', tasks: ['v2a'] },
+  { id: 'media', group: 'tools', label: 'Subtitles, stems & dub', short: 'Media', icon: 'film', tasks: ['subtitles', 'separate', 'dub'], modes: MEDIA_MODES, pref: 'sound.mediaMode' },
+  { id: 'sheets', group: 'tools', label: 'Sheets', icon: 'list-checks', tasks: [] },
 ];
 const SING_EXAMPLE = '你 C4 0.5\n好 E4 0.5\nSP rest 0.2\n歌 G4,E4 0.4,0.4';
 // qa: 'clap' | 'asr' | null (no automatic check); noPrompt: no prompt box; param: the model param the prompt box fills;
@@ -74,9 +77,6 @@ const fmtDb = v => (v == null ? '–' : `${v.toFixed(1)}`);
 
 const CSS = `
 .snd .studio-panel .sp-body { gap: 14px; }
-.snd-tabs { display: flex; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--line-soft); overflow-x: auto; background: var(--bg-2); position: sticky; top: 0; z-index: 3; scrollbar-width: none; }
-.snd-tabs button { border: 0; background: none; padding: 12px 7px 10px; color: var(--text-2); cursor: pointer; font-weight: 600; border-bottom: 2px solid transparent; white-space: nowrap; font-size: 13px; flex: 1 0 auto; }
-.snd-tabs button.on { color: var(--text); border-bottom-color: var(--c-sound); }
 .snd > .studio-panel, .snd > .studio-center { min-width: 0; }
 .snd-mode { display: grid; grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); gap: 6px; }
 .snd-mode button { border: 1px solid var(--line); background: var(--panel); border-radius: 10px; padding: 8px 6px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 4px; font-weight: 600; font-size: 12.5px; color: var(--text-2); }
@@ -170,7 +170,6 @@ const CSS = `
   .snd-ln { grid-template-columns: 24px minmax(0, 1fr); }
   .snd-ln .src, .snd-ln textarea.textarea { grid-column: 2; }
   .snd-takes { grid-template-columns: 1fr; }
-  .snd-tabs button { padding: 11px 6px 9px; }
 }
 `;
 
@@ -547,7 +546,9 @@ class SoundStudio {
     this.dub = { target: 'en', source: 'auto', tts: '', translate: '', ...prefs.get('sound.dub', {}) };
     this.autoQA = prefs.get('sound.autoqa', false);
     this.root = h('div.studio.snd');
-    this.tabsEl = h('div.snd-tabs', { role: 'tablist' });
+    this.tg = new S.TabGroups({ items: TABS, groups: TAB_GROUPS, value: this.tab, accent: 'var(--c-sound)', label: 'Sound tools', onSelect: id => this.setTab(id),
+      remember: { get: g => prefs.get(`sound.grp.${g}`), set: (g, id) => prefs.set(`sound.grp.${g}`, id) } });
+    this.tabsEl = this.tg.el;
     this.body = h('div.sp-body');
     this.genBtn = h('button.btn.btn-primary.gen-btn', { type: 'button', on: { click: () => this.generate() } });
     this.jobsEl = h('div.col', { style: { gap: '8px' } });
@@ -583,8 +584,7 @@ class SoundStudio {
 
   // ---------------------------------------------------------------- layout
   render() {
-    this.tabsEl.replaceChildren(...TABS.map(t => h(`button${t.id === this.tab ? '.on' : ''}`, { type: 'button', role: 'tab', title: t.label, 'aria-selected': t.id === this.tab, on: { click: () => this.setTab(t.id) } },
-      t.short || t.label)));
+    this.tg.set(this.tab);
     if (this.tab === 'sheets') { this.sheets.mount(); return; }
     this.foot.style.display = '';
     const task = this.task();

@@ -16,15 +16,18 @@ import { compare } from './compare.js';
 import { jobCard } from './jobs.js';
 import { costSpan } from '../cost.js';
 import { uiInfo } from '../uiinfo.js';
+import { TabGroups } from './tabgroups.js';
 
 /**
  * new TaskStudio({
  *   studio: 'sound',                       // studio id (stored in asset meta.studio, used for "Regenerate")
- *   tasks: [{id: 'sfx', label: 'SFX', icon, result: 'audio', prompt: true, promptLabel, placeholder,
+ *   tasks: [{id: 'sfx', label: 'SFX', icon, group: 'create', result: 'audio', prompt: true, promptLabel, placeholder,
  *            inputs: [{key: 'ref', label: 'Reference', types: ['audio'], role: 'ref', multiple: false, required: false}],
  *            exclude: ['text'],             // params rendered elsewhere (e.g. the prompt box)
  *            promptParam: null,             // send the prompt as this param name instead of `prompt`
  *            tool: null}],                  // submit as a CPU/GPU tool instead of a model job
+ *   groups: [{id: 'create', label: 'Create'}],  // optional: ordered workflow steps; tasks with `group` show as pills under their step
+ *   numberedGroups: false,                 // number the steps (1 Create · 2 Refine …) for a real pipeline
  *   includeTest: false,
  *   beforeSubmit(spec, kit) -> spec | null // last chance to adjust (return null to abort)
  *   extraPanel(kit, task) -> Element|null  // inserted after the parameters
@@ -40,7 +43,9 @@ export class TaskStudio {
     if (!this.tasks.find(t => t.id === this.task)) this.task = this.tasks[0].id;
     this.slots = {};
     this.el = h('div.studio');
-    this.tabs = h('div.task-tabs', { role: 'tablist' });
+    this.tg = new TabGroups({ items: o.tasks, groups: o.groups, value: this.task, numbered: o.numberedGroups, label: 'Tasks', onSelect: id => this.setTask(id),
+      remember: { get: g => prefs.get(`taskgrp.${o.studio}.${g}`), set: (g, id) => prefs.set(`taskgrp.${o.studio}.${g}`, id) } });
+    this.tabs = this.tg.el;
     this.panelBody = h('div.sp-body');
     this.genBtn = h('button.btn.btn-primary.gen-btn', { type: 'button', on: { click: () => this.generate() } });
     this.jobsEl = h('div.col', { style: { gap: '8px' } });
@@ -58,7 +63,6 @@ export class TaskStudio {
       onApply: extras => this.form.setValues(extras), imageAsset: () => this._firstImageInput(), context: () => this.o.context?.(this) || '' });
     this.prompt.ta?.addEventListener('input', () => { clearTimeout(this._etaT); this._etaT = setTimeout(() => this._eta(), 350); });
     this._buildCenter();
-    this._buildTabs();
     this._buildPanel();
     this._offAsset = bus.on('asset', ev => {
       if (ev.action === 'created' && ev.asset.studio === this.studio && ev.asset.project === store.project && this.cur().id === ev.asset.task && !this.grid.cards.has(ev.asset.id) && !this._tracking) this.grid.add(ev.asset);
@@ -69,15 +73,10 @@ export class TaskStudio {
     this.loadResults();
   }
   cur() { return this.tasks.find(t => t.id === this.task) || this.tasks[0]; }
-  _buildTabs() {
-    clear(this.tabs);
-    if (this.tasks.length < 2) { this.tabs.classList.add('hidden'); return; }
-    for (const t of this.tasks) this.tabs.append(h(`button${t.id === this.task ? '.on' : ''}`, { type: 'button', role: 'tab', 'aria-selected': t.id === this.task, on: { click: () => this.setTask(t.id) } }, t.label));
-  }
   setTask(id) {
     if (!this.tasks.find(t => t.id === id)) return;
     this.task = id; prefs.set(`task.${this.studio}`, id);
-    this._buildTabs();
+    this.tg.set(id);
     this.picker.setTask(id);
     this._buildPanel();
     this.grid.gridEl.classList.toggle('audio-grid', this.cur().result === 'audio');
@@ -196,7 +195,13 @@ export class TaskStudio {
     } catch (e) { toastError(e, 'Cannot start the job'); }
   }
   /** Shell calls this on each navigation into the studio (#/<studio>/<task>?...). */
-  route(r) { if (r.sub && r.sub !== this.task && this.tasks.find(t => t.id === r.sub)) this.setTask(r.sub); }
+  route(r) {
+    // #/<studio>/<task>, #/<studio>?task=<task>, or #/<studio>/<step> (a step id opens its last-used task)
+    const want = r.sub || r.query?.task;
+    if (!want) return;
+    const id = this.tasks.find(t => t.id === want) ? want : this.tg.selectGroup(want);
+    if (id && id !== this.task) this.setTask(id);
+  }
   /** sendTo payload: {action, assets: [meta], params}. regenerate -> restore task/model/params/prompt; else fill inputs. */
   async receive(p) {
     const assets = p.assets || [];

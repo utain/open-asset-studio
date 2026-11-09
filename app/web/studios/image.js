@@ -18,21 +18,27 @@ const IDEAS = {
   film: 'Storyboard frame: detective at a rain-soaked window, low-key light, wide lens… (Thai or English)',
   general: 'A lighthouse at dusk, painterly, calm sea… (Thai or English)',
 };
+// Tabs grouped by intent (Create · Edit · Finish); task ids, routes and send-to actions are unchanged.
+const GROUPS = [
+  { id: 'create', label: 'Create', title: 'Make a new image from a prompt' },
+  { id: 'edit', label: 'Edit', title: 'Change an image, cut out a subject, remove the background' },
+  { id: 'finish', label: 'Finish', title: 'Upscale, or prepare an image for 3D' },
+];
 const TASKS = [
-  { id: 't2i', label: 'Generate', result: 'image', prompt: true, placeholder: p => IDEAS[p.id] || IDEAS.general },
-  { id: 'edit', label: 'Edit', result: 'image', prompt: true, receives: ['edit'],
+  { id: 't2i', group: 'create', label: 'Generate', result: 'image', prompt: true, placeholder: p => IDEAS[p.id] || IDEAS.general },
+  { id: 'edit', group: 'edit', label: 'Edit', result: 'image', prompt: true, receives: ['edit'],
     placeholder: 'Change the wood to red lacquer, keep everything else identical. Refer to references as "image 2"…',
     inputs: [{ key: 'image', label: 'Image to edit (image 1)', types: IMG, role: 'image', required: true },
       { key: 'refs', label: 'References (image 2, 3 …)', types: IMG, role: 'ref', multiple: true, max: 9, hint: 'Qwen-Image: up to 9 extra references (style, outfit, object). Kontext: none.' }] },
-  { id: 'rgba', label: 'Transparent', result: 'image', prompt: true, placeholder: 'A glowing health potion bottle, isolated item… (gets the RGBA trigger automatically)' },
-  { id: 'extract', label: 'Extract', result: 'image', prompt: true, promptRequired: false, receives: ['extract'],
+  { id: 'rgba', group: 'create', label: 'Transparent', result: 'image', prompt: true, placeholder: 'A glowing health potion bottle, isolated item… (gets the RGBA trigger automatically)' },
+  { id: 'extract', group: 'edit', label: 'Extract', result: 'image', prompt: true, promptRequired: false, receives: ['extract'],
     placeholder: 'What to cut out, e.g. "the sword" or "the character in red" (empty = the main subject)',
     inputs: [{ key: 'image', label: 'Image', types: IMG, role: 'image', required: true, hint: 'Qwen-Image redraws the subject on a real transparent background (model-based, keeps thin parts).' }] },
-  { id: 'rmbg', label: 'Remove BG', result: 'image', prompt: false, receives: ['rmbg'],
+  { id: 'rmbg', group: 'edit', label: 'Remove BG', result: 'image', prompt: false, receives: ['rmbg'],
     inputs: [{ key: 'images', label: 'Images', types: IMG, role: 'input', multiple: true, max: 16, required: true, hint: 'Fast matting (CPU). Transparent inputs are flattened on white first.' }] },
-  { id: 'upscale', label: 'Upscale', result: 'image', prompt: false, receives: ['upscale'],
+  { id: 'upscale', group: 'finish', label: 'Upscale', result: 'image', prompt: false, receives: ['upscale'],
     inputs: [{ key: 'images', label: 'Images', types: IMG, role: 'input', multiple: true, max: 16, required: true, hint: 'Real-ESRGAN x4plus; alpha is kept (edge colours are bled first).' }] },
-  { id: 'recenter', label: '3D prep', result: 'image', prompt: false, receives: ['recenter'],
+  { id: 'recenter', group: 'finish', label: '3D prep', result: 'image', prompt: false, receives: ['recenter'],
     inputs: [{ key: 'images', label: 'Images', types: IMG, role: 'input', multiple: true, max: 16, required: true, hint: 'Crop to the object, centre it on a square with a margin: the input Hunyuan3D likes.' }] },
 ];
 const MULTI_TOOL = new Set(['rmbg', 'upscale', 'recenter']);
@@ -52,7 +58,7 @@ export default S.defineStudio({
     let kit;
     const headTools = h('div.img-headtools');
     kit = new S.TaskStudio({
-      studio: 'image',
+      studio: 'image', groups: GROUPS,
       tasks: TASKS,
       context: () => S.getSetting('prompt.context.image') || S.prefs.get('image.context', ''),
       centerHeader: () => headTools,

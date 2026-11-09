@@ -23,6 +23,7 @@ export { jobCard, JobList } from './components/jobs.js';
 export { player, waveCanvas, playButton, waveSurfer, audioRow } from './components/audio.js';
 export { videoBox, videoAttachments } from './components/video.js';
 export { TaskStudio } from './components/taskstudio.js';
+export { TabGroups } from './components/tabgroups.js';
 export { backendPicker, writeHelper, generatedBy, textBackends, backendLabel } from './components/writer.js';
 export { downloadDialog, downloadWidget, downloadsList, canDownload } from './components/downloads.js';
 export { estimateCost, fmtUsd, priceLabel, cloudBadge, priceBadge, costSpan, jobCost, isCloud } from './cost.js';
