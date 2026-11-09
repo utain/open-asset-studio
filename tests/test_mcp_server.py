@@ -181,7 +181,7 @@ PLAIN = {"id": "m1", "project": "default", "type": "mesh", "name": "knight", "ma
 def test_tool_count_stays_reasonable_and_names_unique(mcp):
     names = [t["name"] for t in mcp.TOOLS]
     assert len(names) == len(set(names)) <= 24
-    assert {"retry_job", "delete_asset", "improve_prompt", "save_preset", "export_assets", "studio_info"} <= set(names)
+    assert {"retry_job", "delete_asset", "improve_prompt", "save_preset", "export_assets", "studio_info", "get_settings", "update_settings", "preview_rig_edit"} <= set(names)
     desc = {t["name"]: t["description"] for t in mcp.TOOLS}
     assert "rig" in desc["list_models"] and "motion" in desc["list_models"] and "mesh.flex_preview" in desc["submit_job"]
 
@@ -392,7 +392,7 @@ def test_create_project_update_mode(mcp, monkeypatch):
 
 
 def test_assistant_mcp_stays_read_propose_only(monkeypatch):
-    """workers/studio_mcp.py: the Assistant's server keeps its 5 tools (no submit / delete), knows rig + motion, and its get_asset shows 3D info."""
+    """workers/studio_mcp.py: the Assistant's server keeps its 7 read / propose tools (no submit / delete / update_settings), knows rig + motion, and its get_asset shows 3D info."""
     import sys
     sys.path.insert(0, str(config.STUDIO / "workers"))
     try:
@@ -400,7 +400,7 @@ def test_assistant_mcp_stays_read_propose_only(monkeypatch):
     finally:
         sys.path.pop(0)
     from app.plugins import assistant
-    assert {t["name"] for t in studio_mcp.TOOLS} == {"list_models", "search_assets", "get_asset", "get_rig", "propose_plan"}
+    assert {t["name"] for t in studio_mcp.TOOLS} == {"list_models", "search_assets", "get_asset", "get_rig", "preview_rig_edit", "get_settings", "propose_plan"}
     step = [t for t in studio_mcp.TOOLS if t["name"] == "propose_plan"][0]["inputSchema"]["properties"]["steps"]["items"]["properties"]
     assert "rig" in step["task"]["description"] and "motion" in step["task"]["description"] and "reskin" in step["task"]["description"]
 
@@ -440,3 +440,160 @@ def test_proxied_callers_are_not_local():
     assert plugin._is_local(req({}))
     assert not plugin._is_local(req({"x-forwarded-for": "203.0.113.7"}))
     assert not plugin._is_local(req({"tailscale-user-login": "someone@example.com"}))
+
+
+# ------------------------------------------------------------------ rig edit preview
+def test_preview_rig_edit_is_a_read_only_dry_run(mcp, monkeypatch):
+    rep = {"ops": [{"op": "add_chain", "added": ["tail_01", "tail_02"]}], "needs_reskin": True, "reskin_suggested": True, "zero_weight_bones": ["tail_01", "tail_02"], "notes": ["2 new bone(s)"]}
+    seen = fake(mcp, monkeypatch, {("POST", "/api/x/rig/r1/dry_run"): rep})
+    ops = [{"op": "add_chain", "parent": "hips", "count": 2, "direction": "back", "length": 0.1}]
+    res, d = call(mcp, "preview_rig_edit", {"asset": "r1", "ops": ops})
+    assert not res["isError"] and seen[0][:3] == ("POST", "/api/x/rig/r1/dry_run", {"ops": ops})
+    assert d["written"] is False and d["needs_reskin"] is True and "reskin" in d["next"] and "rig.edit" in d["next"]
+    tool = {t["name"]: t for t in mcp.TOOLS}["preview_rig_edit"]
+    assert tool["annotations"]["readOnlyHint"] is True and tool["inputSchema"]["required"] == ["asset", "ops"]
+    res, d = call(mcp, "preview_rig_edit", {"asset": "r1", "ops": []})
+    assert res["isError"] and d["kind"] == "input" and len(seen) == 1                     # empty ops never reach the core
+    for name in ("get_rig", "submit_job"):
+        assert "preview_rig_edit" in mcp.BY_NAME[name]["description"]
+    assert "preview_rig_edit" in mcp.TOOL_PARAMS["rig.edit"]["note"]
+    assert "preview_rig_edit" in mcp.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})["result"]["instructions"]
+
+
+# ------------------------------------------------------------------ settings
+SCHEMA = {"groups": [{"id": "general", "label": "General", "scopes": ["system", "project"], "help": "h"}, {"id": "memory", "label": "Memory", "scopes": ["system"], "help": "m"},
+                     {"id": "prompts", "label": "Prompts & text", "scopes": ["system", "project"], "help": "p"}, {"id": "env", "label": "Environment", "scopes": ["system"]}],
+          "fields": [{"key": "license.commercial_only", "type": "bool", "label": "Commercial-safe models only", "group": "general", "scope": ["system", "project"], "apply": "live",
+                      "default": False, "help": "Hide NC models", "info": "Beginner text", "editable": True},
+                     {"key": "memory.margin_gb", "type": "float", "label": "Safety margin", "group": "memory", "scope": ["system"], "apply": "live", "default": 6.0,
+                      "min": 0, "max": 32, "unit": "GB", "help": "Kept free", "info": "More text", "editable": True},
+                     {"key": "textgen.improve", "type": "backend", "label": "Prompt improver backend", "group": "prompts", "scope": ["system", "project"], "apply": "live",
+                      "default": None, "editable": True},
+                     {"key": "textgen.cli.claude.binary", "type": "string", "label": "Claude binary", "group": "prompts", "scope": ["system"], "apply": "live", "default": None,
+                      "editable": False, "help": "Path of the executable. It is run, so it is file-only."},
+                     {"key": "textgen.api_models", "type": "json", "label": "API models", "group": "prompts", "scope": ["system"], "apply": "live", "default": [], "gui": False,
+                      "editable": True, "help": "Managed in the Assistant > Text backends dialog."},
+                     {"key": "jobs.cpu_concurrency", "type": "int", "label": "CPU jobs at once", "group": "workers", "scope": ["system"], "apply": "restart", "default": 2,
+                      "min": 1, "max": 16, "editable": True}]}
+
+
+def settings_routes(extra=None):
+    return {("GET", "/api/settings/schema"): SCHEMA,
+            ("GET", "/api/settings"): {"license": {"commercial_only": True}, "memory": {"margin_gb": 6.0}, "textgen": {"improve": None}, "jobs": {"cpu_concurrency": 2}},
+            ("GET", "/api/projects/p1/settings"): {"project": "p1", "overrides": {"license": {"commercial_only": False}}, "overridden": ["license.commercial_only"]},
+            **(extra or {})}
+
+
+def test_get_settings_summary_is_compact(mcp, monkeypatch):
+    fake(mcp, monkeypatch, settings_routes())
+    res, d = call(mcp, "get_settings")
+    assert not res["isError"] and [g["id"] for g in d["groups"]] == ["general", "memory", "prompts"]       # env is read-only noise
+    assert d["changed_from_default"] == {"license.commercial_only": True}                                   # file-only and unchanged fields are not listed
+    assert "info" not in json.dumps(d["changed_from_default"]) and "update_settings" in d["hint"]
+    assert {t["name"]: t for t in mcp.TOOLS}["get_settings"]["annotations"]["readOnlyHint"] is True
+
+
+def test_get_settings_filters_and_project_overrides(mcp, monkeypatch):
+    fake(mcp, monkeypatch, settings_routes())
+    _, d = call(mcp, "get_settings", {"group": "memory"})
+    f = d["settings"][0]
+    assert d["total"] == 1 and f["key"] == "memory.margin_gb" and f["value"] == 6.0 and f["range"] == "0..32 GB" and f["info"] == "More text" and f["scope"] == "system"
+    _, d = call(mcp, "get_settings", {"q": "binary"})
+    assert d["settings"][0]["file_only"] is True
+    keys = [x["key"] for x in call(mcp, "get_settings", {"group": "prompts"})[1]["settings"]]
+    assert "textgen.api_models" not in keys                                                                  # json maps (endpoints, API models) stay in the UI
+    _, d = call(mcp, "get_settings", {"project": "p1", "keys": ["license.commercial_only", "memory.margin_gb"]})
+    lic, mem = d["settings"]
+    assert lic["value"] is False and lic["overridden"] is True and lic["system_value"] is True and "overridden" not in mem and "project p1" in d["scope"]
+    _, d = call(mcp, "get_settings", {"project": "p1"})
+    assert d["overridden_in_project"] == {"license.commercial_only": {"value": False, "system_value": True}}
+    res, d = call(mcp, "get_settings", {"keys": ["nope"]})
+    assert res["isError"] and d["kind"] == "input"
+
+
+def test_update_settings_validation_and_requests(mcp, monkeypatch):
+    seen = fake(mcp, monkeypatch, settings_routes({("PATCH", "/api/settings"): {}, ("PATCH", "/api/projects/p1/settings"): {"overridden": ["license.commercial_only"]}}))
+    res, d = call(mcp, "update_settings", {"values": {"memory.margin_gb": 8}, "reset": ["license.commercial_only"]})
+    assert not res["isError"] and seen[-1][:3] == ("PATCH", "/api/settings", {"memory": {"margin_gb": 8}, "license": {"commercial_only": None}})
+    assert d["scope"] == "system" and d["changed"]["memory.margin_gb"]["value"] == 8 and "default" in d["changed"]["license.commercial_only"]["value"]
+    _, d = call(mcp, "update_settings", {"values": {"jobs.cpu_concurrency": 3}})
+    assert d["changed"]["jobs.cpu_concurrency"]["applies"] == "after a studio restart"
+    n = len(seen)
+    for args, frag in [({"values": {"textgen.cli.claude.binary": "/bin/sh"}}, "file-only"),
+                       ({"values": {"textgen.api_models": []}}, "not changeable through MCP"),
+                       ({"scope": "project", "project": "p1", "values": {"memory.margin_gb": 1}}, "system-wide"),
+                       ({"scope": "project", "values": {"license.commercial_only": True}}, "needs `project`"),
+                       ({"values": {"memry.margin_gb": 1}}, "Did you mean"),
+                       ({"values": {"memory.margin_gb": 1}, "reset": ["memory.margin_gb"]}, "both"),
+                       ({}, "Nothing to do"),
+                       ({"values": {"textgen.improve": "cli:claude"}}, "third-party")]:
+        res, d = call(mcp, "update_settings", args)
+        assert res["isError"] and frag in d["error"], (args, d)
+    assert all(c[0] == "GET" for c in seen[n:])                                      # nothing was written for the refused calls
+    _, d = call(mcp, "update_settings", {"values": {"textgen.improve": "cli:claude"}, "confirm_upload": True})
+    assert d["ok"] and seen[-1][2] == {"textgen": {"improve": "cli:claude"}}
+    _, d = call(mcp, "update_settings", {"values": {"textgen.improve": "local"}})
+    assert d["ok"]
+    t = {t["name"]: t for t in mcp.TOOLS}["update_settings"]
+    assert t["annotations"]["readOnlyHint"] is False and not t["annotations"].get("destructiveHint") and "behave" in t["description"]
+
+
+@pytest.fixture()
+def live_mcp(monkeypatch):
+    """The public MCP tools talking to the real FastAPI app (no GPU, no network): http() is routed through a TestClient."""
+    from fastapi.testclient import TestClient
+
+    import app.main as main
+    from app.core import Core
+
+    spec = importlib.util.spec_from_file_location("mcp_server_live", config.STUDIO / "scripts" / "mcp_server.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    main.core = Core()
+    with TestClient(main.app) as c:
+        def real_http(method, path, body=None, *, query=None, raw=None, ctype="", timeout=60):
+            r = c.request(method, path, json=body, params={k: v for k, v in (query or {}).items() if v not in (None, "", [])})
+            if r.status_code >= 400:
+                d = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+                raise mod.StudioError(str(d.get("error") or d.get("detail") or r.text), d.get("kind", ""), status=r.status_code)
+            return r.json()
+
+        monkeypatch.setattr(mod, "http", real_http)
+        if c.get("/api/projects/mcpset/settings").status_code == 404:
+            assert c.post("/api/projects", json={"id": "mcpset", "title": "MCP settings"}).status_code == 200
+        before = main.core.settings.data["memory"]["margin_gb"]
+        yield mod, c, main.core
+        c.delete("/api/projects/mcpset/settings")
+        main.core.settings.update({"memory": {"margin_gb": None if before == config.DEFAULT_SETTINGS["memory"]["margin_gb"] else before}, "license": {"commercial_only": None}})
+    main.core = None
+
+
+def test_settings_tools_round_trip_against_the_real_app(live_mcp):
+    mod, c, core = live_mcp
+    res, d = call(mod, "get_settings", {"project": "mcpset", "keys": ["license.commercial_only"]})
+    assert not res["isError"] and d["settings"][0]["overridden"] is False
+    # a project override: set, read back as overridden, the system value untouched, then reset to inherit
+    res, d = call(mod, "update_settings", {"scope": "project", "project": "mcpset", "values": {"license.commercial_only": True}})
+    assert not res["isError"] and d["overridden_in_project"] == ["license.commercial_only"]
+    _, d = call(mod, "get_settings", {"project": "mcpset", "keys": ["license.commercial_only"]})
+    f = d["settings"][0]
+    assert f["value"] is True and f["overridden"] is True and f["system_value"] is False
+    assert core.settings.get("license", "commercial_only") is False and core.settings_for("mcpset").get("license", "commercial_only") is True
+    res, d = call(mod, "update_settings", {"scope": "project", "project": "mcpset", "reset": ["license.commercial_only"]})
+    assert not res["isError"] and d["overridden_in_project"] == []
+    assert call(mod, "get_settings", {"project": "mcpset", "keys": ["license.commercial_only"]})[1]["settings"][0]["overridden"] is False
+    # the schema's own rules reach the caller: system-only key in project scope, file-only key, out-of-range value
+    res, d = call(mod, "update_settings", {"scope": "project", "project": "mcpset", "values": {"memory.margin_gb": 2}})
+    assert res["isError"] and "system-wide" in d["error"]
+    res, d = call(mod, "update_settings", {"values": {"llm.server": "/tmp/evil"}})
+    assert res["isError"] and "file-only" in d["error"]
+    res, d = call(mod, "update_settings", {"values": {"memory.margin_gb": 999}})
+    assert res["isError"] and d["kind"] == "input" and "between" in d["error"]
+    # a system change: validated by the real schema, listed as changed, visible in the summary, and reset to the default
+    res, d = call(mod, "update_settings", {"values": {"memory.margin_gb": 7.5}})
+    assert not res["isError"] and core.settings.get("memory", "margin_gb") == 7.5
+    assert call(mod, "get_settings")[1]["changed_from_default"]["memory.margin_gb"] == 7.5
+    call(mod, "update_settings", {"reset": ["memory.margin_gb"]})
+    assert "memory.margin_gb" not in call(mod, "get_settings")[1]["changed_from_default"]
+    res, d = call(mod, "update_settings", {"scope": "project", "project": "nope-project", "values": {"license.commercial_only": True}})
+    assert res["isError"] and d["error"]

@@ -223,16 +223,17 @@ Jobs go through the same queue, memory checks and commercial-safe filter as the 
 upload inputs are refused unless the client passes `confirm_cost` / `confirm_upload` (the error carries the estimate,
 so the client can ask you first).
 
-Tools (20):
+Tools (24):
 
 | Group | Tools |
 | --- | --- |
-| Look around | `studio_status`, `list_models` (tasks incl. `rig` and `motion`), `get_model` (params, presets, user presets, input slots), `get_rig` (the bones of a rigged mesh: index, name, parent, position, role, weight share), `list_tools` (each CPU tool with its inputs and params, e.g. `mesh.flex_preview` takes `{clips, angle}` on a rigged mesh, and `rig.edit` takes `{ops}`: add a tail, move / rename / delete bones, Mixamo / VRM / Unreal names; follow it with `submit_job(task='reskin')` when it added bones), `studio_info` (topics: `profiles` / export presets, `voices`, `video_formats`, `dub_options`, `ready_tasks`, `flows`, `cloud`, `llm`, `comfyui`, `downloads`, `logs`) |
+| Look around | `studio_status`, `list_models` (tasks incl. `rig` and `motion`), `get_model` (params, presets, user presets, input slots), `get_rig` (the bones of a rigged mesh: index, name, parent, position, role, weight share), `preview_rig_edit` (dry run of a `rig.edit`: what the ops would change, nothing written; flow `get_rig` -> `preview_rig_edit` -> `submit_job(tool='rig.edit')` -> `submit_job(task='reskin')`), `get_settings` (groups and the values that differ from the defaults; `group` / `q` / `keys` give label, help, default, range; `project` shows a project's effective values and overrides), `list_tools` (each CPU tool with its inputs and params, e.g. `mesh.flex_preview` takes `{clips, angle}` on a rigged mesh, and `rig.edit` takes `{ops}`: add a tail, move / rename / delete bones, Mixamo / VRM / Unreal names; follow it with `submit_job(task='reskin')` when it added bones), `studio_info` (topics: `profiles` / export presets, `voices`, `video_formats`, `dub_options`, `ready_tasks`, `flows`, `cloud`, `llm`, `comfyui`, `downloads`, `logs`) |
 | Make | `improve_prompt` (rough idea to a model-ready prompt, or `list_styles`), `submit_job` (waits up to `wait_s`, default 300 s, max 600), `get_job`, `list_jobs`, `cancel_job`, `retry_job` |
 | Library | `list_projects`, `create_project` (`update=true` edits one), `search_assets`, `get_asset` (meshes show `mesh3d`: rigged, joints, animation clip names, attachments such as `skeleton.json` / `rigged_plain.glb`; `lineage=true` adds ancestors and derived assets), `update_asset`, `import_file` (clients on the same machine only), `delete_asset` (needs `confirm: true`; moves it to the project's `.trash`) |
 | Deliver | `export_assets` (export preset, zip with meta and attachments, or an engine-ready sound folder), `save_preset` (user presets per model) |
+| Configure | `update_settings` (`scope` system or project + `project`, `values` {dotted.key: value}, `reset` [keys]; validated by the same schema as the Settings page, so file-only settings such as executables are refused; a text backend other than `local` needs `confirm_upload`) |
 
-Left out on purpose: provider API keys, cloud on/off and budget, licence filter and profile settings, model downloads,
+Left out on purpose: provider API keys, cloud on/off and budget, file-only settings (executables, llama-server arguments), model downloads,
 unloading models, the Assistant chats and the Pipelines page's flow editing (read-only through `studio_info`). Change
 those in the web UI.
 

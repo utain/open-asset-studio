@@ -6,6 +6,8 @@ Tools (all read-only, except propose_plan, which only *records* a proposal; noth
   search_assets  list / search assets of the current project
   get_asset      one asset's meta
   get_rig        the bones of a rigged mesh (name, index, parent, position, role, weight share), to plan a rig.edit step
+  preview_rig_edit  dry run of a rig.edit step: what the ops would do (nothing is written)
+  get_settings   the studio settings (system or this project's effective values), read-only
   propose_plan   a structured plan (steps of task / model / params / inputs), validated by the studio
 
 Every call is forwarded to the studio core: POST $STUDIO_API/api/x/assistant/tools/<name> with the run token in
@@ -53,6 +55,10 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
     {"name": "get_rig", "description": "The skeleton of a rigged mesh asset: bones with index, name, parent, world position (metres, +Y up, +Z front, +X the character's left), humanoid role (hips, left_forearm, head ...), child count and skin-weight share; bones without weight. Call it before proposing a tool step rig.edit (add a tail, move / delete / rename bones) and copy bone names from it.",
      "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "mesh asset id"}}, "required": ["id"]}},
+    {"name": "preview_rig_edit", "description": "Dry run of a rig.edit step on a rigged mesh asset: checks the ops (same list as the step's params.ops) and reports what they would do (bones added / moved / deleted, bones left without skin weight, animations dropped, notes). Writes nothing. Use it before proposing the rig.edit step; errors name the candidate bones.",
+     "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "rigged mesh asset id"}, "ops": {"type": "array", "items": {"type": "object"}, "description": "rig edit operations"}}, "required": ["id", "ops"]}},
+    {"name": "get_settings", "description": "Read the studio settings (read-only; you cannot change them). No arguments: setting groups and the values that differ from their defaults, for the current project (its overrides applied). group / q / keys: those settings with help, default and range (profile, commercial-only filter, default model per task, export preset, prompt language ...).",
+     "inputSchema": {"type": "object", "properties": {"group": {"type": "string", "description": "general | models | prompts | memory | workers | llm"}, "q": {"type": "string"}, "keys": {"type": "array", "items": {"type": "string"}}}}},
     {"name": "propose_plan", "description": "Propose a plan to the user. It is shown as an editable card; the USER approves and runs it. Returns validation errors to fix (call again with a corrected plan).",
      "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}, "summary": {"type": "string"},
                                                       "steps": {"type": "array", "items": STEP, "minItems": 1}},

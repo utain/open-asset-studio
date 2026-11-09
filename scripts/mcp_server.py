@@ -240,7 +240,7 @@ TOOL_PARAMS = {
                                     "{op:'add_chain', parent, count, direction, length (per bone) | total_length, name_prefix?} (tails, ears, hair) | {op:'reparent', bone, parent}"),
                             "clips": "bool, rebuild the flex / wiggle preview clips when the input had them (default true)"},
                  "note": ("Writes a NEW mesh asset (rest pose, mesh and textures unchanged; other animation clips are dropped). New bones have ZERO skin weight: when get_asset -> mesh3d.needs_reskin is true, "
-                          "run submit_job(task='reskin') on the result. Examples: ops=[{op:'add_chain', parent:'hips', count:5, direction:'back', length:0.08, name_prefix:'tail'}] (a 5-bone tail); "
+                          "run submit_job(task='reskin') on the result. Check ops first with preview_rig_edit (dry run, writes nothing). Examples: ops=[{op:'add_chain', parent:'hips', count:5, direction:'back', length:0.08, name_prefix:'tail'}] (a 5-bone tail); "
                           "[{op:'move_joint', bone:'left elbow', offset:[0,-0.03,0]}]; [{op:'delete_bone', match:'gun*', include_children:true}]; [{op:'rename_standard', scheme:'mixamo'}]. "
                           "Errors (kind 'input') name the candidates when a bone is unknown or ambiguous.")},
     "audio.process": {"in": "1+ audio / voice assets", "params": {"ops": "{trim:{threshold_db,pad_ms}, fade:{in_ms,out_ms}, loop:{xfade_ms}, normalize:{lufs,ceiling_db}, sample_rate, channels:'mono'|'stereo'} (or the flat keys trim, fade, loop, normalize, lufs, sample_rate, channels)", **AUDIO_OUT}, "note": "A chain of the single audio tools in one pass."},
@@ -278,9 +278,188 @@ def t_get_rig(a, _ctx):
     out = {"asset": d.get("asset"), "name": d.get("name"), "joints": rows, "count": d.get("count"), "height": d.get("height"), "bounds": d.get("bounds"),
            "units": d.get("units"), "humanoid": hum if hum.get("ok") else {"ok": False, "reason": hum.get("reason")},
            "animations": d.get("animations"), "zero_weight": d.get("zero_weight"), "needs_reskin": d.get("needs_reskin")}
-    out["hint"] = ("Edit with submit_job(tool='rig.edit', params={ops: [...]}, inputs=[{asset: <id>, role: 'mesh'}]) - list_tools shows the ops; "
+    out["hint"] = ("Edit: check the ops with preview_rig_edit(asset, ops) (dry run), then submit_job(tool='rig.edit', params={ops: [...]}, inputs=[{asset: <id>, role: 'mesh'}]) - list_tools shows the ops; "
                    "bone = name, index or role word (a humanoid's roles are listed above). " +
                    ("This rig has bones without weights: run submit_job(task='reskin') on it." if d.get("zero_weight") else "After adding bones, run task 'reskin'."))
+    return out
+
+
+def t_preview_rig_edit(a, _ctx):
+    """Dry run of a rig.edit: what the ops would do (bones added / moved / deleted, weights, notes). Nothing is written."""
+    ops = a.get("ops")
+    if not isinstance(ops, list) or not ops:
+        raise StudioError("Give `ops`: the list of rig edit operations (the same as submit_job(tool='rig.edit').params.ops; list_tools shows them).", "input")
+    rep = http("POST", f"/api/x/rig/{urllib.parse.quote(a['asset'])}/dry_run", {"ops": ops})
+    rep = dict(rep) if isinstance(rep, dict) else {"report": rep}
+    rep["written"] = False
+    rep["next"] = ("Nothing was changed. Happy with it? submit_job(tool='rig.edit', params={ops: <the same ops>}, inputs=[{asset: '" + a["asset"] + "', role: 'mesh'}])"
+                   + (", then submit_job(task='reskin') on the result: the new bones have no skin weight." if rep.get("needs_reskin") or rep.get("reskin_suggested") else "."))
+    return rep
+
+
+# ---- settings (docs/CONTRACTS.md section 10: GET /api/settings/schema, /api/settings, /api/projects/<id>/settings)
+def _dig(d, key: str):
+    for p in key.split("."):
+        if not isinstance(d, dict) or p not in d:
+            return None
+        d = d[p]
+    return d
+
+
+def _flat(d, prefix: str = "") -> dict:
+    out = {}
+    for k, v in (d or {}).items():
+        if isinstance(v, dict) and v:
+            out.update(_flat(v, f"{prefix}{k}."))
+        else:
+            out[f"{prefix}{k}"] = v
+    return out
+
+
+def _setting_view(f: dict, value, *, overridden: bool | None = None, system_value=None, with_info: bool = True) -> dict:
+    out = {"key": f["key"], "label": f.get("label"), "type": f.get("type"), "value": value, "default": f.get("default")}
+    if f.get("help"):
+        out["help"] = f["help"]
+    if with_info and f.get("info"):
+        out["info"] = f["info"]
+    if f.get("min") is not None or f.get("max") is not None:
+        out["range"] = f"{f.get('min')}..{f.get('max')}" + (f" {f['unit']}" if f.get("unit") else "")
+    elif f.get("unit"):
+        out["unit"] = f["unit"]
+    if f.get("choices"):
+        out["choices"] = [c["value"] for c in f["choices"]]
+    if f.get("type") == "model":
+        out["task"] = f.get("task")
+    if f.get("maxlen"):
+        out["maxlen"] = f["maxlen"]
+    if f.get("scope") != ["system", "project"]:
+        out["scope"] = "/".join(f.get("scope") or [])
+    if f.get("apply") and f["apply"] != "live":
+        out["applies"] = f["apply"]
+    if f.get("editable") is False:
+        out["file_only"] = True
+    if overridden is not None:
+        out["overridden"] = overridden
+        if overridden:
+            out["system_value"] = system_value
+    return out
+
+
+def _settings_fields(schema: dict) -> list:
+    return [f for f in schema.get("fields", []) if f.get("gui") is not False]       # json maps (API models / endpoints) are not exposed
+
+
+def t_get_settings(a, _ctx):
+    schema = http("GET", "/api/settings/schema")
+    system = http("GET", "/api/settings")
+    project = a.get("project")
+    body = http("GET", f"/api/projects/{urllib.parse.quote(project)}/settings") if project else None
+    ov = _flat(body.get("overrides")) if body else {}
+    fields = _settings_fields(schema)
+
+    def view(f, with_info=True):
+        sysv = _dig(system, f["key"])
+        if body and "project" in f.get("scope", []) and f["key"] in ov:
+            return _setting_view(f, ov[f["key"]], overridden=True, system_value=sysv, with_info=with_info)
+        return _setting_view(f, sysv, overridden=False if body and "project" in f.get("scope", []) else None, with_info=with_info)
+
+    keys, group, q = a.get("keys") or [], a.get("group"), (a.get("q") or "").strip().lower()
+    if not (keys or group or q):
+        groups = []
+        for g in schema.get("groups", []):
+            if g["id"] == "env":
+                continue
+            gf = [f for f in fields if f["group"] == g["id"]]
+            groups.append({"id": g["id"], "label": g["label"], "scopes": g.get("scopes"), "fields": len(gf), "help": g.get("help")})
+        changed = {}
+        for f in fields:
+            v = view(f, with_info=False)
+            if v["value"] != f.get("default") and f.get("editable", True):
+                changed[f["key"]] = v["value"]
+        out = {"scope": f"project {project} (effective)" if project else "system", "groups": groups,
+               "changed_from_default": changed,
+               "hint": "get_settings(group=<id>) lists a group's fields with label / help / info / default / range; q='memory' searches; keys=[...] reads exact keys. "
+                       "update_settings changes them. Add project=<id> to see a project's overrides."}
+        if body:
+            out["overridden_in_project"] = {k: {"value": v, "system_value": _dig(system, k)} for k, v in sorted(ov.items())}
+        return out
+    sel = []
+    for f in fields:
+        if keys and f["key"] not in keys:
+            continue
+        if group and f["group"] != group:
+            continue
+        if q and q not in f"{f['key']} {f.get('label', '')} {f.get('help', '')} {f['group']}".lower():
+            continue
+        sel.append(f)
+    if keys:
+        missing = [k for k in keys if k not in {f["key"] for f in fields}]
+        if missing and not sel:
+            raise StudioError(f"Unknown setting(s): {', '.join(missing)}. get_settings (no arguments) lists the groups.", "input")
+    limit = max(1, min(int(a.get("limit", 40)), 200))
+    out = {"scope": f"project {project} (effective)" if project else "system", "total": len(sel), "settings": [view(f) for f in sel[:limit]]}
+    if len(sel) > limit:
+        out["truncated"] = True
+        out["hint"] = "Narrow with group / q / keys, or raise limit."
+    return out
+
+
+def t_update_settings(a, _ctx):
+    scope = a.get("scope") or ("project" if a.get("project") else "system")
+    project = a.get("project")
+    if scope not in ("system", "project"):
+        raise StudioError("scope must be 'system' or 'project'.", "input")
+    if scope == "project" and not project:
+        raise StudioError("scope 'project' needs `project` (the project id).", "input")
+    if scope == "system" and project:
+        raise StudioError("Give either scope 'system' (no project) or scope 'project' with a project id, not both.", "input")
+    values, reset = a.get("values") or {}, a.get("reset") or []
+    if not isinstance(values, dict) or not isinstance(reset, list):
+        raise StudioError("`values` is an object {key: value}, `reset` a list of keys.", "input")
+    if not values and not reset:
+        raise StudioError("Nothing to do: give `values` {key: value} and / or `reset` [keys] (get_settings shows the keys).", "input")
+    flat = {**_flat(values), **{str(k): None for k in reset}}
+    both = [str(k) for k in reset if str(k) in _flat(values)]
+    if both:
+        raise StudioError(f"{', '.join(both)} is in both `values` and `reset`.", "input")
+    table = {f["key"]: f for f in http("GET", "/api/settings/schema").get("fields", [])}
+    for k, v in flat.items():
+        f = table.get(k)
+        if f is None:
+            hits = [t for t in table if k in t or t.split(".")[-1] == k.split(".")[-1]][:5]
+            raise StudioError(f"Unknown setting '{k}'." + (f" Did you mean: {', '.join(hits)}?" if hits else " get_settings lists the keys."), "input")
+        if f.get("gui") is False:
+            raise StudioError(f"'{k}' ({f.get('label')}) is not changeable through MCP: {f.get('help') or 'managed in the web UI'}", "input")
+        if f.get("editable") is False:
+            raise StudioError(f"'{k}' ({f.get('label')}) is file-only: it runs a program, so it can only be changed by editing settings.json and restarting the studio.", "input")
+        if scope not in f.get("scope", []):
+            raise StudioError(f"'{k}' ({f.get('label')}) is system-wide (shared hardware / services) and cannot be set for a single project.", "input")
+        if k.startswith("textgen.") and f.get("type") == "backend" and v not in (None, "", "local") and not a.get("confirm_upload"):
+            raise StudioError(f"Setting '{k}' to '{v}' sends prompts / chat text to a third-party CLI or API.", "consent",
+                              "Ask the user, then call update_settings again with confirm_upload: true.")
+    patch: dict = {}
+    for k, v in flat.items():
+        d = patch
+        parts = k.split(".")
+        for p in parts[:-1]:
+            d = d.setdefault(p, {})
+        d[parts[-1]] = v
+    if scope == "project":
+        res = http("PATCH", f"/api/projects/{urllib.parse.quote(project)}/settings", patch)
+    else:
+        res = http("PATCH", "/api/settings", patch)
+    applied = {}
+    for k, v in flat.items():
+        f = table[k]
+        row = {"value": v if v is not None else ("inherits the system value" if scope == "project" else f"default ({f.get('default')})")}
+        if f.get("apply") and f["apply"] != "live":
+            row["applies"] = {"new_worker": "to workers started from now on", "llm_start": "at the next prompt-LLM start", "restart": "after a studio restart"}.get(f["apply"], f["apply"])
+        applied[k] = row
+    out = {"scope": scope, "project": project, "ok": True, "changed": applied}
+    if scope == "project":
+        out["overridden_in_project"] = res.get("overridden")
+    else:
+        out["hint"] = "System-wide: this changes the studio for everyone and every project that does not override it."
     return out
 
 
@@ -567,8 +746,13 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {}}, "annotations": RO, "fn": t_list_tools},
     {"name": "get_rig", "description": ("The skeleton of a rigged mesh: every bone with index, name, parent, world position, role on a humanoid (hips, left_forearm, head ...), "
                                        "child count and share of the skin weight; humanoid detection (role -> bone name), animation clips, bones without weights. Look at it before "
-                                       "editing a rig with submit_job(tool='rig.edit') (add a tail, move / delete / rename bones) and re-skinning with task 'reskin'."),
+                                       "editing a rig (add a tail, move / delete / rename bones): get_rig -> preview_rig_edit (dry run) -> submit_job(tool='rig.edit') -> submit_job(task='reskin') when bones were added."),
      "inputSchema": {"type": "object", "properties": {"asset": {**S, "description": "mesh asset id (a rigged GLB)"}}, "required": ["asset"]}, "annotations": RO, "fn": t_get_rig},
+    {"name": "preview_rig_edit", "description": ("Dry run of a rig edit: validates the ops against the rig and reports what they would do (bones added / moved / deleted, weights that merge, "
+                                                 "bones left without skin weight, animations dropped, notes) WITHOUT writing anything. Same `ops` as submit_job(tool='rig.edit'); "
+                                                 "errors name the candidates when a bone is unknown or ambiguous. Flow: get_rig -> preview_rig_edit -> submit_job(tool='rig.edit') -> submit_job(task='reskin') when bones were added."),
+     "inputSchema": {"type": "object", "properties": {"asset": {**S, "description": "rigged mesh asset id"}, "ops": {"type": "array", "items": O, "description": "rig edit operations (list_tools -> rig.edit)"}},
+                     "required": ["asset", "ops"]}, "annotations": RO, "fn": t_preview_rig_edit},
     {"name": "list_projects", "description": "Projects (asset libraries).", "inputSchema": {"type": "object", "properties": {}}, "annotations": RO, "fn": t_list_projects},
     {"name": "create_project", "description": "Create a project (id: lowercase letters, digits, - and _), or with update=true change the title / description of an existing one.",
      "inputSchema": {"type": "object", "properties": {"id": S, "title": S, "description": S, "update": B}, "required": ["id"]}, "fn": t_create_project},
@@ -586,7 +770,7 @@ TOOLS = [
         "Use list_models / get_model first for valid params and input slots (roles); list_tools for CPU tools. seed=-1 is random; the real seed is in the asset. "
         "3D chain: t2i / rgba -> recenter -> shape -> texture -> [retopo (inputs=[{asset: mesh, role: 'mesh'}], params.target_faces / tex_size or a preset: mobile | pc | hero)] -> rig (inputs=[{asset: mesh}]) -> motion (inputs=[{asset: rigged mesh, role: 'mesh'}], params.prompt); "
         "or tool 'mesh.flex_preview' on a rigged mesh for test clips. "
-        "Edit a rig: get_rig(asset) to see the bones, then tool 'rig.edit' with params.ops (add_chain / add_bone / move_joint / delete_bone / rename / rename_standard / reparent; list_tools has the full syntax), "
+        "Edit a rig: get_rig(asset) to see the bones, preview_rig_edit(asset, ops) to check the ops without writing, then tool 'rig.edit' with params.ops (add_chain / add_bone / move_joint / delete_bone / rename / rename_standard / reparent; list_tools has the full syntax), "
         "e.g. submit_job(tool='rig.edit', params={ops:[{op:'add_chain', parent:'hips', count:5, direction:'back', length:0.08, name_prefix:'tail'}]}, inputs=[{asset:'<rigged mesh>', role:'mesh'}]); "
         "the result is a NEW asset; if it reports needs_reskin (new bones have no weights) run submit_job(task='reskin', inputs=[{asset:'<edited mesh>', role:'mesh'}]) (GPU, ~35 s, keeps the skeleton, recomputes the weights). "
         "Cloud models: only set confirm_cost / confirm_upload after the user agreed to the cost / to uploading the inputs."),
@@ -636,6 +820,22 @@ TOOLS = [
                                                       "naming": {"type": "string", "enum": ["name", "id"]}, "include_meta": B, "include_attachments": B, "game_audio": O},
                      "required": ["ids"]},
      "annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False}, "fn": t_export_assets},
+    {"name": "get_settings", "description": (
+        "Studio settings (the Settings page): profile, commercial-use filter, export preset, default model per task, prompt / text backends, memory margins, worker and queue timeouts, prompt LLM. "
+        "With no arguments: the groups and the values that differ from their defaults (small). With group / q / keys: those fields with label, help, info (what it does, in plain words), "
+        "type, current value, default, range / choices, and when a change applies. project=<id>: the EFFECTIVE values for that project and which ones it overrides (system value shown next to the override)."),
+     "inputSchema": {"type": "object", "properties": {"project": {**S, "description": "project id: effective values + overrides of that project"}, "group": {**S, "description": "general | models | prompts | cloud | memory | workers | llm"},
+                                                      "q": {**S, "description": "search in key / label / help"}, "keys": {"type": "array", "items": S, "description": "exact dotted keys, e.g. memory.margin_gb"}, "limit": I}},
+     "annotations": RO, "fn": t_get_settings},
+    {"name": "update_settings", "description": (
+        "Change studio settings; this changes how the studio behaves (which models run by default, the licence filter, memory and timeouts), so say what you change and only do it when the user asked. "
+        "scope 'system' (default; everyone, every project that does not override) or scope 'project' + project=<id> (an override for that project; only project-scoped fields, see get_settings). "
+        "values = {dotted.key: value} e.g. {'memory.margin_gb': 4, 'license.commercial_only': true, 'defaults.t2i': '<model id>'}; reset = [keys] puts a setting back to its default (project: inherit the system value). "
+        "Validated against the schema (type, range, choices, known model for the task). File-only settings (executables, llama-server args) and system-only settings in project scope are refused. "
+        "Text backends other than 'local' send text to a third party: they need confirm_upload=true after the user agreed. Returns what changed and when it applies."),
+     "inputSchema": {"type": "object", "properties": {"scope": {"type": "string", "enum": ["system", "project"]}, "project": {**S, "description": "project id (scope project)"},
+                                                      "values": {**O, "description": "{dotted.key: value}"}, "reset": {"type": "array", "items": S}, "confirm_upload": B}},
+     "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}, "fn": t_update_settings},
     {"name": "studio_info", "description": "Studio reference data. topic: " + "; ".join(f"{k} ({v[0]})" for k, v in INFO_TOPICS.items()) + ". Omit topic to list them.",
      "inputSchema": {"type": "object", "properties": {"topic": {"type": "string", "enum": list(INFO_TOPICS)}, "project": PROJECT, "id": {**S, "description": "flows: a flow id"},
                                                       "name": {**S, "description": "logs: log name"}, "lines": I}},
@@ -692,7 +892,7 @@ def handle(msg: dict, emit=None, allow_paths=True) -> dict | None:
             "capabilities": {"tools": {"listChanged": False}}, "serverInfo": {"name": "open-asset-studio", "version": "1.0"},
             "instructions": ("Open Asset Studio makes images, 3D models, sound and video with local open-weight models. "
                              "Typical flow: list_models(task=...) -> get_model(id) -> [improve_prompt] -> submit_job(...) -> use the returned file paths; "
-                             "export_assets packages results. 3D: shape -> texture -> [retopo for a game-ready low poly with baked maps] -> rig -> motion (get_asset shows mesh3d: rigged, joints, animation clips); edit a rig with get_rig + submit_job(tool='rig.edit') then task 'reskin'. "
+                             "export_assets packages results. 3D: shape -> texture -> [retopo for a game-ready low poly with baked maps] -> rig -> motion (get_asset shows mesh3d: rigged, joints, animation clips); edit a rig with get_rig -> preview_rig_edit -> submit_job(tool='rig.edit') -> task 'reskin'. get_settings / update_settings read and change the studio settings (system or per project). "
                              "Check each model's licence before commercial use; many are non-commercial. "
                              "Never delete, spend cloud money or upload files without the user's explicit OK.")}}
     if method == "ping":

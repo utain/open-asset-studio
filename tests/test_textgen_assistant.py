@@ -175,7 +175,7 @@ def test_mcp_server_exposes_only_the_studio_tools(monkeypatch):
     import studio_mcp
     sys.path.pop(0)
     from app.plugins import assistant
-    assert {t["name"] for t in studio_mcp.TOOLS} == {"list_models", "search_assets", "get_asset", "get_rig", "propose_plan"}
+    assert {t["name"] for t in studio_mcp.TOOLS} == {"list_models", "search_assets", "get_asset", "get_rig", "preview_rig_edit", "get_settings", "propose_plan"}
     assert set(assistant.MCP_TOOLS) == {t["name"] for t in studio_mcp.TOOLS}
     assert assistant.ALLOWED_MCP == [f"mcp__studio__{n}" for n in assistant.MCP_TOOLS]
     r = studio_mcp.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
@@ -367,3 +367,50 @@ def test_real_claude_agent_cannot_run_shell(tmp_path):
     assert tools and all(t.startswith("mcp__studio__") for t in tools), tools   # no built-in tool is even offered
     assert not marker.exists()
     assert all(str(u["name"]).startswith("mcp__studio__") for u in p["tool_uses"])
+
+
+def test_assistant_preview_rig_edit_and_get_settings_are_read_only(monkeypatch):
+    """The two read-only tools added with the public MCP's get_settings / preview_rig_edit: no write path, project-scoped."""
+    sys.path.insert(0, str(ROOT / "workers"))
+    try:
+        import rig_edit
+    finally:
+        sys.path.pop(0)
+    from app.core import Core
+    from app.plugins import assistant
+    seen = []
+
+    def fake_edit(path, ops, **kw):
+        seen.append(ops)
+        return b"glb", {"ops": ops, "needs_reskin": True, "zero_weight_bones": ["tail_01"], "notes": [], "bytes_before": 1, "bytes_after": 2}
+    monkeypatch.setattr(rig_edit, "edit", fake_edit)
+
+    class Store:
+        def get(self, aid):
+            if aid == "r1":
+                return {"id": "r1", "project": "default", "type": "mesh", "main": "mesh.glb", "name": "Soldier"}
+            if aid == "i1":
+                return {"id": "i1", "project": "default", "type": "image", "main": "a.png"}
+            raise KeyError(aid)
+
+        def file_path(self, p, a, f):
+            return Path("/x") / f
+
+    class FakeCore:
+        assets = Store()
+    monkeypatch.setattr(assistant, "CORE", FakeCore())
+    ops = [{"op": "add_chain", "parent": "hips", "count": 1, "direction": "back", "length": 0.1}]
+    d = assistant.tool_preview_rig_edit("default", {"id": "r1", "ops": ops})
+    assert seen == [ops] and d["written"] is False and d["needs_reskin"] is True and "reskin" in d["hint"] and "bytes_before" not in d
+    for bad in ({"id": "r1"}, {"id": "i1", "ops": ops}, {"id": "nope", "ops": ops}):
+        assert "error" in assistant.tool_preview_rig_edit("default", bad)
+    assert "error" in assistant.tool_preview_rig_edit("other", {"id": "r1", "ops": ops})
+    assert "preview_rig_edit" in assistant.SYSTEM
+
+    monkeypatch.setattr(assistant, "CORE", Core())
+    d = assistant.tool_get_settings("default", {})
+    assert {g["id"] for g in d["groups"]} >= {"general", "models", "memory"} and "env" not in {g["id"] for g in d["groups"]}
+    assert "textgen.api_models" not in json.dumps(assistant.tool_get_settings("default", {"group": "prompts"}))
+    d = assistant.tool_get_settings("default", {"keys": ["memory.margin_gb"]})
+    assert d["settings"][0]["key"] == "memory.margin_gb" and d["settings"][0]["range"].startswith("0..")
+    assert assistant.execute_tool({"project": "default"}, "get_settings", {"q": "margin"})["total"] >= 1

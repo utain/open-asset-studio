@@ -51,7 +51,7 @@ _LOCK = threading.RLock()
 RUNS_BY_TOKEN: dict[str, dict] = {}       # MCP token -> {chat, project, proposals: [], tools: []}
 TURNS: dict[str, threading.Event] = {}    # chat id -> cancel event of the turn in flight
 PLAN_RUNS: dict[str, dict] = {}           # run id -> {cancel, thread}
-MCP_TOOLS = ["list_models", "search_assets", "get_asset", "get_rig", "propose_plan"]
+MCP_TOOLS = ["list_models", "search_assets", "get_asset", "get_rig", "preview_rig_edit", "get_settings", "propose_plan"]
 ALLOWED_MCP = [f"mcp__studio__{n}" for n in MCP_TOOLS]
 
 SHARED_PARAMS = {"prompt", "negative", "batch", "seed"}       # accepted by every model job (not always in params:)
@@ -189,6 +189,75 @@ def tool_get_rig(project: str, args: dict) -> dict:
             "humanoid": ({"roles": hum["roles"]} if hum.get("ok") else {"roles": None, "reason": hum.get("reason")}),
             "animations": d["animations"], "bones_without_weight": d["zero_weight"], "needs_reskin": bool((a.get("info") or {}).get("needs_reskin")),
             "hint": "Edit with a step {tool: 'rig.edit', params: {ops: [...]}}; name bones exactly as listed here (or role words like 'left elbow')."}
+
+
+def tool_preview_rig_edit(project: str, args: dict) -> dict:
+    """Dry run of a rig.edit step: what the ops would do. Reads the GLB, writes nothing."""
+    c = _core()
+    try:
+        a = c.assets.get(str(args.get("id") or args.get("asset") or ""))
+    except (AssetError, KeyError):
+        return {"error": "asset not found"}
+    if a.get("project") != project:
+        return {"error": "asset not in this project"}
+    if a.get("type") != "mesh" or not str(a.get("main") or "").lower().endswith(".glb"):
+        return {"error": "preview_rig_edit needs a rigged mesh asset (GLB)"}
+    ops = args.get("ops")
+    if not isinstance(ops, list) or not ops:
+        return {"error": "give ops: the list of rig edit operations of the rig.edit step"}
+    re_ = _rig_edit()
+    try:
+        _, rep = re_.edit(c.assets.file_path(a["project"], a["id"], a["main"]), ops)
+    except re_.NoSkinError:
+        return {"error": "this mesh has no skeleton; propose the task rig first"}
+    except (re_.RigEditError, re_.RigAnimError) as e:
+        return {"error": str(e)}
+    rep.pop("bytes_before", None)
+    rep.pop("bytes_after", None)
+    rep["written"] = False
+    rep["hint"] = ("Nothing was changed. If it is what the user asked for, propose the rig.edit step with these ops"
+                   + (" and then a reskin step (new bones have no skin weight)." if rep.get("needs_reskin") or rep.get("zero_weight_bones") else "."))
+    return rep
+
+
+def tool_get_settings(project: str, args: dict) -> dict:
+    """Read-only settings for the plan: no arguments = groups + values that differ from the defaults; group / q / keys = fields
+    with help, default and range. Values are the project's effective ones. The Assistant cannot change settings."""
+    from .. import settings_schema as ss
+
+    c = _core()
+    view = c.settings_for(project)
+    ov = config.flatten(getattr(view, "overrides", {}) or {})
+    fields = [f for f in ss.fields(c) if f.get("gui") is not False]
+
+    def val(f):
+        v = view.get(*f["key"].split("."))
+        return v
+
+    keys, group, q = args.get("keys") or [], args.get("group"), str(args.get("q") or "").strip().lower()
+    if not (keys or group or q):
+        groups = [{"id": g["id"], "label": g["label"], "fields": sum(1 for f in fields if f["group"] == g["id"])} for g in ss.GROUPS if g["id"] != "env"]
+        return {"project": project, "groups": groups,
+                "changed_from_default": {f["key"]: val(f) for f in fields if f.get("editable", True) and val(f) != f.get("default")},
+                "overridden_in_project": {k: v for k, v in sorted(ov.items())},
+                "hint": "get_settings(group=<id>) or (q=<text>) or (keys=[...]) lists fields with help, default and range. You cannot change settings: tell the user which one to change on the Settings page."}
+    out = []
+    for f in fields:
+        if (keys and f["key"] not in keys) or (group and f["group"] != group):
+            continue
+        if q and q not in f"{f['key']} {f.get('label', '')} {f.get('help', '')}".lower():
+            continue
+        row = {"key": f["key"], "label": f.get("label"), "value": val(f), "default": f.get("default"), "help": f.get("help"),
+               "overridden_in_project": f["key"] in ov}
+        if f.get("min") is not None or f.get("max") is not None:
+            row["range"] = f"{f.get('min')}..{f.get('max')}" + (f" {f['unit']}" if f.get("unit") else "")
+        ch = ss._choices(f)
+        if ch:
+            row["choices"] = [x["value"] for x in ch]
+        if f.get("editable") is False:
+            row["file_only"] = True
+        out.append({k: v for k, v in row.items() if v not in (None, "")} | {"value": val(f)})
+    return {"project": project, "total": len(out), "settings": out[:40], **({"truncated": True} if len(out) > 40 else {})}
 
 
 def tool_search_assets(project: str, args: dict) -> dict:
@@ -419,6 +488,10 @@ def execute_tool(run: dict, name: str, args: dict) -> dict:
             return tool_get_asset(run["project"], args)
         if name == "get_rig":
             return tool_get_rig(run["project"], args)
+        if name == "preview_rig_edit":
+            return tool_preview_rig_edit(run["project"], args)
+        if name == "get_settings":
+            return tool_get_settings(run["project"], args)
         if name == "propose_plan":
             return tool_propose_plan(run, args)
     except (ValueError, TypeError, AssetError) as e:
@@ -497,7 +570,8 @@ Rules:
 - Keep plans short (usually <= 12 steps). Step ids: short snake_case. Give every step a clear title.
 - Editing an existing rig ("add a 5-bone tail", "move the left elbow down a bit", "delete the gun bones", "rename to Mixamo names",
   "re-skin"): first call get_rig(id) on the rigged mesh (find it with search_assets; mesh3d.rigged must be true) and copy bone names
-  from it; never invent bones. Then propose ONE step {"tool": "rig.edit", "params": {"ops": [...]}, "inputs": [{"asset": id}]}.
+  from it; never invent bones. Check the ops with preview_rig_edit(id, ops) (a dry run: reports what changes and which bones will
+  lack weights; fix the ops if it errors). Then propose ONE step {"tool": "rig.edit", "params": {"ops": [...]}, "inputs": [{"asset": id}]}.
   Ops (applied in order; units metres, +Y up, the character faces +Z, its left is +X; a bone is a name, an index or a role word like
   "left elbow", "head", "hips"):
   {"op":"rename","bone":B,"to":NAME} | {"op":"rename_standard","scheme":"mixamo"|"vrm"|"unreal"} (humanoids) |
