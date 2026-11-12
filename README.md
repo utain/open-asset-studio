@@ -23,6 +23,26 @@ licence of each model, is in [docs/research/audio_more/README.md](docs/research/
 > (aarch64, GB10, 121 GB unified memory, CUDA 13). Other Linux + NVIDIA setups should work for most backends, but
 > the pinned environments, memory numbers and workarounds in `docs/research/` are specific to that machine.
 
+## Screenshots
+
+The web studio (dark theme; light theme is a toggle in the top bar). Each studio has the same layout: settings on the
+left, results and the shared library on the right.
+
+| | |
+|---|---|
+| ![Image studio: generate, edit, extract and remove backgrounds](docs/img/image.jpg) | ![3D studio: image or text to a textured GLB](docs/img/3d.jpg) |
+| **Image**: generate, edit with references, extract, remove background | **3D**: image / text / multi-view to mesh, then refine, animate, export |
+| ![Sound studio: SFX, ambience, music and songs](docs/img/sound.jpg) | ![Pipelines: guided multi-step flows](docs/img/pipelines.jpg) |
+| **Sound**: SFX, ambience, music, songs, voices | **Pipelines**: guided flows from idea to a finished kit |
+
+![Library: every result in one place, with filters, ratings and full recipes](docs/img/library.jpg)
+
+**Library**: every take lands here with its recipe. The examples above were made locally in an empty demo project (z-image-turbo, Hunyuan3D 2.1, Stable Audio 3).
+
+![Models page: every model with its task, licence, memory and status](docs/img/models.jpg)
+
+**Models**: every model shows its tasks, licence (commercial-OK or not), memory use and whether it is ready.
+
 * Spec: [docs/DESIGN.md](docs/DESIGN.md) · Contracts for studio builders: [docs/CONTRACTS.md](docs/CONTRACTS.md)
   · Setup: [docs/SETUP.md](docs/SETUP.md) · Research and measurements: [docs/research/](docs/research/)
 
